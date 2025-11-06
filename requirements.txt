@@ -1,0 +1,23 @@
+# 工业视觉登录页面所需依赖库
+# Industrial Vision Login Page Dependencies
+
+# GUI框架 - PyQt6的替代品，用于创建跨平台桌面应用程序
+PySide6==6.8.0.2
+
+# 开发和调试工具（可选）
+# Development and debugging tools (optional)
+
+# 代码格式化工具
+# black==24.8.0
+
+# 代码质量检查
+# flake8==7.1.1
+
+# 类型检查
+# mypy==1.11.2
+
+# 单元测试框架
+# pytest==8.3.3
+
+# UI测试框架
+# pytest-qt==4.2.0

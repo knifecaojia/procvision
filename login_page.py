@@ -58,7 +58,7 @@ class LoginWindow(QMainWindow):
         self.create_right_panel(splitter)
 
         # 设置分割器比例
-        splitter.setSizes([300, 900])
+        splitter.setSizes([300, 600])
 
     def create_title_bar(self):
         title_bar = QWidget()

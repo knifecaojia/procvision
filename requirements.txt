@@ -4,6 +4,9 @@
 # GUI框架 - PyQt6的替代品，用于创建跨平台桌面应用程序
 PySide6==6.8.0.2
 
+# 安全认证 - 密码哈希和会话管理
+bcrypt==4.2.0
+
 # 开发和调试工具（可选）
 # Development and debugging tools (optional)
 

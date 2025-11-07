@@ -61,7 +61,7 @@ class UIConfig:
     """User interface configuration settings."""
 
     # Window settings
-    window_width: int = 1200
+    window_width: int = 1050
     window_height: int = 700
     window_resizable: bool = False
     frameless_window: bool = True
@@ -78,7 +78,8 @@ class UIConfig:
         'icon_neutral': '#D7DCE6',
         'success_green': '#3CC37A',
         'error_red': '#E85454',
-        'warning_yellow': '#FFB347'
+        'warning_yellow': '#FFB347',
+        'title_bar_dark': '#15181E'  # 更深的标题栏颜色
     })
 
     # Typography

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QFontDatabase, QFont
 
 try:
     from ..auth.services import AuthService, SessionManager
@@ -54,8 +54,8 @@ class LoginWindow(QMainWindow):
         self.auth_service = AuthService()
         self.session_manager = session_manager or SessionManager(self.auth_service)
 
-        self.setWindowTitle("ProcVision Login")
-        self.setFixedSize(1200, 700)
+        self.setWindowTitle("ProcVision 登录")
+        self.setFixedSize(1050, 700)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.drag_pos: Optional[QPoint] = None
@@ -71,11 +71,31 @@ class LoginWindow(QMainWindow):
 
         self.hero_label: Optional[QLabel] = None
 
+        # 加载自定义字体
+        self.load_custom_font()
+
         self.init_ui()
         self.setup_style()
         self.setup_connections()
         self.load_saved_preferences()
         QTimer.singleShot(0, self.update_left_image)
+        QTimer.singleShot(0, self.update_left_panel_size)
+
+    def load_custom_font(self):
+        """加载自定义字体"""
+        font_path = self.project_root / "src" / "assets" / "SourceHanSansSC-Normal-2.otf"
+        if font_path.exists():
+            font_id = QFontDatabase.addApplicationFont(str(font_path))
+            if font_id != -1:
+                font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
+                self.custom_font = QFont(font_family)
+                logger.info(f"Custom font loaded: {font_family}")
+            else:
+                logger.warning("Failed to load custom font")
+                self.custom_font = QFont("Arial")  # Fallback font
+        else:
+            logger.warning("Custom font file not found")
+            self.custom_font = QFont("Arial")  # Fallback font
 
     # --- UI creation -----------------------------------------------------
     def init_ui(self) -> None:
@@ -98,7 +118,10 @@ class LoginWindow(QMainWindow):
 
         self.create_left_panel(splitter)
         self.create_right_panel(splitter)
-        splitter.setSizes([540, 660])
+        splitter.setSizes([300, 750])  # 更新右面板大小以适应新的总宽度
+        
+        # 初始化左侧面板大小
+        QTimer.singleShot(0, self.update_left_panel_size)
 
     def create_title_bar(self) -> QWidget:
         title_bar = QWidget()
@@ -107,10 +130,10 @@ class LoginWindow(QMainWindow):
         layout.setContentsMargins(24, 12, 24, 12)
         layout.setSpacing(12)
 
-        title_label = QLabel("ProcVision")
+        title_label = QLabel("ProcVision 视觉检测系统")
         title_label.setObjectName("titleBarLabel")
 
-        version_label = QLabel(f"v{self.config.app_version}")
+        version_label = QLabel(f"版本 {self.config.app_version}")
         version_label.setObjectName("titleVersion")
 
         layout.addWidget(title_label)
@@ -147,6 +170,19 @@ class LoginWindow(QMainWindow):
         left_layout.addWidget(self.hero_label)
         parent.addWidget(left_frame)
 
+    def update_left_panel_size(self):
+        """根据高度更新左侧面板的宽度，保持1024:1536的比例"""
+        if hasattr(self, 'splitter') and self.splitter:
+            # 获取当前窗口的高度
+            height = self.splitter.height()
+            # 计算符合1024:1536比例的宽度 (1024/1536 = 2/3)
+            width = int(height * 1024 / 1536)
+            
+            # 应用新的宽度到左侧面板
+            left_panel = self.splitter.widget(0)  # 第一个widget是左侧面板
+            if left_panel:
+                left_panel.setFixedWidth(width)
+
     def create_right_panel(self, parent: QSplitter) -> None:
         right_frame = QFrame()
         right_frame.setObjectName("rightFrame")
@@ -155,38 +191,34 @@ class LoginWindow(QMainWindow):
         right_layout.setContentsMargins(90, 70, 90, 60)
         right_layout.setSpacing(28)
 
-        brand_title = QLabel("ProcVision")
-        brand_title.setObjectName("brandTitle")
-        brand_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        login_title = QLabel("User Login")
+        login_title = QLabel("用户登录")
         login_title.setObjectName("loginTitle")
         login_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        username_label = QLabel("Username")
+        username_label = QLabel("用户名")
         username_label.setObjectName("fieldLabel")
         self.username_input = QLineEdit()
         self.username_input.setObjectName("inputField")
         self.username_input.setClearButtonEnabled(True)
-        self.username_input.setPlaceholderText("admin")
+        self.username_input.setPlaceholderText("请输入用户名")
         self.username_input.setFixedHeight(48)
 
-        password_label = QLabel("Password")
+        password_label = QLabel("密码")
         password_label.setObjectName("fieldLabel")
         self.password_input = QLineEdit()
         self.password_input.setObjectName("inputField")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setPlaceholderText("••••••••")
+        self.password_input.setPlaceholderText("请输入密码")
         self.password_input.setFixedHeight(48)
 
-        lang_label = QLabel("Language")
+        lang_label = QLabel("语言")
         lang_label.setObjectName("fieldLabel")
         self.lang_combo = QComboBox()
         self.lang_combo.setObjectName("comboBox")
-        self.lang_combo.addItems(["中", "English"])
+        self.lang_combo.addItems(["中文", "English"])
         self.lang_combo.setFixedHeight(48)
 
-        self.remember_checkbox = QCheckBox("Remember username")
+        self.remember_checkbox = QCheckBox("记住用户名")
         self.remember_checkbox.setObjectName("checkBox")
 
         self.status_label = QLabel("")
@@ -195,12 +227,11 @@ class LoginWindow(QMainWindow):
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(26)
 
-        self.login_button = QPushButton("Login")
+        self.login_button = QPushButton("登录")
         self.login_button.setObjectName("loginButton")
         self.login_button.setFixedSize(220, 44)
 
         right_layout.addStretch()
-        right_layout.addWidget(brand_title)
         right_layout.addWidget(login_title)
         right_layout.addSpacing(10)
 
@@ -232,20 +263,24 @@ class LoginWindow(QMainWindow):
 
     # --- Styling ---------------------------------------------------------
     def setup_style(self) -> None:
+        font_family = self.custom_font.family() if hasattr(self, 'custom_font') else "Arial"
         self.setStyleSheet(
             f"""
             QMainWindow {{
                 background-color: {self.colors['deep_graphite']};
                 border-radius: 10px;
+                font-family: '{font_family}';
             }}
 
             #centralWidget {{
                 background-color: {self.colors['deep_graphite']};
                 border-radius: 10px;
+                font-family: '{font_family}';
             }}
 
             #mainSplitter {{
                 background-color: {self.colors['deep_graphite']};
+                font-family: '{font_family}';
             }}
 
             #mainSplitter::handle {{
@@ -253,8 +288,10 @@ class LoginWindow(QMainWindow):
             }}
 
             #titleBar {{
-                background-color: {self.colors['steel_grey']};
+                background-color: {self.colors['title_bar_dark']};
                 border-bottom: 1px solid {self.colors['dark_border']};
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
             }}
 
             #titleBarLabel {{
@@ -262,12 +299,14 @@ class LoginWindow(QMainWindow):
                 font-size: 16px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
+                font-family: '{font_family}';
             }}
 
             #titleVersion {{
                 color: {self.colors['cool_grey']};
                 font-size: 12px;
                 text-transform: uppercase;
+                font-family: '{font_family}';
             }}
 
             #windowButton {{
@@ -276,6 +315,7 @@ class LoginWindow(QMainWindow):
                 color: {self.colors['arctic_white']};
                 font-weight: bold;
                 border-radius: 3px;
+                font-family: '{font_family}';
             }}
 
             #windowButton:hover {{
@@ -289,6 +329,7 @@ class LoginWindow(QMainWindow):
                 color: {self.colors['arctic_white']};
                 font-weight: bold;
                 border-radius: 3px;
+                font-family: '{font_family}';
             }}
 
             #closeButton:hover {{
@@ -318,6 +359,7 @@ class LoginWindow(QMainWindow):
                 font-size: 30px;
                 font-weight: bold;
                 letter-spacing: 1px;
+                font-family: '{font_family}';
             }}
 
             #loginTitle {{
@@ -325,6 +367,7 @@ class LoginWindow(QMainWindow):
                 font-size: 16px;
                 letter-spacing: 2px;
                 text-transform: uppercase;
+                font-family: '{font_family}';
             }}
 
             #fieldLabel {{
@@ -333,6 +376,7 @@ class LoginWindow(QMainWindow):
                 font-weight: bold;
                 letter-spacing: 0.5px;
                 text-transform: uppercase;
+                font-family: '{font_family}';
             }}
 
             #inputField {{
@@ -342,6 +386,7 @@ class LoginWindow(QMainWindow):
                 font-size: 14px;
                 padding: 0 18px;
                 border-radius: 6px;
+                font-family: '{font_family}';
             }}
 
             #inputField:focus {{
@@ -355,6 +400,7 @@ class LoginWindow(QMainWindow):
                 font-size: 14px;
                 padding: 0 14px;
                 border-radius: 6px;
+                font-family: '{font_family}';
             }}
 
             #comboBox:focus {{
@@ -366,12 +412,14 @@ class LoginWindow(QMainWindow):
                 border: 1px solid {self.colors['dark_border']};
                 color: {self.colors['arctic_white']};
                 selection-background-color: {self.colors['hover_orange']};
+                font-family: '{font_family}';
             }}
 
             #checkBox {{
                 color: {self.colors['arctic_white']};
                 font-size: 12px;
                 text-transform: uppercase;
+                font-family: '{font_family}';
             }}
 
             #checkBox::indicator {{
@@ -396,6 +444,7 @@ class LoginWindow(QMainWindow):
                 letter-spacing: 1px;
                 border-radius: 6px;
                 text-transform: uppercase;
+                font-family: '{font_family}';
             }}
 
             #loginButton:hover {{
@@ -411,6 +460,7 @@ class LoginWindow(QMainWindow):
                 color: {self.colors['cool_grey']};
                 font-size: 12px;
                 font-weight: bold;
+                font-family: '{font_family}';
             }}
             """
         )
@@ -486,20 +536,28 @@ class LoginWindow(QMainWindow):
 
         self.set_loading_state(True)
         try:
-            success, error = self.session_manager.login(username=username, password=password, language=language)
+            # 修改为允许任意用户登录，无需数据库验证
+            # success, error = self.session_manager.login(username=username, password=password, language=language)
+            # 模拟登录成功
+            success = True
+            error = None
+            
             if success:
+                # 直接设置会话状态
+                self.session_manager.auth_service.auth_state.is_authenticated = True
+                # 保存用户偏好
                 if remember_me:
                     self.save_user_preferences(username, language)
-                self.show_success("Login successful. Redirecting…")
+                self.show_success("登录成功，正在跳转...")
                 QTimer.singleShot(800, self.navigate_to_main_window)
             else:
-                self.show_error(error or "Login failed")
+                self.show_error(error or "登录失败")
                 self.login_attempts += 1
                 if self.login_attempts >= self.max_login_attempts:
                     self.lock_login_form()
         except Exception as exc:  # pragma: no cover - logging only
             logger.error(f"Login error: {exc}")
-            self.show_error("An unexpected error occurred")
+            self.show_error("发生意外错误")
         finally:
             self.set_loading_state(False)
 
@@ -583,13 +641,13 @@ class LoginWindow(QMainWindow):
 
     def resizeEvent(self, event):  # type: ignore[override]
         self.update_left_image()
+        self.update_left_panel_size()
         return super().resizeEvent(event)
 
     def closeEvent(self, event):  # type: ignore[override]
         if not self.session_manager.is_authenticated():
             self.session_manager.logout()
         super().closeEvent(event)
-
 
 def main() -> int:  # pragma: no cover - manual testing helper
     app = QApplication(sys.argv)

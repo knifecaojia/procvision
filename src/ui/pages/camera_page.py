@@ -161,40 +161,44 @@ class CameraPage(QFrame):
         # Bottom section - Camera status info
         status_frame = QFrame()
         status_frame.setObjectName("statusFrame")
-        status_frame.setFixedHeight(80)  # Fixed height for status panel
+        status_frame.setFixedHeight(110)  # Fixed height for status panel (increased by 30px)
         
         status_layout = QVBoxLayout(status_frame)
-        status_layout.setContentsMargins(15, 10, 15, 10)  # Reduced margins to fit content
-        status_layout.setSpacing(5)  # Reduced spacing
+        status_layout.setContentsMargins(15, 10, 15, 10)
+        status_layout.setSpacing(8)
         
         status_title = QLabel("相机状态")
         status_title.setObjectName("paramsTitle")
-        status_title.setFixedHeight(20)  # Fixed height for title
+        status_title.setFixedHeight(25)  # Increased height for better visibility
         
         # Status details
         status_grid = QGridLayout()
-        status_grid.setSpacing(5)  # Reduced spacing
+        status_grid.setSpacing(10)  # Increased spacing for better readability
         status_grid.setContentsMargins(0, 0, 0, 0)
         
         cam_model_label = QLabel("相机型号:")
         cam_model_label.setObjectName("paramLabel")
         cam_model_value = QLabel("MV-CE060-10GM")
         cam_model_value.setObjectName("paramValue")
+        cam_model_value.setMinimumWidth(120)  # Ensure enough space for value
         
         cam_status_label = QLabel("连接状态:")
         cam_status_label.setObjectName("paramLabel")
         cam_status_value = QLabel("未连接")
         cam_status_value.setObjectName("paramValue")
+        cam_status_value.setMinimumWidth(80)  # Ensure enough space for value
         
         cam_temp_label = QLabel("温度:")
         cam_temp_label.setObjectName("paramLabel")
         cam_temp_value = QLabel("38.5°C")
         cam_temp_value.setObjectName("paramValue")
+        cam_temp_value.setMinimumWidth(60)  # Ensure enough space for value
         
         cam_fps_label = QLabel("实际帧率:")
         cam_fps_label.setObjectName("paramLabel")
         cam_fps_value = QLabel("0 FPS")
         cam_fps_value.setObjectName("paramValue")
+        cam_fps_value.setMinimumWidth(60)  # Ensure enough space for value
         
         status_grid.addWidget(cam_model_label, 0, 0)
         status_grid.addWidget(cam_model_value, 0, 1)

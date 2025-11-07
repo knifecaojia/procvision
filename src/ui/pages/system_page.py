@@ -5,7 +5,7 @@ System settings page for the industrial vision system.
 import logging
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, 
-    QLineEdit, QPushButton
+    QLineEdit, QPushButton, QSpacerItem, QSizePolicy
 )
 from PySide6.QtCore import Qt
 
@@ -39,13 +39,6 @@ class SystemPage(QFrame):
         header_layout.addStretch()
         
         layout.addWidget(header_frame)
-        
-        # Save button
-        save_btn = QPushButton("保存配置")
-        save_btn.setObjectName("saveButton")
-        save_btn.setFixedHeight(40)
-        
-        layout.addWidget(save_btn)
         
         # Server configuration
         server_frame = QFrame()
@@ -99,8 +92,11 @@ class SystemPage(QFrame):
         img_path_label.setObjectName("paramLabel")
         img_path_input = QLineEdit("C:\\VisionData\\Images")
         img_path_input.setObjectName("paramInput")
+        # Removed fixed width to allow adaptive width
         img_browse_btn = QPushButton("浏览")
         img_browse_btn.setObjectName("browseButton")
+        img_browse_btn.setFixedWidth(80)
+        img_browse_btn.setFixedHeight(32)  # Increased button height
         img_path_layout.addWidget(img_path_label)
         img_path_layout.addWidget(img_path_input)
         img_path_layout.addWidget(img_browse_btn)
@@ -137,8 +133,11 @@ class SystemPage(QFrame):
         log_path_label.setObjectName("paramLabel")
         log_path_input = QLineEdit("C:\\VisionData\\Logs")
         log_path_input.setObjectName("paramInput")
+        # Removed fixed width to allow adaptive width
         log_browse_btn = QPushButton("浏览")
         log_browse_btn.setObjectName("browseButton")
+        log_browse_btn.setFixedWidth(80)
+        log_browse_btn.setFixedHeight(32)  # Increased button height
         log_path_layout.addWidget(log_path_label)
         log_path_layout.addWidget(log_path_input)
         log_path_layout.addWidget(log_browse_btn)
@@ -157,4 +156,16 @@ class SystemPage(QFrame):
         log_layout.addLayout(log_retention_layout)
         
         layout.addWidget(log_frame)
+        
+        # Save button - moved to bottom and adjusted width
+        save_btn_layout = QHBoxLayout()
+        save_btn_layout.addStretch()
+        save_btn = QPushButton("保存配置")
+        save_btn.setObjectName("saveButton")
+        save_btn.setFixedHeight(40)
+        save_btn.setFixedWidth(120)  # Set normal width
+        save_btn_layout.addWidget(save_btn)
+        save_btn_layout.addStretch()
+        
+        layout.addLayout(save_btn_layout)
         layout.addStretch()

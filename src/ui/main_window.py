@@ -733,7 +733,7 @@ class MainWindow(QMainWindow):
 
             #paramsTitle, #sectionTitle {{
                 color: {self.colors['arctic_white']};
-                font-size: 16px;
+                font-size: 18px;
                 font-weight: bold;
                 border-bottom: 1px solid {self.colors['dark_border']};
                 padding-bottom: 5px;
@@ -741,8 +741,9 @@ class MainWindow(QMainWindow):
 
             #paramLabel {{
                 color: {self.colors['cool_grey']};
-                font-size: 12px;
+                font-size: 13px;
                 min-width: 100px;
+                padding-right: 5px;
             }}
 
             #paramInput, #paramCombo {{
@@ -751,7 +752,7 @@ class MainWindow(QMainWindow):
                 color: {self.colors['arctic_white']};
                 border-radius: 6px;
                 padding: 6px;
-                font-size: 12px;
+                font-size: 13px;
                 min-width: 100px;
             }}
 
@@ -761,8 +762,9 @@ class MainWindow(QMainWindow):
             
             #paramValue {{
                 color: {self.colors['arctic_white']};
-                font-size: 12px;
+                font-size: 13px;
                 font-weight: normal;
+                minimum-width: 60px;
             }}
 
             /* System Page Styles */

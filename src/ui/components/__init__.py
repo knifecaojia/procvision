@@ -6,5 +6,6 @@ UI elements following industrial design patterns.
 """
 
 from .model_card import ModelCard
+from .process_card import ProcessCard
 
-__all__ = ['ModelCard']
+__all__ = ['ModelCard', 'ProcessCard']

@@ -88,7 +88,10 @@ class MainWindow(QMainWindow):
         self.setup_style()
         self.setup_connections()
         self.load_preferences()
-        
+
+        # Center window on screen
+        self.center_window()
+
         # Set default page
         self.show_process_page()
 
@@ -764,7 +767,7 @@ class MainWindow(QMainWindow):
                 color: {self.colors['arctic_white']};
                 font-size: 13px;
                 font-weight: normal;
-                minimum-width: 60px;
+                min-width: 60px;
             }}
 
             /* System Page Styles */
@@ -964,6 +967,133 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
                 min-width: 80px;
             }}
+
+            /* Model Card Styles */
+            #modelCard {{
+                background-color: #252525;
+                border: 1px solid #3a3a3a;
+                border-radius: 8px;
+                font-family: "{font_family}";
+            }}
+
+            #modelCard:hover {{
+                border: 1px solid rgba(255, 165, 0, 0.5);
+            }}
+
+            #iconFrame {{
+                background-color: #1a1a1a;
+                border-radius: 20px;
+            }}
+
+            #iconFrame.opencv {{
+                background-color: rgba(59, 130, 246, 0.1);
+            }}
+
+            #iconFrame.yolo {{
+                background-color: rgba(168, 85, 247, 0.1);
+            }}
+
+            #iconLabel {{
+                color: #ffffff;
+                font-size: 18px;
+            }}
+
+            #iconFrame.opencv #iconLabel {{
+                color: #60a5fa;
+            }}
+
+            #iconFrame.yolo #iconLabel {{
+                color: #c084fc;
+            }}
+
+            #cardTitle {{
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: bold;
+            }}
+
+            #cardVersion {{
+                color: #6b7280;
+                font-size: 12px;
+            }}
+
+            #statusBadge {{
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+
+            #statusBadge.active {{
+                background-color: rgba(34, 197, 94, 0.1);
+                color: #4ade80;
+                border: 1px solid rgba(34, 197, 94, 0.3);
+            }}
+
+            #statusBadge.inactive {{
+                background-color: rgba(107, 114, 128, 0.1);
+                color: #9ca3af;
+                border: 1px solid rgba(107, 114, 128, 0.3);
+            }}
+
+            #descLabel {{
+                color: #9ca3af;
+                font-size: 14px;
+            }}
+
+            #infoFrame {{
+                background-color: #1a1a1a;
+                border-radius: 4px;
+            }}
+
+            #infoLabel {{
+                color: #6b7280;
+                font-size: 12px;
+            }}
+
+            #infoValue {{
+                color: #ffffff;
+                font-size: 14px;
+            }}
+
+            #viewButton {{
+                background-color: transparent;
+                border: 1px solid #3a3a3a;
+                color: #9ca3af;
+                border-radius: 6px;
+                font-size: 13px;
+            }}
+
+            #viewButton:hover {{
+                background-color: #2a2a2a;
+                color: #ffffff;
+            }}
+
+            #updateButton {{
+                background-color: #f97316;
+                border: 1px solid #f97316;
+                color: #ffffff;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+            }}
+
+            #updateButton:hover {{
+                background-color: #ea580c;
+                border: 1px solid #ea580c;
+            }}
+
+            #deleteButton {{
+                background-color: transparent;
+                border: 1px solid rgba(239, 68, 68, 0.5);
+                color: #f87171;
+                border-radius: 6px;
+                font-size: 13px;
+            }}
+
+            #deleteButton:hover {{
+                background-color: rgba(239, 68, 68, 0.1);
+            }}
         """)
 
     def setup_connections(self):
@@ -976,6 +1106,15 @@ class MainWindow(QMainWindow):
         """Placeholder for loading persisted UI preferences."""
         # Future implementation: restore splitter sizes, last open page, etc.
         pass
+
+    def center_window(self):
+        """Center the window on the screen."""
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.availableGeometry()
+        window_geometry = self.frameGeometry()
+        center_point = screen_geometry.center()
+        window_geometry.moveCenter(center_point)
+        self.move(window_geometry.topLeft())
         
     def toggle_maximize(self):
         """Toggle window maximize state."""

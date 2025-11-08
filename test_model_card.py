@@ -1,58 +1,22 @@
+#!/usr/bin/env python3
 """
-Model management page for the industrial vision system.
+Test script for ModelCard component.
 """
 
-import logging
-from PySide6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QWidget, QGridLayout
-)
-from PySide6.QtCore import Qt
-from ..components.model_card import ModelCard
+import sys
+from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QScrollArea
 
-logger = logging.getLogger(__name__)
+# Add src to path
+sys.path.insert(0, 'src')
 
+from ui.components.model_card import ModelCard
 
-class ModelPage(QFrame):
-    """Model management page implementation."""
-    
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("modelPage")
-        self.init_ui()
-        
-    def init_ui(self):
-        """Initialize the model page UI."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
-        
-        # Header section
-        header_frame = QFrame()
-        header_frame.setObjectName("modelHeader")
-        header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        
-        title_label = QLabel("模型管理")
-        title_label.setObjectName("modelTitle")
-        
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        
-        layout.addWidget(header_frame)
-        
-        # Model cards in scroll area
-        scroll_area = QScrollArea()
-        scroll_area.setObjectName("modelScrollArea")
-        scroll_area.setStyleSheet("QScrollArea#modelScrollArea { background-color: #1f232b; border: none; }")
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        # Container for cards
-        cards_container = QWidget()
-        cards_container.setObjectName("cardsContainer")
-        cards_container.setStyleSheet("QWidget#cardsContainer { background-color: #1f232b; border: 1px solid #1f232b; }")
-        # cards_layout will be created later as QGridLayout
-        
+class TestWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ModelCard Test")
+        self.setMinimumSize(800, 600)
+
         # Sample model data
         models_data = [
             {
@@ -134,22 +98,36 @@ class ModelPage(QFrame):
                 "status_label": "启用"
             }
         ]
-        
-        # Create and add cards in 2 columns
-        cards_layout = QGridLayout()
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(1)  # ScrollBarAsNeeded
+
+        # Container for cards
+        cards_container = QWidget()
+        cards_layout = QVBoxLayout(cards_container)
         cards_layout.setSpacing(15)
-        cards_layout.setContentsMargins(15, 15, 15, 15)
 
-        for index, model_data in enumerate(models_data):
+        # Create cards
+        for model_data in models_data:
             card = ModelCard(model_data)
-            row = index // 2
-            col = index % 2
-            cards_layout.addWidget(card, row, col)
+            cards_layout.addWidget(card)
 
-        # Add stretch to the last row to push cards up
-        cards_layout.setRowStretch(len(models_data) // 2 + 1, 1)
+        cards_layout.addStretch()
 
-        cards_container.setLayout(cards_layout)
-        
-        scroll_area.setWidget(cards_container)
-        layout.addWidget(scroll_area)
+        scroll.setWidget(cards_container)
+        layout.addWidget(scroll)
+
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = TestWindow()
+    window.show()
+    sys.exit(app.exec())

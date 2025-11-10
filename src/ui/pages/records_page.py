@@ -4,274 +4,290 @@ Work records page for the industrial vision system.
 
 import logging
 from PySide6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, 
-    QScrollArea, QWidget, QGridLayout, QLineEdit, QDateEdit, QSpacerItem, QSizePolicy
+    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QComboBox, QLineEdit
 )
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import Qt
+
+from ..components.records_table import RecordsTableWidget
 
 logger = logging.getLogger(__name__)
 
 
-class RecordCard(QFrame):
-    """Record card widget to display work record information."""
-    
-    def __init__(self, record_data, parent=None):
-        super().__init__(parent)
-        self.setObjectName("recordCard")
-        self.record_data = record_data
-        self.init_ui()
-        
-    def init_ui(self):
-        """Initialize the record card UI."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(12)
-        
-        # Header with title and status
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Title section
-        title_layout = QVBoxLayout()
-        title_layout.setSpacing(2)
-        
-        title_label = QLabel(self.record_data["process_title"])
-        title_label.setObjectName("cardTitle")
-        
-        id_label = QLabel(f"{self.record_data['process_name']} | 记录编号: {self.record_data['record_id']}")
-        id_label.setObjectName("cardId")
-        
-        title_layout.addWidget(title_label)
-        title_layout.addWidget(id_label)
-        
-        # Status badge
-        status_badge = QLabel(self.record_data["status_label"])
-        status_badge.setObjectName(f"statusBadge_{self.record_data['status']}")
-        
-        header_layout.addLayout(title_layout)
-        header_layout.addStretch()
-        header_layout.addWidget(status_badge)
-        
-        layout.addLayout(header_layout)
-        
-        # Info grid
-        info_grid = QGridLayout()
-        info_grid.setSpacing(10)
-        info_grid.setObjectName("infoGrid")
-        
-        # Product SN
-        sn_frame = QFrame()
-        sn_frame.setObjectName("infoFrame")
-        sn_layout = QVBoxLayout(sn_frame)
-        sn_layout.setContentsMargins(8, 8, 8, 8)
-        sn_label = QLabel("产品SN")
-        sn_label.setObjectName("infoLabel")
-        sn_value = QLabel(self.record_data["product_sn"])
-        sn_value.setObjectName("infoValue")
-        sn_layout.addWidget(sn_label)
-        sn_layout.addWidget(sn_value)
-        
-        # Operator
-        operator_frame = QFrame()
-        operator_frame.setObjectName("infoFrame")
-        operator_layout = QVBoxLayout(operator_frame)
-        operator_layout.setContentsMargins(8, 8, 8, 8)
-        operator_label = QLabel("操作员")
-        operator_label.setObjectName("infoLabel")
-        operator_value = QLabel(self.record_data["operator"])
-        operator_value.setObjectName("infoValue")
-        operator_layout.addWidget(operator_label)
-        operator_layout.addWidget(operator_value)
-        
-        # Workstation
-        workstation_frame = QFrame()
-        workstation_frame.setObjectName("infoFrame")
-        workstation_layout = QVBoxLayout(workstation_frame)
-        workstation_layout.setContentsMargins(8, 8, 8, 8)
-        workstation_label = QLabel("工位")
-        workstation_label.setObjectName("infoLabel")
-        workstation_value = QLabel(self.record_data["workstation"])
-        workstation_value.setObjectName("infoValue")
-        workstation_layout.addWidget(workstation_label)
-        workstation_layout.addWidget(workstation_value)
-        
-        # Duration
-        duration_frame = QFrame()
-        duration_frame.setObjectName("infoFrame")
-        duration_layout = QVBoxLayout(duration_frame)
-        duration_layout.setContentsMargins(8, 8, 8, 8)
-        duration_label = QLabel("耗时")
-        duration_label.setObjectName("infoLabel")
-        duration_value = QLabel(self.record_data["duration"])
-        duration_value.setObjectName("infoValue")
-        duration_layout.addWidget(duration_label)
-        duration_layout.addWidget(duration_value)
-        
-        info_grid.addWidget(sn_frame, 0, 0)
-        info_grid.addWidget(operator_frame, 0, 1)
-        info_grid.addWidget(workstation_frame, 1, 0)
-        info_grid.addWidget(duration_frame, 1, 1)
-        
-        layout.addLayout(info_grid)
-        
-        # Defects list (if any)
-        if self.record_data["defects"]:
-            defects_title = QLabel("缺陷信息：")
-            defects_title.setObjectName("defectsTitle")
-            layout.addWidget(defects_title)
-            
-            defects_layout = QHBoxLayout()
-            defects_layout.setSpacing(5)
-            defects_layout.setContentsMargins(0, 0, 0, 0)
-            
-            for defect in self.record_data["defects"]:
-                defect_badge = QLabel(defect)
-                defect_badge.setObjectName("defectBadge")
-                defects_layout.addWidget(defect_badge)
-            
-            defects_layout.addStretch()
-            layout.addLayout(defects_layout)
-        
-        # Time info
-        time_layout = QHBoxLayout()
-        time_layout.setSpacing(15)
-        
-        start_label = QLabel(f"开始: {self.record_data['start_time']}")
-        start_label.setObjectName("timeLabel")
-        
-        end_label = QLabel(f"结束: {self.record_data['end_time']}")
-        end_label.setObjectName("timeLabel")
-        
-        time_layout.addWidget(start_label)
-        time_layout.addWidget(end_label)
-        time_layout.addStretch()
-        
-        layout.addLayout(time_layout)
-        
-        # Action button
-        action_layout = QHBoxLayout()
-        action_layout.addStretch()
-        
-        detail_btn = QPushButton("详情")
-        detail_btn.setObjectName("detailButton")
-        detail_btn.setFixedWidth(80)
-        
-        action_layout.addWidget(detail_btn)
-        
-        layout.addLayout(action_layout)
-
-
 class RecordsPage(QFrame):
-    """Work records page implementation."""
-    
+    """Work records page implementation aligned with the records table spec."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("recordsPage")
+
+        # State for filtering and display
+        self.search_term = ""
+        self.filter_status = "all"
+        self.all_records = []
+        self.filtered_records = []
+
+        self.setup_colors()
         self.init_ui()
-        
+        self.load_sample_data()
+
+    # --------------------------------------------------------------------- UI
     def init_ui(self):
         """Initialize the records page UI."""
+        self.setStyleSheet(f"background-color: {self.color_surface_darker};")
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
-        
-        # Header section
-        header_frame = QFrame()
-        header_frame.setObjectName("recordsHeader")
-        header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        layout.addWidget(self._create_title_bar())
+        layout.addWidget(self._create_filter_bar())
+        layout.addWidget(self._create_table_section(), stretch=1)
+
+    def _create_title_bar(self):
+        """Create the title bar per spec."""
+        frame = QFrame()
+        frame.setObjectName("recordsTitleBar")
+        frame.setStyleSheet(
+            "QFrame#recordsTitleBar {"
+            f"background-color: {self.color_surface};"
+            f"border-bottom: 1px solid {self.color_border_subtle};"
+            "}"
+        )
+
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
+        layout.setAlignment(Qt.AlignVCenter)
+
+        # Left: icon + title
+        left_container = QHBoxLayout()
+        left_container.setSpacing(16)
+
+        icon_frame = QFrame()
+        icon_frame.setFixedSize(44, 44)
+        icon_frame.setStyleSheet(
+            f"background-color: {self.color_hover_orange}; border-radius: 12px;"
+        )
+        icon_label = QLabel("WR", icon_frame)
+        icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setStyleSheet("color: white; font-weight: 700;")
+
+        text_container = QVBoxLayout()
+        text_container.setContentsMargins(0, 0, 0, 0)
+        text_container.setSpacing(4)
+
         title_label = QLabel("工作记录")
-        title_label.setObjectName("recordsTitle")
-        
-        header_layout.addWidget(title_label)
-        header_layout.addStretch()
-        
-        layout.addWidget(header_frame)
-        
-        # Filter section
-        filter_frame = QFrame()
-        filter_frame.setObjectName("filterFrame")
-        filter_layout = QHBoxLayout(filter_frame)
-        filter_layout.setContentsMargins(0, 0, 0, 0)
-        filter_layout.setSpacing(15)
-        
-        # Date range
-        date_layout = QHBoxLayout()
-        date_label = QLabel("日期:")
-        date_label.setObjectName("filterLabel")
-        
-        start_date = QDateEdit()
-        start_date.setDate(QDate.currentDate().addDays(-7))
-        start_date.setDisplayFormat("yyyy-MM-dd")
-        start_date.setObjectName("dateEdit")
-        
-        to_label = QLabel("至")
-        to_label.setObjectName("filterLabel")
-        
-        end_date = QDateEdit()
-        end_date.setDate(QDate.currentDate())
-        end_date.setDisplayFormat("yyyy-MM-dd")
-        end_date.setObjectName("dateEdit")
-        
-        date_layout.addWidget(date_label)
-        date_layout.addWidget(start_date)
-        date_layout.addWidget(to_label)
-        date_layout.addWidget(end_date)
-        
-        # Product filter
-        product_layout = QHBoxLayout()
-        product_label = QLabel("产品:")
-        product_label.setObjectName("filterLabel")
-        product_combo = QComboBox()
-        product_combo.addItems(["全部", "产品A", "产品B", "产品C"])
-        product_combo.setObjectName("filterCombo")
-        product_layout.addWidget(product_label)
-        product_layout.addWidget(product_combo)
-        
-        # Search
-        search_layout = QHBoxLayout()
-        search_label = QLabel("搜索:")
-        search_label.setObjectName("filterLabel")
-        search_input = QLineEdit()
-        search_input.setPlaceholderText("输入产品名称或批次号")
-        search_input.setObjectName("searchInput")
-        search_layout.addWidget(search_label)
-        search_layout.addWidget(search_input)
-        
-        # Action buttons
-        refresh_btn = QPushButton("刷新")
-        refresh_btn.setObjectName("refreshButton")
-        refresh_btn.setFixedHeight(36)
-        
-        export_btn = QPushButton("导出")
-        export_btn.setObjectName("exportButton")
-        export_btn.setFixedHeight(36)
-        
-        filter_layout.addLayout(date_layout)
-        filter_layout.addLayout(product_layout)
-        filter_layout.addLayout(search_layout)
-        filter_layout.addStretch()
-        filter_layout.addWidget(refresh_btn)
-        filter_layout.addWidget(export_btn)
-        
-        layout.addWidget(filter_frame)
-        
-        # Records cards in scroll area
-        scroll_area = QScrollArea()
-        scroll_area.setObjectName("recordsScrollArea")
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        # Container for cards
-        cards_container = QWidget()
-        cards_container.setObjectName("cardsContainer")
-        cards_layout = QVBoxLayout(cards_container)
-        cards_layout.setSpacing(15)
-        cards_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Sample record data
-        records_data = [
+        title_label.setObjectName("recordsTitleLabel")
+        title_label.setStyleSheet(
+            f"color: {self.color_text_primary}; font-size: 20px; font-weight: 700;"
+        )
+
+        self.subtitle_label = QLabel("Work Records - 0 条记录")
+        self.subtitle_label.setObjectName("recordsSubtitleLabel")
+        self.subtitle_label.setStyleSheet(
+            f"color: {self.color_text_muted}; font-size: 13px;"
+        )
+
+        text_container.addWidget(title_label)
+        text_container.addWidget(self.subtitle_label)
+
+        left_container.addWidget(icon_frame)
+        left_container.addLayout(text_container)
+
+        layout.addLayout(left_container, stretch=1)
+
+        # Right: action buttons
+        button_row = QHBoxLayout()
+        button_row.setSpacing(12)
+
+        date_btn = QPushButton("选择日期")
+        date_btn.setFixedHeight(38)
+        date_btn.setCursor(Qt.PointingHandCursor)
+        date_btn.setStyleSheet(self._secondary_button_style())
+        date_btn.clicked.connect(self.on_select_date)
+
+        export_btn = QPushButton("导出报表")
+        export_btn.setFixedHeight(38)
+        export_btn.setCursor(Qt.PointingHandCursor)
+        export_btn.setStyleSheet(self._primary_button_style())
+        export_btn.clicked.connect(self.on_export)
+
+        button_row.addWidget(date_btn)
+        button_row.addWidget(export_btn)
+
+        layout.addLayout(button_row)
+
+        return frame
+
+    def _create_filter_bar(self):
+        """Create the search and filter bar."""
+        frame = QFrame()
+        frame.setObjectName("recordsFilterBar")
+        frame.setStyleSheet(
+            "QFrame#recordsFilterBar {"
+            f"background-color: {self.color_surface_dark};"
+            f"border-bottom: 1px solid {self.color_border_subtle};"
+            "}"
+        )
+
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(24, 12, 24, 12)
+        layout.setSpacing(16)
+        layout.setAlignment(Qt.AlignVCenter)
+
+        # Search input with icon
+        search_container = QFrame()
+        search_container.setObjectName("recordsSearchContainer")
+        search_container.setStyleSheet(
+            "QFrame#recordsSearchContainer {"
+            f"background-color: {self.color_surface_darker};"
+            f"border: 1px solid {self.color_border_subtle};"
+            "border-radius: 8px;"
+            "}"
+        )
+        search_layout = QHBoxLayout(search_container)
+        search_layout.setContentsMargins(12, 6, 12, 6)
+        search_layout.setSpacing(8)
+
+        search_icon = QLabel("🔍")
+        search_icon.setStyleSheet(f"color: {self.color_text_muted}; font-size: 14px;")
+
+        self.search_input = QLineEdit()
+        self.search_input.setObjectName("recordsSearchInput")
+        self.search_input.setPlaceholderText("搜索记录编号、产品SN或工艺名称...")
+        self.search_input.setStyleSheet(
+            f"border: none; background: transparent; color: {self.color_text_primary}; font-size: 14px;"
+        )
+        self.search_input.textChanged.connect(self.on_search_changed)
+
+        search_layout.addWidget(search_icon)
+        search_layout.addWidget(self.search_input)
+        layout.addWidget(search_container, stretch=1)
+
+        # Status filter combo
+        self.status_filter_combo = QComboBox()
+        self.status_filter_combo.setObjectName("statusFilterCombo")
+        self.status_filter_combo.addItem("所有状态", "all")
+        self.status_filter_combo.addItem("OK", "ok")
+        self.status_filter_combo.addItem("NG", "ng")
+        self.status_filter_combo.addItem("条件通过", "conditional")
+        self.status_filter_combo.setFixedWidth(180)
+        self.status_filter_combo.setStyleSheet(
+            "QComboBox#statusFilterCombo {"
+            f"background-color: {self.color_surface_darker};"
+            f"border: 1px solid {self.color_border_subtle};"
+            f"color: {self.color_text_primary};"
+            "border-radius: 8px;"
+            "padding: 6px 10px;"
+            "}"
+            "QComboBox QAbstractItemView {"
+            f"background-color: {self.color_surface};"
+            f"color: {self.color_text_primary};"
+            f"border: 1px solid {self.color_border_subtle};"
+            "selection-background-color: #2a2a2a;"
+            "}"
+        )
+        self.status_filter_combo.currentIndexChanged.connect(self.on_status_changed)
+        layout.addWidget(self.status_filter_combo)
+
+        return frame
+
+    def _create_table_section(self):
+        """Create the table container section."""
+        frame = QFrame()
+        frame.setObjectName("recordsContentFrame")
+        frame.setStyleSheet(
+            "QFrame#recordsContentFrame {"
+            f"background-color: {self.color_surface_darker};"
+            "}"
+        )
+
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(0)
+
+        self.table_widget = RecordsTableWidget()
+        self.table_widget.get_table().view_detail.connect(self.on_view_detail)
+        layout.addWidget(self.table_widget, stretch=1)
+
+        return frame
+
+    def _primary_button_style(self):
+        return (
+            "QPushButton {"
+            f"background-color: {self.color_hover_orange};"
+            "border: none;"
+            "color: white;"
+            "border-radius: 8px;"
+            "font-weight: 600;"
+            "padding: 0 20px;"
+            "}"
+            "QPushButton:hover {"
+            "background-color: #ea580c;"
+            "}"
+        )
+
+    def _secondary_button_style(self):
+        return (
+            "QPushButton {"
+            "background-color: transparent;"
+            f"border: 1px solid {self.color_border_subtle};"
+            f"color: {self.color_text_muted};"
+            "border-radius: 8px;"
+            "font-weight: 600;"
+            "padding: 0 20px;"
+            "}"
+            "QPushButton:hover {"
+            "background-color: #2a2a2a;"
+            "color: white;"
+            "}"
+        )
+
+    # --------------------------------------------------------------- Data/State
+    def setup_colors(self):
+        """Setup dark mode color palette from config."""
+        try:
+            from ...core.config import get_config
+            config = get_config()
+            colors = config.ui.colors
+
+            self.color_deep_graphite = colors.get('deep_graphite', '#1A1D23')
+            self.color_steel_grey = colors.get('steel_grey', '#1F232B')
+            self.color_dark_border = colors.get('dark_border', '#242831')
+            self.color_arctic_white = colors.get('arctic_white', '#F2F4F8')
+            self.color_cool_grey = colors.get('cool_grey', '#8C92A0')
+            self.color_hover_orange = colors.get('hover_orange', '#FF8C32')
+            self.color_success_green = colors.get('success_green', '#3CC37A')
+            self.color_error_red = colors.get('error_red', '#E85454')
+            self.color_warning_yellow = colors.get('warning_yellow', '#FFB347')
+            self.color_surface = colors.get('surface', '#252525')
+            self.color_surface_dark = colors.get('surface_dark', '#1F1F1F')
+            self.color_surface_darker = colors.get('surface_darker', '#1A1A1A')
+            self.color_border_subtle = colors.get('border_subtle', '#3A3A3A')
+            self.color_text_primary = colors.get('text_primary', '#FFFFFF')
+            self.color_text_muted = colors.get('text_muted', '#9CA3AF')
+        except Exception:
+            # Fallback defaults
+            self.color_deep_graphite = "#1A1D23"
+            self.color_steel_grey = "#1F232B"
+            self.color_dark_border = "#242831"
+            self.color_arctic_white = "#F2F4F8"
+            self.color_cool_grey = "#8C92A0"
+            self.color_hover_orange = "#FF8C32"
+            self.color_success_green = "#3CC37A"
+            self.color_error_red = "#E85454"
+            self.color_warning_yellow = "#FFB347"
+            self.color_surface = "#252525"
+            self.color_surface_dark = "#1F1F1F"
+            self.color_surface_darker = "#1A1A1A"
+            self.color_border_subtle = "#3A3A3A"
+            self.color_text_primary = "#FFFFFF"
+            self.color_text_muted = "#9CA3AF"
+
+    def load_sample_data(self):
+        """Load sample records data."""
+        self.all_records = [
             {
                 "id": 1,
                 "record_id": "REC-2024110701234",
@@ -353,13 +369,57 @@ class RecordsPage(QFrame):
                 "defects": []
             }
         ]
-        
-        # Create and add cards
-        for record_data in records_data:
-            card = RecordCard(record_data)
-            cards_layout.addWidget(card)
-        
-        cards_layout.addStretch()
-        
-        scroll_area.setWidget(cards_container)
-        layout.addWidget(scroll_area)
+
+        self.apply_filters()
+
+    # --------------------------------------------------------- Event handlers
+    def on_search_changed(self, text):
+        self.search_term = text.strip()
+        self.apply_filters()
+
+    def on_status_changed(self):
+        self.filter_status = self.status_filter_combo.currentData()
+        self.apply_filters()
+
+    def on_select_date(self):
+        logger.info("Date selection triggered - pending implementation")
+
+    def on_export(self):
+        logger.info("Exporting %d filtered records", len(self.filtered_records))
+        # In real implementation, would export data to file
+
+    def on_view_detail(self, record_id):
+        logger.info("Viewing detail for record %s", record_id)
+        # In real implementation, would open detail dialog
+
+    # ---------------------------------------------------------- Data helpers
+    def apply_filters(self):
+        """Apply search and status filters to the data set."""
+        search_lower = self.search_term.lower()
+
+        def matches_search(record):
+            if not search_lower:
+                return True
+            targets = [
+                record.get("record_id", ""),
+                record.get("product_sn", ""),
+                record.get("process_title", "")
+            ]
+            return any(search_lower in (target or "").lower() for target in targets)
+
+        def matches_status(record):
+            if self.filter_status == "all":
+                return True
+            return record.get("status") == self.filter_status
+
+        self.filtered_records = [
+            record for record in self.all_records
+            if matches_search(record) and matches_status(record)
+        ]
+
+        self.table_widget.set_records(self.filtered_records)
+        self.update_record_summary(len(self.filtered_records))
+
+    def update_record_summary(self, record_count):
+        """Update the subtitle with the current record count."""
+        self.subtitle_label.setText(f"Work Records - {record_count} 条记录")

@@ -621,8 +621,10 @@ class LoginWindow(QMainWindow):
             self.main_window.show()
             logger.info("Navigated to main window")
         except Exception as exc:  # pragma: no cover - logging only
+            import traceback
             logger.error(f"Failed to navigate to main window: {exc}")
-            QMessageBox.critical(self, "Navigation Error", "Failed to open main window.")
+            logger.error(traceback.format_exc())
+            QMessageBox.critical(self, "Navigation Error", f"Failed to open main window.\n\n{exc}")
             self.show()
 
     # --- Qt events -------------------------------------------------------

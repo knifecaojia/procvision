@@ -6,7 +6,7 @@ session management, user information, and application functionality.
 """
 
 import logging
-import os
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QToolButton,
 )
-from PySide6.QtCore import Qt, QPoint, Signal, QSize, QFileSystemWatcher, QEvent
+from PySide6.QtCore import Qt, QPoint, Signal, QSize, QFileSystemWatcher, QEvent, QTimer
 from PySide6.QtGui import QFontDatabase, QFont
 
 try:
@@ -77,15 +77,13 @@ class MainWindow(QMainWindow):
         self.colors = self.config.ui.colors
         self.stylesheet_path = Path(__file__).resolve().parent / "styles" / "main_window.qss"
         self.stylesheet_watcher: Optional[QFileSystemWatcher] = None
-        
-        # Load custom font
-        font_path = os.path.join(os.path.dirname(__file__), "..", "assets", "SourceHanSansSC-Normal-2.otf")
-        font_id = QFontDatabase.addApplicationFont(font_path)
-        if font_id != -1:
-            font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
-            self.custom_font = QFont(font_family)
-        else:
-            self.custom_font = QFont()
+        self.custom_font_family = "Arial"
+        self.custom_font = QFont(self.custom_font_family)
+        self._load_custom_font()
+        self._time_labels = []
+        self.time_label: Optional[QLabel] = None
+        self.user_info_label: Optional[QLabel] = None
+        self._time_timer: Optional[QTimer] = None
         
         self.init_ui()
         self.setProperty("maximized", "true" if self.isMaximized() else "false")
@@ -98,6 +96,47 @@ class MainWindow(QMainWindow):
 
         # Set default page
         self.show_process_page()
+
+    def _load_custom_font(self):
+        """Load Source Han Sans font for the main window and its widgets."""
+        font_path = Path(__file__).resolve().parent.parent / "assets" / "SourceHanSansSC-Normal-2.otf"
+        if not font_path.exists():
+            logger.warning("Custom font file not found: %s", font_path)
+            self.setFont(self.custom_font)
+            return
+
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id == -1:
+            logger.warning("Failed to load custom font from: %s", font_path)
+            self.setFont(self.custom_font)
+            return
+
+        font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
+        self.custom_font = QFont(font_family)
+        self.custom_font_family = font_family
+        self.setFont(self.custom_font)
+        logger.info("Custom font applied to main window: %s", font_family)
+
+    def _register_time_label(self, label: QLabel) -> None:
+        """Track time labels so they can be updated together."""
+        if label and label not in self._time_labels:
+            self._time_labels.append(label)
+
+    def _start_time_timer(self) -> None:
+        """Start timer to refresh time display."""
+        if hasattr(self, "_time_timer") and self._time_timer:
+            return
+        self._time_timer = QTimer(self)
+        self._time_timer.setInterval(1000)
+        self._time_timer.timeout.connect(self._update_time_display)
+        self._time_timer.start()
+        self._update_time_display()
+
+    def _update_time_display(self) -> None:
+        """Update all registered time labels with the current time."""
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for label in self._time_labels:
+            label.setText(current_time)
 
     def init_ui(self):
         """Initialize the UI components."""
@@ -138,13 +177,27 @@ class MainWindow(QMainWindow):
         left_layout.addStretch()
 
         # Right-aligned user info (简化用户信息显示)
-        user_info = QLabel("User: Demo User | Workstation: WS-001 | ID: 001 | 2024-11-07 14:30")
-        user_info.setObjectName("userInfo")
-        user_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.user_info_label = QLabel("User: Demo User | Workstation: WS-001 | ID: 001")
+        self.user_info_label.setObjectName("userInfo")
+        self.user_info_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        self.time_label = QLabel()
+        self.time_label.setObjectName("timeInfo")
+        self.time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.time_label.setStyleSheet(
+            f"color: {self.colors.get('success_green', '#3cc37a')}; font-size: 13px;"
+        )
+        self._register_time_label(self.time_label)
+
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.addWidget(self.user_info_label)
+        info_layout.addWidget(self.time_label)
 
         layout.addLayout(left_layout)
         layout.addStretch()
-        layout.addWidget(user_info, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(info_layout)
 
         # Enable window dragging
         title_bar.mousePressEvent = self.title_bar_mouse_press
@@ -165,6 +218,7 @@ class MainWindow(QMainWindow):
         self.create_right_content_area(self.splitter)
         
         main_layout.addWidget(self.splitter)
+        self._start_time_timer()
 
     def create_title_bar(self):
         """Create custom title bar with user info."""
@@ -193,9 +247,23 @@ class MainWindow(QMainWindow):
         user_info.setObjectName("userInfo")
         user_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
+        time_label = QLabel()
+        time_label.setObjectName("timeInfo")
+        time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        time_label.setStyleSheet(
+            f"color: {self.colors.get('success_green', '#3cc37a')}; font-size: 13px;"
+        )
+        self._register_time_label(time_label)
+
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        info_layout.addWidget(user_info)
+        info_layout.addWidget(time_label)
+
         layout.addLayout(left_layout)
         layout.addStretch()
-        layout.addWidget(user_info, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        layout.addLayout(info_layout)
 
         # Enable window dragging
         title_bar.mousePressEvent = self.title_bar_mouse_press
@@ -468,7 +536,7 @@ class MainWindow(QMainWindow):
     def _inject_stylesheet_variables(self, template: str) -> str:
         """Replace placeholder tokens with values from config and fonts."""
         replacements = {f"@{name}": value for name, value in self.colors.items()}
-        font_family = self.custom_font.family() or "Arial"
+        font_family = getattr(self, "custom_font_family", "Arial") or "Arial"
         replacements["@font_family"] = font_family
 
         for placeholder, value in replacements.items():

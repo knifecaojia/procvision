@@ -84,18 +84,26 @@ class LoginWindow(QMainWindow):
     def load_custom_font(self):
         """加载自定义字体"""
         font_path = self.project_root / "src" / "assets" / "SourceHanSansSC-Normal-2.otf"
-        if font_path.exists():
-            font_id = QFontDatabase.addApplicationFont(str(font_path))
-            if font_id != -1:
-                font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
-                self.custom_font = QFont(font_family)
-                logger.info(f"Custom font loaded: {font_family}")
-            else:
-                logger.warning("Failed to load custom font")
-                self.custom_font = QFont("Arial")  # Fallback font
-        else:
-            logger.warning("Custom font file not found")
-            self.custom_font = QFont("Arial")  # Fallback font
+        fallback_font = QFont("Arial")
+        self.custom_font = fallback_font
+        self.custom_font_family = fallback_font.family()
+
+        if not font_path.exists():
+            logger.warning("Custom font file not found at %s", font_path)
+            return
+
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        if font_id == -1:
+            logger.warning("Failed to load custom font")
+            return
+
+        font_family = QFontDatabase.applicationFontFamilies(font_id)[0]
+        self.custom_font = QFont(font_family)
+        self.custom_font_family = font_family
+        app = QApplication.instance()
+        if app is not None:
+            app.setFont(self.custom_font)
+        logger.info("Custom font loaded: %s", font_family)
 
     # --- UI creation -----------------------------------------------------
     def init_ui(self) -> None:
@@ -189,7 +197,7 @@ class LoginWindow(QMainWindow):
 
         right_layout = QVBoxLayout(right_frame)
         right_layout.setContentsMargins(90, 70, 90, 60)
-        right_layout.setSpacing(28)
+        right_layout.setSpacing(6)
 
         login_title = QLabel("用户登录")
         login_title.setObjectName("loginTitle")
@@ -211,12 +219,18 @@ class LoginWindow(QMainWindow):
         self.password_input.setPlaceholderText("请输入密码")
         self.password_input.setFixedHeight(48)
 
-        lang_label = QLabel("语言")
-        lang_label.setObjectName("fieldLabel")
-        self.lang_combo = QComboBox()
-        self.lang_combo.setObjectName("comboBox")
-        self.lang_combo.addItems(["中文", "English"])
-        self.lang_combo.setFixedHeight(48)
+        workstation_label = QLabel("工位")
+        workstation_label.setObjectName("fieldLabel")
+        self.workstation_combo = QComboBox()
+        self.workstation_combo.setObjectName("comboBox")
+        self.workstation_combo.addItems([
+            "装配工位-01",
+            "装配工位-02",
+            "检测工位-01",
+            "测试工位-02",
+            "包装工位-01",
+        ])
+        self.workstation_combo.setFixedHeight(48)
 
         self.remember_checkbox = QCheckBox("记住用户名")
         self.remember_checkbox.setObjectName("checkBox")
@@ -243,8 +257,8 @@ class LoginWindow(QMainWindow):
         right_layout.addWidget(self.password_input)
         right_layout.addSpacing(16)
 
-        right_layout.addWidget(lang_label)
-        right_layout.addWidget(self.lang_combo)
+        right_layout.addWidget(workstation_label)
+        right_layout.addWidget(self.workstation_combo)
         right_layout.addSpacing(20)
 
         right_layout.addWidget(self.remember_checkbox)
@@ -263,7 +277,7 @@ class LoginWindow(QMainWindow):
 
     # --- Styling ---------------------------------------------------------
     def setup_style(self) -> None:
-        font_family = self.custom_font.family() if hasattr(self, 'custom_font') else "Arial"
+        font_family = getattr(self, "custom_font_family", "Arial")
         self.setStyleSheet(
             f"""
             QMainWindow {{
@@ -372,7 +386,7 @@ class LoginWindow(QMainWindow):
 
             #fieldLabel {{
                 color: {self.colors['cool_grey']};
-                font-size: 12px;
+                font-size: 14px;
                 font-weight: bold;
                 letter-spacing: 0.5px;
                 text-transform: uppercase;
@@ -498,19 +512,19 @@ class LoginWindow(QMainWindow):
     def load_saved_preferences(self) -> None:
         if self.session_manager.is_authenticated():
             username = self.session_manager.get_username()
-            language = self.session_manager.get_language_preference()
+            workstation = self.session_manager.get_language_preference()
             if username:
                 self.username_input.setText(username)
                 self.remember_checkbox.setChecked(True)
-            if language:
-                index = self.lang_combo.findText(language)
+            if workstation:
+                index = self.workstation_combo.findText(workstation)
                 if index >= 0:
-                    self.lang_combo.setCurrentIndex(index)
+                    self.workstation_combo.setCurrentIndex(index)
 
-    def save_user_preferences(self, username: str, language: str) -> None:
+    def save_user_preferences(self, username: str, workstation: str) -> None:
         try:
             preferences = {
-                "language_preference": language,
+                "language_preference": workstation,
                 "remember_username": self.remember_checkbox.isChecked(),
             }
             self.auth_service.update_user_preferences(username, preferences)
@@ -524,7 +538,7 @@ class LoginWindow(QMainWindow):
 
         username = self.username_input.text().strip()
         password = self.password_input.text()
-        language = self.lang_combo.currentText()
+        workstation = self.workstation_combo.currentText()
         remember_me = self.remember_checkbox.isChecked()
 
         self.clear_status()
@@ -537,7 +551,7 @@ class LoginWindow(QMainWindow):
         self.set_loading_state(True)
         try:
             # 修改为允许任意用户登录，无需数据库验证
-            # success, error = self.session_manager.login(username=username, password=password, language=language)
+            # success, error = self.session_manager.login(username=username, password=password, language=workstation)
             # 模拟登录成功
             success = True
             error = None
@@ -547,7 +561,7 @@ class LoginWindow(QMainWindow):
                 self.session_manager.auth_service.auth_state.is_authenticated = True
                 # 保存用户偏好
                 if remember_me:
-                    self.save_user_preferences(username, language)
+                    self.save_user_preferences(username, workstation)
                 self.show_success("登录成功，正在跳转...")
                 QTimer.singleShot(800, self.navigate_to_main_window)
             else:
@@ -569,7 +583,7 @@ class LoginWindow(QMainWindow):
         self.is_loading = loading
         self.username_input.setEnabled(not loading)
         self.password_input.setEnabled(not loading)
-        self.lang_combo.setEnabled(not loading)
+        self.workstation_combo.setEnabled(not loading)
         self.remember_checkbox.setEnabled(not loading)
         self.login_button.setEnabled(not loading)
         if loading:

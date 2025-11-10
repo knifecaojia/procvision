@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.session_manager = session_manager
         self.config: AppConfig = config or get_config()
+        self.app_display_name = "ProcVision"
         self.colors = self.config.ui.colors
         self.stylesheet_path = Path(__file__).resolve().parent / "styles" / "main_window.qss"
         self.stylesheet_watcher: Optional[QFileSystemWatcher] = None
@@ -100,7 +101,7 @@ class MainWindow(QMainWindow):
 
     def init_ui(self):
         """Initialize the UI components."""
-        self.setWindowTitle(f"{self.config.app_title} v{self.config.app_version}")
+        self.setWindowTitle(f"{self.app_display_name} v{self.config.app_version}")
         self.setGeometry(100, 100, 1200, 800)
         self.setMinimumWidth(1000)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -125,7 +126,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(15)
 
         # Left side - App info
-        title_label = QLabel(self.config.app_title)
+        title_label = QLabel(self.app_display_name)
         title_label.setObjectName("titleBarLabel")
 
         version_label = QLabel(f"v{self.config.app_version}")
@@ -136,18 +137,14 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(version_label)
         left_layout.addStretch()
 
-        # Center - User info (简化用户信息显示)
+        # Right-aligned user info (简化用户信息显示)
         user_info = QLabel("User: Demo User | Workstation: WS-001 | ID: 001 | 2024-11-07 14:30")
         user_info.setObjectName("userInfo")
-        user_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        center_layout = QHBoxLayout()
-        center_layout.addStretch()
-        center_layout.addWidget(user_info)
-        center_layout.addStretch()
+        user_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         layout.addLayout(left_layout)
-        layout.addLayout(center_layout)
+        layout.addStretch()
+        layout.addWidget(user_info, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         # Enable window dragging
         title_bar.mousePressEvent = self.title_bar_mouse_press
@@ -180,7 +177,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(15)
 
         # Left side - App info
-        title_label = QLabel(self.config.app_title)
+        title_label = QLabel(self.app_display_name)
         title_label.setObjectName("titleBarLabel")
 
         version_label = QLabel(f"v{self.config.app_version}")
@@ -191,18 +188,14 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(version_label)
         left_layout.addStretch()
 
-        # Center - User info (简化用户信息显示)
+        # Right-aligned user info (简化用户信息显示)
         user_info = QLabel("User: Demo User | Workstation: WS-001")
         user_info.setObjectName("userInfo")
-        user_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        center_layout = QHBoxLayout()
-        center_layout.addStretch()
-        center_layout.addWidget(user_info)
-        center_layout.addStretch()
+        user_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         layout.addLayout(left_layout)
-        layout.addLayout(center_layout)
+        layout.addStretch()
+        layout.addWidget(user_info, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         # Enable window dragging
         title_bar.mousePressEvent = self.title_bar_mouse_press

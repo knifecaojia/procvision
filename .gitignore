@@ -91,3 +91,5 @@ config/
 *.temp
 *.bak
 *.backup
+# reference assets
+ref

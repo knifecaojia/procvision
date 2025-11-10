@@ -355,7 +355,7 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
         defects = record.get("defects", [])
         if defects:
             defects_label = QLabel(", ".join(defects))
-            defects_label.setWordWrap(True)
+            defects_label.setWordWrap(False)  # keep NG reason on a single line so rows don't clip
             defects_label.setStyleSheet("color: #f87171; font-size: 12px;")
             layout.addWidget(defects_label, alignment=Qt.AlignLeft)
 

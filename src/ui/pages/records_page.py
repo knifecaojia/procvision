@@ -3,6 +3,7 @@ Work records page for the industrial vision system.
 """
 
 import logging
+import math
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QLineEdit
@@ -15,72 +16,59 @@ logger = logging.getLogger(__name__)
 
 
 class RecordsPage(QFrame):
-    """Work records page implementation aligned with the records table spec."""
+    """Work records page implementation aligned with the design spec."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("recordsPage")
 
-        # State for filtering and display
+        # State for filtering and pagination
         self.search_term = ""
         self.filter_status = "all"
+        self.page_size = 10
+        self.current_page = 1
+        self.total_pages = 1
         self.all_records = []
         self.filtered_records = []
+
+        # UI references
+        self.subtitle_label = None
+        self.pagination_label = None
+        self.prev_page_btn = None
+        self.next_page_btn = None
 
         self.setup_colors()
         self.init_ui()
         self.load_sample_data()
 
-    # --------------------------------------------------------------------- UI
+    # ------------------------------------------------------------------ UI ----
     def init_ui(self):
         """Initialize the records page UI."""
-        self.setStyleSheet(f"background-color: {self.color_surface_darker};")
+        self.setStyleSheet(f"background-color: {self.color_deep_graphite};")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(30, 30, 30, 30)
+        layout.setSpacing(20)
 
-        layout.addWidget(self._create_title_bar())
+        layout.addWidget(self._create_header_section())
         layout.addWidget(self._create_filter_bar())
         layout.addWidget(self._create_table_section(), stretch=1)
 
-    def _create_title_bar(self):
-        """Create the title bar per spec."""
+    def _create_header_section(self):
         frame = QFrame()
-        frame.setObjectName("recordsTitleBar")
+        frame.setObjectName("recordsHeader")
         frame.setStyleSheet(
-            "QFrame#recordsTitleBar {"
-            f"background-color: {self.color_surface};"
-            f"border-bottom: 1px solid {self.color_border_subtle};"
-            "}"
+            "QFrame#recordsHeader { background-color: transparent; }"
         )
 
-        layout = QHBoxLayout(frame)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(16)
-        layout.setAlignment(Qt.AlignVCenter)
-
-        # Left: icon + title
-        left_container = QHBoxLayout()
-        left_container.setSpacing(16)
-
-        icon_frame = QFrame()
-        icon_frame.setFixedSize(44, 44)
-        icon_frame.setStyleSheet(
-            f"background-color: {self.color_hover_orange}; border-radius: 12px;"
-        )
-        icon_label = QLabel("WR", icon_frame)
-        icon_label.setAlignment(Qt.AlignCenter)
-        icon_label.setStyleSheet("color: white; font-weight: 700;")
-
-        text_container = QVBoxLayout()
-        text_container.setContentsMargins(0, 0, 0, 0)
-        text_container.setSpacing(4)
+        header_layout = QVBoxLayout(frame)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(4)
 
         title_label = QLabel("工作记录")
         title_label.setObjectName("recordsTitleLabel")
         title_label.setStyleSheet(
-            f"color: {self.color_text_primary}; font-size: 20px; font-weight: 700;"
+            f"color: {self.color_text_primary}; font-size: 24px; font-weight: 700;"
         )
 
         self.subtitle_label = QLabel("Work Records - 0 条记录")
@@ -89,61 +77,57 @@ class RecordsPage(QFrame):
             f"color: {self.color_text_muted}; font-size: 13px;"
         )
 
-        text_container.addWidget(title_label)
-        text_container.addWidget(self.subtitle_label)
+        header_layout.addWidget(title_label)
+        header_layout.addWidget(self.subtitle_label)
 
-        left_container.addWidget(icon_frame)
-        left_container.addLayout(text_container)
-
-        layout.addLayout(left_container, stretch=1)
-
-        # Right: action buttons
-        button_row = QHBoxLayout()
-        button_row.setSpacing(12)
+        # Actions row
+        actions_layout = QHBoxLayout()
+        actions_layout.setContentsMargins(0, 12, 0, 0)
+        actions_layout.setSpacing(12)
+        actions_layout.addStretch()
 
         date_btn = QPushButton("选择日期")
-        date_btn.setFixedHeight(38)
+        date_btn.setFixedHeight(36)
         date_btn.setCursor(Qt.PointingHandCursor)
         date_btn.setStyleSheet(self._secondary_button_style())
         date_btn.clicked.connect(self.on_select_date)
 
         export_btn = QPushButton("导出报表")
-        export_btn.setFixedHeight(38)
+        export_btn.setFixedHeight(36)
         export_btn.setCursor(Qt.PointingHandCursor)
         export_btn.setStyleSheet(self._primary_button_style())
         export_btn.clicked.connect(self.on_export)
 
-        button_row.addWidget(date_btn)
-        button_row.addWidget(export_btn)
-
-        layout.addLayout(button_row)
+        actions_layout.addWidget(date_btn)
+        actions_layout.addWidget(export_btn)
+        header_layout.addLayout(actions_layout)
 
         return frame
 
     def _create_filter_bar(self):
-        """Create the search and filter bar."""
         frame = QFrame()
         frame.setObjectName("recordsFilterBar")
         frame.setStyleSheet(
             "QFrame#recordsFilterBar {"
-            f"background-color: {self.color_surface_dark};"
-            f"border-bottom: 1px solid {self.color_border_subtle};"
+            f"background-color: {self.color_steel_grey};"
+            f"border: 1px solid {self.color_dark_border};"
+            "border-radius: 12px;"
             "}"
         )
 
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(24, 12, 24, 12)
+        layout.setContentsMargins(20, 12, 20, 12)
         layout.setSpacing(16)
         layout.setAlignment(Qt.AlignVCenter)
 
-        # Search input with icon
+        # Search input
         search_container = QFrame()
         search_container.setObjectName("recordsSearchContainer")
         search_container.setStyleSheet(
             "QFrame#recordsSearchContainer {"
-            f"background-color: {self.color_surface_darker};"
-            f"border: 1px solid {self.color_border_subtle};"
-            "border-radius: 8px;"
+            f"background-color: {self.color_deep_graphite};"
+            f"border: 1px solid {self.color_dark_border};"
+            "border-radius: 10px;"
             "}"
         )
         search_layout = QHBoxLayout(search_container)
@@ -165,7 +149,7 @@ class RecordsPage(QFrame):
         search_layout.addWidget(self.search_input)
         layout.addWidget(search_container, stretch=1)
 
-        # Status filter combo
+        # Status filter
         self.status_filter_combo = QComboBox()
         self.status_filter_combo.setObjectName("statusFilterCombo")
         self.status_filter_combo.addItem("所有状态", "all")
@@ -175,17 +159,17 @@ class RecordsPage(QFrame):
         self.status_filter_combo.setFixedWidth(180)
         self.status_filter_combo.setStyleSheet(
             "QComboBox#statusFilterCombo {"
-            f"background-color: {self.color_surface_darker};"
-            f"border: 1px solid {self.color_border_subtle};"
+            f"background-color: {self.color_deep_graphite};"
+            f"border: 1px solid {self.color_dark_border};"
             f"color: {self.color_text_primary};"
-            "border-radius: 8px;"
-            "padding: 6px 10px;"
+            "border-radius: 10px;"
+            "padding: 6px 12px;"
             "}"
             "QComboBox QAbstractItemView {"
-            f"background-color: {self.color_surface};"
+            f"background-color: {self.color_steel_grey};"
             f"color: {self.color_text_primary};"
-            f"border: 1px solid {self.color_border_subtle};"
-            "selection-background-color: #2a2a2a;"
+            f"border: 1px solid {self.color_dark_border};"
+            f"selection-background-color: {self.color_surface_dark};"
             "}"
         )
         self.status_filter_combo.currentIndexChanged.connect(self.on_status_changed)
@@ -194,22 +178,51 @@ class RecordsPage(QFrame):
         return frame
 
     def _create_table_section(self):
-        """Create the table container section."""
         frame = QFrame()
         frame.setObjectName("recordsContentFrame")
         frame.setStyleSheet(
             "QFrame#recordsContentFrame {"
-            f"background-color: {self.color_surface_darker};"
+            f"background-color: {self.color_steel_grey};"
+            f"border: 1px solid {self.color_dark_border};"
+            "border-radius: 12px;"
             "}"
         )
 
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(0)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
 
         self.table_widget = RecordsTableWidget()
         self.table_widget.get_table().view_detail.connect(self.on_view_detail)
         layout.addWidget(self.table_widget, stretch=1)
+
+        # Pagination bar
+        pagination_frame = QFrame()
+        pagination_layout = QHBoxLayout(pagination_frame)
+        pagination_layout.setContentsMargins(0, 0, 0, 0)
+        pagination_layout.setSpacing(12)
+
+        self.pagination_label = QLabel("第 1/1 页 · 共 0 条记录")
+        self.pagination_label.setStyleSheet(f"color: {self.color_text_muted}; font-size: 13px;")
+
+        self.prev_page_btn = QPushButton("上一页")
+        self.prev_page_btn.setFixedHeight(32)
+        self.prev_page_btn.setCursor(Qt.PointingHandCursor)
+        self.prev_page_btn.setStyleSheet(self._secondary_button_style())
+        self.prev_page_btn.clicked.connect(self.on_prev_page)
+
+        self.next_page_btn = QPushButton("下一页")
+        self.next_page_btn.setFixedHeight(32)
+        self.next_page_btn.setCursor(Qt.PointingHandCursor)
+        self.next_page_btn.setStyleSheet(self._secondary_button_style())
+        self.next_page_btn.clicked.connect(self.on_next_page)
+
+        pagination_layout.addWidget(self.pagination_label)
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.prev_page_btn)
+        pagination_layout.addWidget(self.next_page_btn)
+
+        layout.addWidget(pagination_frame)
 
         return frame
 
@@ -244,7 +257,7 @@ class RecordsPage(QFrame):
             "}"
         )
 
-    # --------------------------------------------------------------- Data/State
+    # ----------------------------------------------------- Data & State ----
     def setup_colors(self):
         """Setup dark mode color palette from config."""
         try:
@@ -268,7 +281,6 @@ class RecordsPage(QFrame):
             self.color_text_primary = colors.get('text_primary', '#FFFFFF')
             self.color_text_muted = colors.get('text_muted', '#9CA3AF')
         except Exception:
-            # Fallback defaults
             self.color_deep_graphite = "#1A1D23"
             self.color_steel_grey = "#1F232B"
             self.color_dark_border = "#242831"
@@ -286,115 +298,72 @@ class RecordsPage(QFrame):
             self.color_text_muted = "#9CA3AF"
 
     def load_sample_data(self):
-        """Load sample records data."""
-        self.all_records = [
-            {
-                "id": 1,
-                "record_id": "REC-2024110701234",
-                "process_name": "ME-ASM-2024-001",
-                "process_title": "机械底座装配工艺",
-                "product_sn": "SN20241107001",
-                "order_no": "ORD-2024-1105",
-                "operator": "张三",
-                "workstation": "A01",
-                "status": "ok",
-                "status_label": "OK",
-                "start_time": "2024-11-07 09:15:23",
-                "end_time": "2024-11-07 09:28:45",
-                "duration": "13min 22s",
-                "defects": []
-            },
-            {
-                "id": 2,
-                "record_id": "REC-2024110701235",
-                "process_name": "PCB-ASM-2024-015",
-                "process_title": "主控板PCB装配工艺",
-                "product_sn": "SN20241107002",
-                "order_no": "ORD-2024-1105",
-                "operator": "李四",
-                "workstation": "B02",
-                "status": "ng",
-                "status_label": "NG",
-                "start_time": "2024-11-07 09:30:15",
-                "end_time": "2024-11-07 09:42:30",
-                "duration": "12min 15s",
-                "defects": ["焊点缺失", "PCB位置偏移"]
-            },
-            {
-                "id": 3,
-                "record_id": "REC-2024110701236",
-                "process_name": "PKG-STD-2024-003",
-                "process_title": "标准包装工艺流程",
-                "product_sn": "SN20241107003",
-                "order_no": "ORD-2024-1106",
-                "operator": "王五",
-                "workstation": "C01",
-                "status": "conditional",
-                "status_label": "条件通过",
-                "start_time": "2024-11-07 10:05:00",
-                "end_time": "2024-11-07 10:12:18",
-                "duration": "7min 18s",
-                "defects": ["标签轻微歪斜"]
-            },
-            {
-                "id": 4,
-                "record_id": "REC-2024110701237",
-                "process_name": "ME-ASM-2024-001",
-                "process_title": "机械底座装配工艺",
-                "product_sn": "SN20241107004",
-                "order_no": "ORD-2024-1105",
-                "operator": "张三",
-                "workstation": "A01",
-                "status": "ok",
-                "status_label": "OK",
-                "start_time": "2024-11-07 10:30:45",
-                "end_time": "2024-11-07 10:43:20",
-                "duration": "12min 35s",
-                "defects": []
-            },
-            {
-                "id": 5,
-                "record_id": "REC-2024110701238",
-                "process_name": "PCB-ASM-2024-016",
-                "process_title": "接口板PCB装配工艺",
-                "product_sn": "SN20241107005",
-                "order_no": "ORD-2024-1106",
-                "operator": "赵六",
-                "workstation": "B03",
-                "status": "ok",
-                "status_label": "OK",
-                "start_time": "2024-11-07 11:00:10",
-                "end_time": "2024-11-07 11:08:55",
-                "duration": "8min 45s",
-                "defects": []
-            }
+        """Generate mock data with 20 records."""
+        templates = [
+            ("ME-ASM-2024-001", "机械底座装配工艺", "OK", "ok", "A01", []),
+            ("PCB-ASM-2024-015", "主控板PCB装配工艺", "NG", "ng", "B02", ["焊点缺失", "PCB位置偏移"]),
+            ("PKG-STD-2024-003", "标准包装工艺流程", "条件通过", "conditional", "C01", ["标签轻微歪斜"]),
+            ("PCB-ASM-2024-016", "接口板PCB装配工艺", "OK", "ok", "B03", []),
         ]
 
+        records = []
+        base_record_id = 1234
+        for idx in range(20):
+            template = templates[idx % len(templates)]
+            process_code, process_title, status_label, status, workstation, defects = template
+            record = {
+                "id": idx + 1,
+                "record_id": f"REC-20241107{base_record_id + idx:04d}",
+                "process_name": process_code,
+                "process_title": process_title,
+                "product_sn": f"SN20241107{idx + 1:03d}",
+                "order_no": "ORD-2024-1105" if idx < 10 else "ORD-2024-1106",
+                "operator": ["张三", "李四", "王五", "赵六", "钱七"][idx % 5],
+                "workstation": workstation,
+                "status": status,
+                "status_label": status_label,
+                "start_time": f"2024-11-07 {9 + (idx // 4):02d}:{10 + (idx * 3) % 50:02d}:15",
+                "end_time": f"2024-11-07 {9 + (idx // 4):02d}:{20 + (idx * 3) % 50:02d}:45",
+                "duration": f"{8 + (idx % 6)}min {10 + idx % 50}s",
+                "defects": defects if status != "ok" else [],
+            }
+            records.append(record)
+
+        self.all_records = records
         self.apply_filters()
 
-    # --------------------------------------------------------- Event handlers
+    # -------------------------------------------------------- Interaction ----
     def on_search_changed(self, text):
         self.search_term = text.strip()
+        self.current_page = 1
         self.apply_filters()
 
     def on_status_changed(self):
         self.filter_status = self.status_filter_combo.currentData()
+        self.current_page = 1
         self.apply_filters()
+
+    def on_prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self._refresh_table_view()
+
+    def on_next_page(self):
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self._refresh_table_view()
 
     def on_select_date(self):
         logger.info("Date selection triggered - pending implementation")
 
     def on_export(self):
         logger.info("Exporting %d filtered records", len(self.filtered_records))
-        # In real implementation, would export data to file
 
     def on_view_detail(self, record_id):
         logger.info("Viewing detail for record %s", record_id)
-        # In real implementation, would open detail dialog
 
-    # ---------------------------------------------------------- Data helpers
+    # ----------------------------------------------------------- Helpers ----
     def apply_filters(self):
-        """Apply search and status filters to the data set."""
         search_lower = self.search_term.lower()
 
         def matches_search(record):
@@ -417,9 +386,32 @@ class RecordsPage(QFrame):
             if matches_search(record) and matches_status(record)
         ]
 
-        self.table_widget.set_records(self.filtered_records)
-        self.update_record_summary(len(self.filtered_records))
+        total = len(self.filtered_records)
+        self.total_pages = max(1, math.ceil(total / self.page_size)) if total else 1
+        self.current_page = min(self.current_page, self.total_pages)
+
+        self._refresh_table_view()
+        self.update_record_summary(total)
+
+    def _refresh_table_view(self):
+        start = (self.current_page - 1) * self.page_size
+        end = start + self.page_size
+        page_records = self.filtered_records[start:end]
+        self.table_widget.set_records(page_records)
+        self._update_pagination_controls()
+
+    def _update_pagination_controls(self):
+        total_records = len(self.filtered_records)
+        if self.pagination_label:
+            self.pagination_label.setText(
+                f"第 {self.current_page}/{self.total_pages} 页 · 共 {total_records} 条记录"
+            )
+        if self.prev_page_btn:
+            self.prev_page_btn.setEnabled(self.current_page > 1)
+        if self.next_page_btn:
+            self.next_page_btn.setEnabled(self.current_page < self.total_pages)
 
     def update_record_summary(self, record_count):
         """Update the subtitle with the current record count."""
-        self.subtitle_label.setText(f"Work Records - {record_count} 条记录")
+        if self.subtitle_label:
+            self.subtitle_label.setText(f"Work Records - {record_count} 条记录")

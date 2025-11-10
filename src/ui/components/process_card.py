@@ -93,7 +93,7 @@ class ProcessCard(QFrame):
                 margin-right: 5px;
             }
 
-            #viewButton, #startButton {
+            #viewButton {
                 background-color: transparent;
                 border: 1px solid #3a3a3a;
                 color: #9ca3af;
@@ -101,9 +101,24 @@ class ProcessCard(QFrame):
                 font-size: 13px;
             }
 
-            #viewButton:hover, #startButton:hover {
+            #viewButton:hover {
                 border: 1px solid #ffa500;
                 color: #ffffff;
+            }
+
+            #startButton {
+                background-color: rgba(60, 195, 122, 0.15);
+                border: 1px solid rgba(60, 195, 122, 0.55);
+                color: #6ff3b3;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            #startButton:hover {
+                border: 1px solid #6ff3b3;
+                color: #ffffff;
+                background-color: rgba(60, 195, 122, 0.35);
             }
         """)
         layout = QVBoxLayout(self)

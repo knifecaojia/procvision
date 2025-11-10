@@ -1,0 +1,603 @@
+            QMainWindow {
+                background-color: @deep_graphite;
+                border-radius: 10px;
+                font-family: "@font_family";
+            }
+
+            /* 当窗口最大化时移除圆角 */
+            QMainWindow[maximized="true"] {
+                border-radius: 0px;
+            }
+
+            #centralWidget {
+                background-color: @deep_graphite;
+                border-radius: 10px;
+                font-family: "@font_family";
+            }
+
+            QMainWindow[maximized="true"] #centralWidget {
+                border-radius: 0px;
+            }
+
+            #titleBar {
+                background-color: @deep_graphite;
+                border-bottom: 1px solid @dark_border;
+                border-top-left-radius: 10px;
+                border-top-right-radius: 10px;
+            }
+
+            QMainWindow[maximized="true"] #titleBar {
+                border-top-left-radius: 0px;
+                border-top-right-radius: 0px;
+            }
+
+            #titleBarLabel {
+                color: @arctic_white;
+                font-size: 16px;
+                font-weight: bold;
+                letter-spacing: 1px;
+            }
+
+            #titleVersion {
+                color: @cool_grey;
+                font-size: 12px;
+                text-transform: uppercase;
+            }
+
+            #userInfo {
+                color: @arctic_white;
+                font-size: 16px;  /* 增大字体 */
+                font-weight: normal;
+            }
+
+            #mainSplitter {
+                background-color: @deep_graphite;
+                border-radius: 10px;
+            }
+
+            QMainWindow[maximized="true"] #mainSplitter {
+                border-radius: 0px;
+            }
+
+            #mainSplitter::handle {
+                background-color: transparent;
+            }
+
+            #leftPanel {
+                background-color: @steel_grey;
+                border-right: 1px solid @dark_border;
+                border-bottom-left-radius: 10px;
+                font-family: "@font_family";
+            }
+
+            QMainWindow[maximized="true"] #leftPanel {
+                border-bottom-left-radius: 0px;
+            }
+
+            #navFrame {
+                background-color: @steel_grey;
+            }
+
+            #navButton_camera, #navButton_system, #navButton_model, 
+            #navButton_process, #navButton_records {
+                background-color: transparent;
+                border: none;
+                text-align: left;
+                padding: 12px 20px;
+            }
+
+            #navButton_camera:hover, #navButton_system:hover, #navButton_model:hover, 
+            #navButton_process:hover, #navButton_records:hover {
+                background-color: #2a2a2a;
+            }
+
+            #navButton_camera[selected="true"], #navButton_system[selected="true"], 
+            #navButton_model[selected="true"], #navButton_process[selected="true"], 
+            #navButton_records[selected="true"] {
+                background-color: @hover_orange;
+            }
+
+            #navIcon {
+                color: @arctic_white;
+                font-size: 16px;
+            }
+
+            #navIcon[selected="true"] {
+                color: #0f0f0f;
+            }
+
+            #navName {
+                color: @arctic_white;
+                font-size: 14px;
+                font-weight: 400;
+                letter-spacing: 0.5px;
+            }
+
+            #navName[selected="true"] {
+                color: #0b0b0b;
+                font-weight: 700;
+            }
+
+            #navDesc {
+                color: @arctic_white;
+                font-size: 12px;
+                font-weight: 400;
+                text-transform: none;
+            }
+
+            #navDesc[selected="true"] {
+                color: #131313;
+                font-weight: 600;
+            }
+
+            #statusFrame {
+                background-color: @deep_graphite;
+                border-top: 1px solid @dark_border;
+            }
+
+            #wifiIcon {
+                color: @success_green;
+                font-size: 10px;
+            }
+
+            #wifiLabel {
+                color: @success_green;
+                font-size: 12px;
+            }
+
+            #versionInfo {
+                color: @cool_grey;
+                font-size: 12px;
+            }
+
+            #syncLabel {
+                color: @cool_grey;
+                font-size: 10px;
+                margin-top: 5px;
+            }
+
+            #rightPanel {
+                background-color: @deep_graphite;
+                border-bottom-right-radius: 10px;
+            }
+
+            QMainWindow[maximized="true"] #rightPanel {
+                border-bottom-right-radius: 0px;
+            }
+
+            #contentStack {
+                background-color: @deep_graphite;
+            }
+
+            #cameraPage, #systemPage, #modelPage, #processPage, #recordsPage {
+                background-color: @deep_graphite;
+                font-family: "@font_family";
+            }
+
+            #pageLabel {
+                color: @arctic_white;
+                font-size: 18px;
+                font-weight: bold;
+            }
+
+            #processHeader, #cameraHeader, #systemHeader, #modelHeader, #recordsHeader {
+                background-color: transparent;
+            }
+
+            #cameraTitle, #systemTitle, #modelTitle, #processTitle, #recordsTitle {
+                color: @arctic_white;
+                font-size: 24px;
+                font-weight: bold;
+            }
+
+            /* Camera Page Styles */
+            #applyButton {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                color: @arctic_white;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #applyButton:hover {
+                background-color: @hover_orange;
+                border: 1px solid @hover_orange;
+            }
+
+            #previewToolbar {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                border-radius: 0px;
+                padding: 6px 10px;
+            }
+
+            QToolButton#previewToolButton {
+                color: @arctic_white;
+                border: 1px solid transparent;
+                padding: 4px;
+                border-radius: 6px;
+            }
+
+            QToolButton#previewToolButton:hover {
+                border: 1px solid @hover_orange;
+                color: @hover_orange;
+            }
+
+            #previewFrame {
+                background-color: #000000;
+                border: 2px solid @dark_border;
+                border-radius: 6px;
+            }
+
+            #previewLabel {
+                color: @cool_grey;
+                font-size: 16px;
+            }
+
+            #paramsFrame, #serverFrame, #imageFrame, #logFrame, #statusFrame {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                border-radius: 8px;
+            }
+
+            #paramsTitle, #sectionTitle {
+                color: @arctic_white;
+                font-size: 18px;
+                font-weight: bold;
+                border-bottom: 1px solid @dark_border;
+                padding-bottom: 5px;
+            }
+
+            #paramLabel {
+                color: @cool_grey;
+                font-size: 13px;
+                min-width: 100px;
+                padding-right: 5px;
+            }
+
+            #paramInput, #paramCombo {
+                background-color: @deep_graphite;
+                border: 1px solid @dark_border;
+                color: @arctic_white;
+                border-radius: 6px;
+                padding: 6px;
+                font-size: 13px;
+                min-width: 100px;
+            }
+
+            #paramInput:focus, #paramCombo:focus {
+                border: 1px solid @hover_orange;
+            }
+            
+            #paramValue {
+                color: @arctic_white;
+                font-size: 13px;
+                font-weight: normal;
+                min-width: 60px;
+            }
+
+            /* System Page Styles */
+            #saveButton, #browseButton {
+                background-color: @hover_orange;
+                border: none;
+                color: @arctic_white;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #saveButton:hover, #browseButton:hover {
+                background-color: #e07a28;
+            }
+
+            /* Model Page Styles */
+            #downloadButton, #uploadButton {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                color: @arctic_white;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #downloadButton:hover {
+                background-color: @hover_orange;
+                border: 1px solid @hover_orange;
+            }
+
+            #uploadButton:hover {
+                background-color: @hover_orange;
+                border: 1px solid @hover_orange;
+            }
+
+            #tableFrame {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                border-radius: 8px;
+            }
+
+            #headersFrame {
+                background-color: @deep_graphite;
+                border-bottom: 1px solid @dark_border;
+            }
+
+            #tableHeader {
+                color: @cool_grey;
+                font-size: 14px;
+                font-weight: bold;
+                min-width: 120px;
+            }
+
+            #rowFrame {
+                background-color: @deep_graphite;
+                border-bottom: 1px solid @dark_border;
+            }
+
+            #tableCell {
+                color: @arctic_white;
+                font-size: 13px;
+                min-width: 120px;
+            }
+
+            #tableButton {
+                background-color: transparent;
+                border: 1px solid @dark_border;
+                color: @arctic_white;
+                border-radius: 4px;
+                font-size: 12px;
+                padding: 5px 10px;
+                min-width: 60px;
+            }
+
+            #tableButton:hover {
+                border: 1px solid @hover_orange;
+                color: @hover_orange;
+            }
+
+            #deleteButton {
+                background-color: transparent;
+                border: 1px solid #E85454;
+                color: #E85454;
+                border-radius: 4px;
+                font-size: 12px;
+                padding: 5px 10px;
+                min-width: 60px;
+            }
+
+            #deleteButton:hover {
+                background-color: #E85454;
+                color: @arctic_white;
+            }
+
+            /* Process Page Styles */
+            #syncButton, #createButton {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                color: @arctic_white;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #syncButton:hover, #createButton:hover {
+                background-color: @hover_orange;
+                border: 1px solid @hover_orange;
+            }
+
+            #cardFrame {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                border-radius: 8px;
+            }
+
+            #cardTitle {
+                color: @arctic_white;
+                font-size: 16px;
+                font-weight: bold;
+            }
+
+            #cardType {
+                background-color: #1a1d23;
+                color: #8C92A0;
+                border: 1px solid #242831;
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 12px;
+            }
+
+            #cardStatus {
+                background-color: #3CC37A;
+                color: #1a1d23;
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            #detailLabel, #modelsLabel {
+                color: @cool_grey;
+                font-size: 13px;
+            }
+
+            #modelTag {
+                background-color: @deep_graphite;
+                color: @arctic_white;
+                border: 1px solid @dark_border;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 12px;
+                margin-right: 5px;
+            }
+
+            #viewButton, #editButton {
+                background-color: transparent;
+                border: 1px solid @dark_border;
+                color: @arctic_white;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+
+            #viewButton:hover, #editButton:hover {
+                border: 1px solid @hover_orange;
+                color: @hover_orange;
+            }
+
+            #startButton {
+                background-color: @hover_orange;
+                border: none;
+                color: @arctic_white;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+
+            #startButton:hover {
+                background-color: #e07a28;
+            }
+
+            /* Records Page Styles */
+            #dateButton, #exportButton {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                color: @arctic_white;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #dateButton:hover, #exportButton:hover {
+                background-color: @hover_orange;
+                border: 1px solid @hover_orange;
+            }
+
+            #statusLabel {
+                font-weight: bold;
+                min-width: 80px;
+            }
+
+            /* Model Card Styles */
+            #modelCard {
+                background-color: #252525;
+                border: 1px solid #3a3a3a;
+                border-radius: 8px;
+                font-family: "@font_family";
+            }
+
+            #modelCard:hover {
+                border: 1px solid rgba(255, 165, 0, 0.5);
+            }
+
+            #iconFrame {
+                background-color: #1a1a1a;
+                border-radius: 20px;
+            }
+
+            #iconFrame.opencv {
+                background-color: rgba(59, 130, 246, 0.1);
+            }
+
+            #iconFrame.yolo {
+                background-color: rgba(168, 85, 247, 0.1);
+            }
+
+            #iconLabel {
+                color: #ffffff;
+                font-size: 18px;
+            }
+
+            #iconFrame.opencv #iconLabel {
+                color: #60a5fa;
+            }
+
+            #iconFrame.yolo #iconLabel {
+                color: #c084fc;
+            }
+
+            #cardTitle {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: bold;
+            }
+
+            #cardVersion {
+                color: #6b7280;
+                font-size: 12px;
+            }
+
+            #statusBadge {
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+
+            #statusBadge.active {
+                background-color: rgba(34, 197, 94, 0.1);
+                color: #4ade80;
+                border: 1px solid rgba(34, 197, 94, 0.3);
+            }
+
+            #statusBadge.inactive {
+                background-color: rgba(107, 114, 128, 0.1);
+                color: #9ca3af;
+                border: 1px solid rgba(107, 114, 128, 0.3);
+            }
+
+            #descLabel {
+                color: #9ca3af;
+                font-size: 14px;
+            }
+
+            #infoFrame {
+                background-color: #1a1a1a;
+                border-radius: 4px;
+            }
+
+            #infoLabel {
+                color: #6b7280;
+                font-size: 12px;
+            }
+
+            #infoValue {
+                color: #ffffff;
+                font-size: 14px;
+            }
+
+            #viewButton {
+                background-color: transparent;
+                border: 1px solid #3a3a3a;
+                color: #9ca3af;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+
+            #viewButton:hover {
+                background-color: #2a2a2a;
+                color: #ffffff;
+            }
+
+            #updateButton {
+                background-color: #f97316;
+                border: 1px solid #f97316;
+                color: #ffffff;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+            }
+
+            #updateButton:hover {
+                background-color: #ea580c;
+                border: 1px solid #ea580c;
+            }
+
+            #deleteButton {
+                background-color: transparent;
+                border: 1px solid rgba(239, 68, 68, 0.5);
+                color: #f87171;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+
+            #deleteButton:hover {
+                background-color: rgba(239, 68, 68, 0.1);
+            }

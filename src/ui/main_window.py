@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QToolButton,
 )
-from PySide6.QtCore import Qt, QPoint, Signal, QSize
+from PySide6.QtCore import Qt, QPoint, Signal, QSize, QFileSystemWatcher, QEvent
 from PySide6.QtGui import QFontDatabase, QFont
 
 try:
@@ -74,6 +74,8 @@ class MainWindow(QMainWindow):
         self.session_manager = session_manager
         self.config: AppConfig = config or get_config()
         self.colors = self.config.ui.colors
+        self.stylesheet_path = Path(__file__).resolve().parent / "styles" / "main_window.qss"
+        self.stylesheet_watcher: Optional[QFileSystemWatcher] = None
         
         # Load custom font
         font_path = os.path.join(os.path.dirname(__file__), "..", "assets", "SourceHanSansSC-Normal-2.otf")
@@ -85,6 +87,7 @@ class MainWindow(QMainWindow):
             self.custom_font = QFont()
         
         self.init_ui()
+        self.setProperty("maximized", "true" if self.isMaximized() else "false")
         self.setup_style()
         self.setup_connections()
         self.load_preferences()
@@ -138,28 +141,13 @@ class MainWindow(QMainWindow):
         user_info.setObjectName("userInfo")
         user_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Right side - Window controls
-        self.min_button = QPushButton("−")
-        self.min_button.setObjectName("windowButton")
-        self.min_button.setFixedSize(30, 20)
-        
-        self.max_button = QPushButton("□")
-        self.max_button.setObjectName("windowButton")
-        self.max_button.setFixedSize(30, 20)
-
-        self.close_button = QPushButton("×")
-        self.close_button.setObjectName("closeButton")
-        self.close_button.setFixedSize(30, 20)
-
-        right_layout = QHBoxLayout()
-        right_layout.addWidget(user_info)
-        right_layout.addStretch()
-        right_layout.addWidget(self.min_button)
-        right_layout.addWidget(self.max_button)
-        right_layout.addWidget(self.close_button)
+        center_layout = QHBoxLayout()
+        center_layout.addStretch()
+        center_layout.addWidget(user_info)
+        center_layout.addStretch()
 
         layout.addLayout(left_layout)
-        layout.addLayout(right_layout)
+        layout.addLayout(center_layout)
 
         # Enable window dragging
         title_bar.mousePressEvent = self.title_bar_mouse_press
@@ -182,7 +170,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.splitter)
 
     def create_title_bar(self):
-        """Create custom title bar with user info and window controls."""
+        """Create custom title bar with user info."""
         title_bar = QFrame()
         title_bar.setObjectName("titleBar")
         title_bar.setFixedHeight(60)
@@ -208,28 +196,13 @@ class MainWindow(QMainWindow):
         user_info.setObjectName("userInfo")
         user_info.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Right side - Window controls
-        self.min_button = QPushButton("−")
-        self.min_button.setObjectName("windowButton")
-        self.min_button.setFixedSize(30, 20)
-        
-        self.max_button = QPushButton("□")
-        self.max_button.setObjectName("windowButton")
-        self.max_button.setFixedSize(30, 20)
-
-        self.close_button = QPushButton("×")
-        self.close_button.setObjectName("closeButton")
-        self.close_button.setFixedSize(30, 20)
-
-        right_layout = QHBoxLayout()
-        right_layout.addWidget(user_info)
-        right_layout.addStretch()
-        right_layout.addWidget(self.min_button)
-        right_layout.addWidget(self.max_button)
-        right_layout.addWidget(self.close_button)
+        center_layout = QHBoxLayout()
+        center_layout.addStretch()
+        center_layout.addWidget(user_info)
+        center_layout.addStretch()
 
         layout.addLayout(left_layout)
-        layout.addLayout(right_layout)
+        layout.addLayout(center_layout)
 
         # Enable window dragging
         title_bar.mousePressEvent = self.title_bar_mouse_press
@@ -306,6 +279,7 @@ class MainWindow(QMainWindow):
 
         left_layout.addWidget(nav_frame)
         left_layout.addWidget(status_frame)
+        self._debug_nav_button_state("init_left_panel")
         parent.addWidget(left_frame)
 
     def create_nav_button(self, item_id, cn_name, en_name):
@@ -315,8 +289,9 @@ class MainWindow(QMainWindow):
         button.setFixedHeight(60)
         
         # Set default selected button to "process"
-        if item_id == "process":
-            button.setProperty("selected", True)
+        is_default = item_id == "process"
+        initial_state = "true" if is_default else "false"
+        button.setProperty("selected", initial_state)
         
         # Create layout for button content
         layout = QHBoxLayout(button)
@@ -326,6 +301,7 @@ class MainWindow(QMainWindow):
         # Icon placeholder (in a real app, you would use actual icons)
         icon_label = QLabel("■")  # Placeholder icon
         icon_label.setObjectName("navIcon")
+        icon_label.setProperty("selected", initial_state)
         
         # Text layout
         text_layout = QVBoxLayout()
@@ -334,9 +310,11 @@ class MainWindow(QMainWindow):
         
         name_label = QLabel(cn_name)
         name_label.setObjectName("navName")
+        name_label.setProperty("selected", initial_state)
         
         desc_label = QLabel(en_name)
         desc_label.setObjectName("navDesc")
+        desc_label.setProperty("selected", initial_state)
         
         text_layout.addWidget(name_label)
         text_layout.addWidget(desc_label)
@@ -417,9 +395,17 @@ class MainWindow(QMainWindow):
         """Switch to the specified page."""
         # Reset all buttons
         for btn_id, button in self.nav_buttons.items():
-            button.setProperty("selected", btn_id == page_id)
+            selection_state = "true" if btn_id == page_id else "false"
+            button.setProperty("selected", selection_state)
             button.style().unpolish(button)
             button.style().polish(button)
+
+            for child_name in ("navIcon", "navName", "navDesc"):
+                label = button.findChild(QLabel, child_name)
+                if label is not None:
+                    label.setProperty("selected", selection_state)
+                    label.style().unpolish(label)
+                    label.style().polish(label)
         
         # Switch to the appropriate page
         page_map = {
@@ -432,6 +418,18 @@ class MainWindow(QMainWindow):
         
         page_index = page_map.get(page_id, 3)  # Default to process page
         self.content_stack.setCurrentIndex(page_index)
+        self._debug_nav_button_state(f"switch_to_{page_id}")
+
+    def _debug_nav_button_state(self, context: str):
+        """Log current navigation button selection state for diagnostics."""
+        if not getattr(self, "nav_buttons", None):
+            return
+
+        state_snapshot = {
+            btn_id: button.property("selected")
+            for btn_id, button in self.nav_buttons.items()
+        }
+        logger.info("Nav button state [%s]: %s", context, state_snapshot)
 
     def title_bar_mouse_press(self, event):
         """Handle mouse press on title bar for window dragging."""
@@ -451,656 +449,50 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def setup_style(self):
-        """Apply styles to the main window."""
-        # 获取自定义字体族
-        font_family = self.custom_font.family() if self.custom_font.family() else "Arial"
-        
-        self.setStyleSheet(f"""
-            QMainWindow {{
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 10px;
-                font-family: "{font_family}";
-            }}
-
-            /* 当窗口最大化时移除圆角 */
-            QMainWindow[maximized="true"] {{
-                border-radius: 0px;
-            }}
-
-            #centralWidget {{
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 10px;
-                font-family: "{font_family}";
-            }}
-
-            QMainWindow[maximized="true"] #centralWidget {{
-                border-radius: 0px;
-            }}
-
-            #titleBar {{
-                background-color: {self.colors['deep_graphite']};
-                border-bottom: 1px solid {self.colors['dark_border']};
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-            }}
-
-            QMainWindow[maximized="true"] #titleBar {{
-                border-top-left-radius: 0px;
-                border-top-right-radius: 0px;
-            }}
-
-            #titleBarLabel {{
-                color: {self.colors['arctic_white']};
-                font-size: 16px;
-                font-weight: bold;
-                letter-spacing: 1px;
-            }}
-
-            #titleVersion {{
-                color: {self.colors['cool_grey']};
-                font-size: 12px;
-                text-transform: uppercase;
-            }}
-
-            #userInfo {{
-                color: {self.colors['arctic_white']};
-                font-size: 16px;  /* 增大字体 */
-                font-weight: normal;
-            }}
-
-            #windowButton {{
-                background-color: transparent;
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-weight: bold;
-                border-radius: 3px;
-            }}
-
-            #windowButton:hover {{
-                border: 1px solid {self.colors['hover_orange']};
-                color: {self.colors['hover_orange']};
-            }}
-
-            #closeButton {{
-                background-color: transparent;
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-weight: bold;
-                border-radius: 3px;
-            }}
-
-            #closeButton:hover {{
-                background-color: {self.colors['error_red']};
-                border: 1px solid {self.colors['error_red']};
-            }}
-
-            #mainSplitter {{
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 10px;
-            }}
-
-            QMainWindow[maximized="true"] #mainSplitter {{
-                border-radius: 0px;
-            }}
-
-            #mainSplitter::handle {{
-                background-color: transparent;
-            }}
-
-            #leftPanel {{
-                background-color: {self.colors['steel_grey']};
-                border-right: 1px solid {self.colors['dark_border']};
-                border-bottom-left-radius: 10px;
-                font-family: "{font_family}";
-            }}
-
-            QMainWindow[maximized="true"] #leftPanel {{
-                border-bottom-left-radius: 0px;
-            }}
-
-            #navFrame {{
-                background-color: {self.colors['steel_grey']};
-            }}
-
-            #navButton_camera, #navButton_system, #navButton_model, 
-            #navButton_process, #navButton_records {{
-                background-color: transparent;
-                border: none;
-                text-align: left;
-                padding: 10px 20px;
-            }}
-
-            #navButton_camera:hover, #navButton_system:hover, #navButton_model:hover, 
-            #navButton_process:hover, #navButton_records:hover {{
-                background-color: #2a2a2a;
-            }}
-
-            #navButton_camera[selected="true"], #navButton_system[selected="true"], 
-            #navButton_model[selected="true"], #navButton_process[selected="true"], 
-            #navButton_records[selected="true"] {{
-                background-color: {self.colors['hover_orange']};
-            }}
-
-            #navIcon {{
-                color: {self.colors['cool_grey']};
-                font-size: 16px;
-            }}
-
-            #navButton_camera[selected="true"] #navIcon,
-            #navButton_system[selected="true"] #navIcon,
-            #navButton_model[selected="true"] #navIcon,
-            #navButton_process[selected="true"] #navIcon,
-            #navButton_records[selected="true"] #navIcon {{
-                color: {self.colors['arctic_white']};
-            }}
-
-            #navName {{
-                color: {self.colors['cool_grey']};
-                font-size: 14px;
-                font-weight: normal;
-            }}
-
-            #navButton_camera[selected="true"] #navName,
-            #navButton_system[selected="true"] #navName,
-            #navButton_model[selected="true"] #navName,
-            #navButton_process[selected="true"] #navName,
-            #navButton_records[selected="true"] #navName {{
-                color: {self.colors['arctic_white']};
-                font-weight: bold;
-            }}
-
-            #navDesc {{
-                color: {self.colors['cool_grey']};
-                font-size: 10px;
-                text-transform: uppercase;
-            }}
-
-            #navButton_camera[selected="true"] #navDesc,
-            #navButton_system[selected="true"] #navDesc,
-            #navButton_model[selected="true"] #navDesc,
-            #navButton_process[selected="true"] #navDesc,
-            #navButton_records[selected="true"] #navDesc {{
-                color: #ffdbb8;
-            }}
-
-            #statusFrame {{
-                background-color: {self.colors['deep_graphite']};
-                border-top: 1px solid {self.colors['dark_border']};
-            }}
-
-            #wifiIcon {{
-                color: {self.colors['success_green']};
-                font-size: 10px;
-            }}
-
-            #wifiLabel {{
-                color: {self.colors['success_green']};
-                font-size: 12px;
-            }}
-
-            #versionInfo {{
-                color: {self.colors['cool_grey']};
-                font-size: 12px;
-            }}
-
-            #syncLabel {{
-                color: {self.colors['cool_grey']};
-                font-size: 10px;
-                margin-top: 5px;
-            }}
-
-            #rightPanel {{
-                background-color: {self.colors['deep_graphite']};
-                border-bottom-right-radius: 10px;
-            }}
-
-            QMainWindow[maximized="true"] #rightPanel {{
-                border-bottom-right-radius: 0px;
-            }}
-
-            #contentStack {{
-                background-color: {self.colors['deep_graphite']};
-            }}
-
-            #cameraPage, #systemPage, #modelPage, #processPage, #recordsPage {{
-                background-color: {self.colors['deep_graphite']};
-                font-family: "{font_family}";
-            }}
-
-            #pageLabel {{
-                color: {self.colors['arctic_white']};
-                font-size: 18px;
-                font-weight: bold;
-            }}
-
-            #processHeader, #cameraHeader, #systemHeader, #modelHeader, #recordsHeader {{
-                background-color: transparent;
-            }}
-
-            #cameraTitle, #systemTitle, #modelTitle, #processTitle, #recordsTitle {{
-                color: {self.colors['arctic_white']};
-                font-size: 24px;
-                font-weight: bold;
-            }}
-
-            /* Camera Page Styles */
-            #applyButton {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-
-            #applyButton:hover {{
-                background-color: {self.colors['hover_orange']};
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #previewToolbar {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                border-radius: 8px;
-                padding: 10px 14px;
-            }}
-
-            QToolButton#previewToolButton {{
-                color: {self.colors['arctic_white']};
-                border: 1px solid transparent;
-                padding: 8px;
-                border-radius: 6px;
-            }}
-
-            QToolButton#previewToolButton:hover {{
-                border: 1px solid {self.colors['hover_orange']};
-                color: {self.colors['hover_orange']};
-            }}
-
-            #previewFrame {{
-                background-color: #000000;
-                border: 2px solid {self.colors['dark_border']};
-                border-radius: 6px;
-            }}
-
-            #previewLabel {{
-                color: {self.colors['cool_grey']};
-                font-size: 16px;
-            }}
-
-            #paramsFrame, #serverFrame, #imageFrame, #logFrame, #statusFrame {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                border-radius: 8px;
-            }}
-
-            #paramsTitle, #sectionTitle {{
-                color: {self.colors['arctic_white']};
-                font-size: 18px;
-                font-weight: bold;
-                border-bottom: 1px solid {self.colors['dark_border']};
-                padding-bottom: 5px;
-            }}
-
-            #paramLabel {{
-                color: {self.colors['cool_grey']};
-                font-size: 13px;
-                min-width: 100px;
-                padding-right: 5px;
-            }}
-
-            #paramInput, #paramCombo {{
-                background-color: {self.colors['deep_graphite']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                border-radius: 6px;
-                padding: 6px;
-                font-size: 13px;
-                min-width: 100px;
-            }}
-
-            #paramInput:focus, #paramCombo:focus {{
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-            
-            #paramValue {{
-                color: {self.colors['arctic_white']};
-                font-size: 13px;
-                font-weight: normal;
-                min-width: 60px;
-            }}
-
-            /* System Page Styles */
-            #saveButton, #browseButton {{
-                background-color: {self.colors['hover_orange']};
-                border: none;
-                color: {self.colors['arctic_white']};
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-
-            #saveButton:hover, #browseButton:hover {{
-                background-color: #e07a28;
-            }}
-
-            /* Model Page Styles */
-            #downloadButton, #uploadButton {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-
-            #downloadButton:hover {{
-                background-color: {self.colors['hover_orange']};
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #uploadButton:hover {{
-                background-color: {self.colors['hover_orange']};
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #tableFrame {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                border-radius: 8px;
-            }}
-
-            #headersFrame {{
-                background-color: {self.colors['deep_graphite']};
-                border-bottom: 1px solid {self.colors['dark_border']};
-            }}
-
-            #tableHeader {{
-                color: {self.colors['cool_grey']};
-                font-size: 14px;
-                font-weight: bold;
-                min-width: 120px;
-            }}
-
-            #rowFrame {{
-                background-color: {self.colors['deep_graphite']};
-                border-bottom: 1px solid {self.colors['dark_border']};
-            }}
-
-            #tableCell {{
-                color: {self.colors['arctic_white']};
-                font-size: 13px;
-                min-width: 120px;
-            }}
-
-            #tableButton {{
-                background-color: transparent;
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                border-radius: 4px;
-                font-size: 12px;
-                padding: 5px 10px;
-                min-width: 60px;
-            }}
-
-            #tableButton:hover {{
-                border: 1px solid {self.colors['hover_orange']};
-                color: {self.colors['hover_orange']};
-            }}
-
-            #deleteButton {{
-                background-color: transparent;
-                border: 1px solid #E85454;
-                color: #E85454;
-                border-radius: 4px;
-                font-size: 12px;
-                padding: 5px 10px;
-                min-width: 60px;
-            }}
-
-            #deleteButton:hover {{
-                background-color: #E85454;
-                color: {self.colors['arctic_white']};
-            }}
-
-            /* Process Page Styles */
-            #syncButton, #createButton {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-
-            #syncButton:hover, #createButton:hover {{
-                background-color: {self.colors['hover_orange']};
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #cardFrame {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                border-radius: 8px;
-            }}
-
-            #cardTitle {{
-                color: {self.colors['arctic_white']};
-                font-size: 16px;
-                font-weight: bold;
-            }}
-
-            #cardType {{
-                background-color: #1a1d23;
-                color: #8C92A0;
-                border: 1px solid #242831;
-                border-radius: 4px;
-                padding: 2px 8px;
-                font-size: 12px;
-            }}
-
-            #cardStatus {{
-                background-color: #3CC37A;
-                color: #1a1d23;
-                border-radius: 4px;
-                padding: 2px 8px;
-                font-size: 12px;
-                font-weight: bold;
-            }}
-
-            #detailLabel, #modelsLabel {{
-                color: {self.colors['cool_grey']};
-                font-size: 13px;
-            }}
-
-            #modelTag {{
-                background-color: {self.colors['deep_graphite']};
-                color: {self.colors['arctic_white']};
-                border: 1px solid {self.colors['dark_border']};
-                border-radius: 4px;
-                padding: 2px 6px;
-                font-size: 12px;
-                margin-right: 5px;
-            }}
-
-            #viewButton, #editButton {{
-                background-color: transparent;
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                border-radius: 6px;
-                font-size: 13px;
-            }}
-
-            #viewButton:hover, #editButton:hover {{
-                border: 1px solid {self.colors['hover_orange']};
-                color: {self.colors['hover_orange']};
-            }}
-
-            #startButton {{
-                background-color: {self.colors['hover_orange']};
-                border: none;
-                color: {self.colors['arctic_white']};
-                border-radius: 6px;
-                font-size: 13px;
-            }}
-
-            #startButton:hover {{
-                background-color: #e07a28;
-            }}
-
-            /* Records Page Styles */
-            #dateButton, #exportButton {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-
-            #dateButton:hover, #exportButton:hover {{
-                background-color: {self.colors['hover_orange']};
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #statusLabel {{
-                font-weight: bold;
-                min-width: 80px;
-            }}
-
-            /* Model Card Styles */
-            #modelCard {{
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                border-radius: 8px;
-                font-family: "{font_family}";
-            }}
-
-            #modelCard:hover {{
-                border: 1px solid rgba(255, 165, 0, 0.5);
-            }}
-
-            #iconFrame {{
-                background-color: #1a1a1a;
-                border-radius: 20px;
-            }}
-
-            #iconFrame.opencv {{
-                background-color: rgba(59, 130, 246, 0.1);
-            }}
-
-            #iconFrame.yolo {{
-                background-color: rgba(168, 85, 247, 0.1);
-            }}
-
-            #iconLabel {{
-                color: #ffffff;
-                font-size: 18px;
-            }}
-
-            #iconFrame.opencv #iconLabel {{
-                color: #60a5fa;
-            }}
-
-            #iconFrame.yolo #iconLabel {{
-                color: #c084fc;
-            }}
-
-            #cardTitle {{
-                color: #ffffff;
-                font-size: 14px;
-                font-weight: bold;
-            }}
-
-            #cardVersion {{
-                color: #6b7280;
-                font-size: 12px;
-            }}
-
-            #statusBadge {{
-                padding: 4px 12px;
-                border-radius: 12px;
-                font-size: 12px;
-                font-weight: bold;
-            }}
-
-            #statusBadge.active {{
-                background-color: rgba(34, 197, 94, 0.1);
-                color: #4ade80;
-                border: 1px solid rgba(34, 197, 94, 0.3);
-            }}
-
-            #statusBadge.inactive {{
-                background-color: rgba(107, 114, 128, 0.1);
-                color: #9ca3af;
-                border: 1px solid rgba(107, 114, 128, 0.3);
-            }}
-
-            #descLabel {{
-                color: #9ca3af;
-                font-size: 14px;
-            }}
-
-            #infoFrame {{
-                background-color: #1a1a1a;
-                border-radius: 4px;
-            }}
-
-            #infoLabel {{
-                color: #6b7280;
-                font-size: 12px;
-            }}
-
-            #infoValue {{
-                color: #ffffff;
-                font-size: 14px;
-            }}
-
-            #viewButton {{
-                background-color: transparent;
-                border: 1px solid #3a3a3a;
-                color: #9ca3af;
-                border-radius: 6px;
-                font-size: 13px;
-            }}
-
-            #viewButton:hover {{
-                background-color: #2a2a2a;
-                color: #ffffff;
-            }}
-
-            #updateButton {{
-                background-color: #f97316;
-                border: 1px solid #f97316;
-                color: #ffffff;
-                border-radius: 6px;
-                font-size: 13px;
-                font-weight: bold;
-            }}
-
-            #updateButton:hover {{
-                background-color: #ea580c;
-                border: 1px solid #ea580c;
-            }}
-
-            #deleteButton {{
-                background-color: transparent;
-                border: 1px solid rgba(239, 68, 68, 0.5);
-                color: #f87171;
-                border-radius: 6px;
-                font-size: 13px;
-            }}
-
-            #deleteButton:hover {{
-                background-color: rgba(239, 68, 68, 0.1);
-            }}
-        """)
+        """Apply styles to the main window from an external QSS file."""
+        self.apply_stylesheet()
+        self._register_stylesheet_watcher()
+
+    def apply_stylesheet(self):
+        """Load stylesheet template and apply runtime variables."""
+        try:
+            template = self.stylesheet_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            logger.error("Stylesheet file not found: %s", self.stylesheet_path)
+            return
+
+        stylesheet = self._inject_stylesheet_variables(template)
+        self.setStyleSheet(stylesheet)
+
+    def reload_stylesheet(self):
+        """Public helper to reload styles, useful during development."""
+        self.apply_stylesheet()
+        if self.stylesheet_watcher and self.stylesheet_path.exists():
+            watched_files = set(self.stylesheet_watcher.files())
+            if str(self.stylesheet_path) not in watched_files:
+                self.stylesheet_watcher.addPath(str(self.stylesheet_path))
+
+    def _inject_stylesheet_variables(self, template: str) -> str:
+        """Replace placeholder tokens with values from config and fonts."""
+        replacements = {f"@{name}": value for name, value in self.colors.items()}
+        font_family = self.custom_font.family() or "Arial"
+        replacements["@font_family"] = font_family
+
+        for placeholder, value in replacements.items():
+            template = template.replace(placeholder, value)
+        return template
+
+    def _register_stylesheet_watcher(self):
+        """Watch the stylesheet for changes to enable live reload."""
+        if self.stylesheet_watcher or not self.stylesheet_path.exists():
+            return
+
+        self.stylesheet_watcher = QFileSystemWatcher([str(self.stylesheet_path)])
+        self.stylesheet_watcher.fileChanged.connect(self.reload_stylesheet)
 
     def setup_connections(self):
         """Setup signal connections."""
-        self.min_button.clicked.connect(self.showMinimized)
-        self.max_button.clicked.connect(self.toggle_maximize)
-        self.close_button.clicked.connect(self.close)
+        pass
 
     def load_preferences(self) -> None:
         """Placeholder for loading persisted UI preferences."""
@@ -1116,22 +508,6 @@ class MainWindow(QMainWindow):
         window_geometry.moveCenter(center_point)
         self.move(window_geometry.topLeft())
         
-    def toggle_maximize(self):
-        """Toggle window maximize state."""
-        if self.isMaximized():
-            self.showNormal()
-            self.max_button.setText("□")
-            self.setProperty("maximized", False)
-        else:
-            self.showMaximized()
-            self.max_button.setText("❐")
-            self.setProperty("maximized", True)
-        
-        # 更新样式以反映最大化状态
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self.update()
-
     def update_user_info(self):
         """Update user information display."""
         # Placeholder for user info update
@@ -1184,3 +560,11 @@ class MainWindow(QMainWindow):
         """Handle window resize events."""
         super().resizeEvent(event)
         # 如果需要在窗口大小变化时执行特定操作，可以在这里添加代码
+
+    def changeEvent(self, event):
+        """Track window state changes to update style-sheet bindings."""
+        if event.type() == QEvent.Type.WindowStateChange:
+            self.setProperty("maximized", "true" if self.isMaximized() else "false")
+            self.style().unpolish(self)
+            self.style().polish(self)
+        super().changeEvent(event)

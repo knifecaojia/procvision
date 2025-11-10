@@ -5,7 +5,8 @@ Camera settings page for the industrial vision system.
 import logging
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, 
-    QLineEdit, QComboBox, QPushButton, QGridLayout, QSizePolicy
+    QLineEdit, QComboBox, QPushButton, QGridLayout, QSizePolicy,
+    QToolButton
 )
 from PySide6.QtCore import Qt
 
@@ -58,27 +59,35 @@ class CameraPage(QFrame):
         preview_layout.setContentsMargins(0, 0, 0, 0)
         preview_layout.setSpacing(10)
         
-        # Camera control buttons (moved to be above preview)
-        control_layout = QHBoxLayout()
-        control_layout.setSpacing(10)
-        
+        # Camera control toolbar row
+        controls_frame = QFrame()
+        controls_frame.setObjectName("previewToolbar")
+        controls_layout = QHBoxLayout(controls_frame)
+        controls_layout.setContentsMargins(8, 0, 8, 0)
+        controls_layout.setSpacing(2)
+        controls_frame.setFixedHeight(45)
+
         control_specs = [
-            ("connect", "连接相机"),
-            ("disconnect", "断开连接"),
-            ("startPreview", "开始预览"),
-            ("stopPreview", "停止预览"),
-            ("screenshot", "截图"),
-            ("record", "录像"),
+            ("connect", "连接相机", "⦿"),
+            ("disconnect", "断开连接", "⦸"),
+            ("startPreview", "开始预览", "▶"),
+            ("stopPreview", "停止预览", "■"),
+            ("screenshot", "截图", "⎙"),
+            ("record", "录像", "●"),
         ]
 
-        for control_id, text in control_specs:
-            button = QPushButton(text)
-            button.setObjectName("previewControlButton")
+        for control_id, tooltip, symbol in control_specs:
+            button = QToolButton()
+            button.setObjectName("previewToolButton")
             button.setProperty("controlId", control_id)
-            button.setFixedHeight(40)
-            control_layout.addWidget(button)
+            button.setToolTip(tooltip)
+            button.setText(symbol)
+            button.setCursor(Qt.PointingHandCursor)
+            button.setFixedSize(32, 32)
+            button.setStyleSheet("font-size: 24px;")
+            controls_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        control_layout.addStretch()
+        controls_layout.addStretch()
         
         # Camera preview area - Will expand to fill available space
         preview_label = QLabel("相机预览区域")
@@ -86,7 +95,7 @@ class CameraPage(QFrame):
         preview_label.setObjectName("previewLabel")
         preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         
-        preview_layout.addLayout(control_layout)
+        preview_layout.addWidget(controls_frame)
         preview_layout.addWidget(preview_label)
         
         # Right side - Camera parameters

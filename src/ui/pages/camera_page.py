@@ -3,12 +3,14 @@ Camera settings page for the industrial vision system.
 """
 
 import logging
+from pathlib import Path
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, 
     QLineEdit, QComboBox, QPushButton, QGridLayout, QSizePolicy,
     QToolButton
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
+from PySide6.QtGui import QIcon
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +21,7 @@ class CameraPage(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("cameraPage")
+        self.assets_dir = Path(__file__).resolve().parents[2] / "assets"
         self.init_ui()
         
     def init_ui(self):
@@ -68,23 +71,28 @@ class CameraPage(QFrame):
         controls_frame.setFixedHeight(45)
 
         control_specs = [
-            ("connect", "连接相机", "⦿"),
-            ("disconnect", "断开连接", "⦸"),
-            ("startPreview", "开始预览", "▶"),
-            ("stopPreview", "停止预览", "■"),
-            ("screenshot", "截图", "⎙"),
-            ("record", "录像", "●"),
+            ("connect", "连接相机", "connect.svg", "⦿"),
+            ("disconnect", "断开连接", "disconnect.svg", "⦸"),
+            ("startPreview", "开始预览", "preview.svg", "▶"),
+            ("stopPreview", "停止预览", "stop.svg", "■"),
+            ("screenshot", "截图", "snapshot.svg", "⎙"),
+            ("record", "录像", "record.svg", "●"),
         ]
 
-        for control_id, tooltip, symbol in control_specs:
+        for control_id, tooltip, icon_name, fallback_symbol in control_specs:
             button = QToolButton()
             button.setObjectName("previewToolButton")
             button.setProperty("controlId", control_id)
             button.setToolTip(tooltip)
-            button.setText(symbol)
             button.setCursor(Qt.PointingHandCursor)
             button.setFixedSize(32, 32)
-            button.setStyleSheet("font-size: 24px;")
+            icon_path = self.assets_dir / icon_name
+            if icon_path.exists():
+                button.setIcon(QIcon(str(icon_path)))
+                button.setIconSize(QSize(20, 20))
+            else:
+                button.setText(fallback_symbol)
+                button.setStyleSheet("font-size: 24px;")
             controls_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
 
         controls_layout.addStretch()

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -48,11 +48,12 @@ logger = logging.getLogger(__name__)
 class LoginWindow(QMainWindow):
     """Main ProcVision login window."""
 
-    def __init__(self, session_manager: Optional[SessionManager] = None) -> None:
+    def __init__(self, session_manager: Optional[SessionManager] = None, app_context: Optional[Any] = None) -> None:
         super().__init__()
 
         self.auth_service = AuthService()
         self.session_manager = session_manager or SessionManager(self.auth_service)
+        self.app_context = app_context
 
         self.setWindowTitle("ProcVision 登录")
         self.setFixedSize(1050, 700)
@@ -631,7 +632,7 @@ class LoginWindow(QMainWindow):
                 from src.ui.main_window import MainWindow
             except ImportError:  # pragma: no cover - fallback for script execution
                 from .main_window import MainWindow  # type: ignore
-            self.main_window = MainWindow(self.session_manager)
+            self.main_window = MainWindow(self.session_manager, app=self.app_context)
             self.main_window.show()
             logger.info("Navigated to main window")
         except Exception as exc:  # pragma: no cover - logging only

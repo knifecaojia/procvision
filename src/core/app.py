@@ -95,6 +95,20 @@ class IndustrialVisionApp:
             self.logger.error(f"Failed to initialize session manager: {e}")
             raise
 
+        # Initialize camera service
+        try:
+            try:
+                from ..camera import CameraService
+            except ImportError:
+                from src.camera import CameraService
+
+            self.camera_service = CameraService(self.config.camera)
+            self.logger.info("Camera service initialized")
+        except Exception as e:
+            self.logger.error(f"Failed to initialize camera service: {e}")
+            # Non-critical - camera features will be unavailable
+            self.camera_service = None
+
         # Initialize windows
         self.login_window = None
         self.main_window = None
@@ -151,7 +165,7 @@ class IndustrialVisionApp:
                 self.main_window = None
 
             # Create and show login window
-            self.login_window = LoginWindow(self.session_manager)
+            self.login_window = LoginWindow(self.session_manager, app_context=self)
             self.login_window.show()
 
             self.logger.info("Login window displayed")
@@ -177,7 +191,8 @@ class IndustrialVisionApp:
                 self.login_window = None
 
             # Create and show main window
-            self.main_window = MainWindow(self.session_manager)
+            # Create and show main window - pass self to provide access to camera_service
+            self.main_window = MainWindow(self.session_manager, self)
             self.main_window.show()
 
             self.logger.info("Main window displayed")
@@ -213,6 +228,17 @@ class IndustrialVisionApp:
         """Perform application cleanup before exit."""
         try:
             self.logger.info("Performing application cleanup")
+
+            # Cleanup camera service
+            if hasattr(self, 'camera_service') and self.camera_service:
+                try:
+                    if getattr(self.camera_service, "is_streaming", None) and self.camera_service.is_streaming():
+                        self.camera_service.stop_preview()
+                    if getattr(self.camera_service, "get_connected_camera", None) and self.camera_service.get_connected_camera():
+                        self.camera_service.disconnect_camera()
+                    self.logger.info("Camera service cleaned up")
+                except Exception as e:
+                    self.logger.error(f"Error cleaning up camera service: {e}")
 
             # Cleanup session
             if hasattr(self, 'session_manager') and self.session_manager:

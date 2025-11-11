@@ -68,10 +68,12 @@ class MainWindow(QMainWindow):
     # Signal emitted when user requests logout
     logout_requested = Signal()
 
-    def __init__(self, session_manager: SessionManager, config: Optional[AppConfig] = None):
+    def __init__(self, session_manager: SessionManager, app=None, config: Optional[AppConfig] = None):
         """Initialize the main window."""
         super().__init__()
         self.session_manager = session_manager
+        self.app = app  # Store app reference for shared services
+        self.camera_service = getattr(app, "camera_service", None)
         self.config: AppConfig = config or get_config()
         self.app_display_name = "ProcVision"
         self.colors = self.config.ui.colors
@@ -403,7 +405,7 @@ class MainWindow(QMainWindow):
         self.content_stack.setObjectName("contentStack")
 
         # Create pages using dynamic loading
-        self.camera_page = CameraPage()
+        self.camera_page = CameraPage(camera_service=self.camera_service)
         self.system_page = SystemPage()
         self.model_page = ModelPage()
         self.process_page = ProcessPage()  # 默认页面
@@ -592,7 +594,7 @@ class MainWindow(QMainWindow):
 
             # Show login window
             from .login_window import LoginWindow
-            self.login_window = LoginWindow(self.session_manager)
+            self.login_window = LoginWindow(self.session_manager, app_context=self.app)
             self.login_window.show()
 
         except Exception as e:

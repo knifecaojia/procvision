@@ -107,6 +107,25 @@ class LoggingConfig:
 
 
 @dataclass
+class CameraConfig:
+    """Camera system configuration settings."""
+
+    # SDK settings
+    sdk_path: Optional[str] = None
+
+    # Preview settings
+    enable_preview: bool = True
+    preview_fps_limit: int = 30
+
+    # Connection settings
+    auto_connect: bool = False
+    connection_timeout_ms: int = 5000
+
+    # Preset storage
+    presets_directory: str = "data/camera_presets"
+
+
+@dataclass
 class AppConfig:
     """Main application configuration."""
 
@@ -114,6 +133,7 @@ class AppConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     ui: UIConfig = field(default_factory=UIConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    camera: CameraConfig = field(default_factory=CameraConfig)
 
     # Application metadata
     app_name: str = "SMART-VISION"
@@ -183,6 +203,7 @@ class ConfigManager:
             'SMART_VISION_LOG_LEVEL': ('logging.level', str),
             'SMART_VISION_SESSION_TIMEOUT': ('auth.session_timeout_hours', int),
             'SMART_VISION_LANGUAGE': ('auth.default_language', str),
+            'SMART_VISION_CAMERA_SDK_PATH': ('camera.sdk_path', str),
         }
 
         for env_var, (config_path, value_type) in env_mappings.items():
@@ -216,6 +237,9 @@ class ConfigManager:
         if 'logging' in config_data:
             self._update_dataclass(self.config.logging, config_data['logging'])
 
+        if 'camera' in config_data:
+            self._update_dataclass(self.config.camera, config_data['camera'])
+
         # Update root level properties
         for key in ['app_name', 'app_version', 'app_title', 'debug_mode', 'dev_mode']:
             if key in config_data:
@@ -243,7 +267,8 @@ class ConfigManager:
             os.path.dirname(self.config.database.database_path),
             self.config.database.backup_directory,
             os.path.dirname(self.config.logging.file_path),
-            os.path.dirname(self.config_file_path)
+            os.path.dirname(self.config_file_path),
+            self.config.camera.presets_directory
         ]
 
         for directory in directories:
@@ -258,6 +283,7 @@ class ConfigManager:
                 'database': self._dataclass_to_dict(self.config.database),
                 'ui': self._dataclass_to_dict(self.config.ui),
                 'logging': self._dataclass_to_dict(self.config.logging),
+                'camera': self._dataclass_to_dict(self.config.camera),
                 'app_name': self.config.app_name,
                 'app_version': self.config.app_version,
                 'app_title': self.config.app_title,

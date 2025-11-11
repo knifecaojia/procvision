@@ -7,6 +7,9 @@ PySide6==6.8.0.2
 # 安全认证 - 密码哈希和会话管理
 bcrypt==4.2.0
 
+# 科学计算和图像处理 - NumPy for camera frame data
+numpy>=1.21.0
+
 # 开发和调试工具（可选）
 # Development and debugging tools (optional)
 

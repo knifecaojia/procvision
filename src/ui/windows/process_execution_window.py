@@ -1194,7 +1194,7 @@ class ProcessExecutionWindow(QWidget):
     def create_step_list_panel(self) -> QWidget:
         """Create the left sidebar with scrollable step list."""
         panel = QFrame()
-        panel.setFixedWidth(288)
+        panel.setFixedWidth(368)
         panel.setObjectName("stepListPanel")
         panel.setStyleSheet("""
             QFrame#stepListPanel {
@@ -1212,7 +1212,7 @@ class ProcessExecutionWindow(QWidget):
         header.setStyleSheet("""
             background-color: #1e1e1e;
             color: #ffffff;
-            font-size: 16px;
+            font-size: 24px;
             font-weight: bold;
             padding: 12px;
             border-bottom: 1px solid #3a3a3a;
@@ -1268,7 +1268,8 @@ class ProcessExecutionWindow(QWidget):
         card = QFrame()
         card.setObjectName(f"stepCard_{step.id}")
         card.setCursor(Qt.CursorShape.PointingHandCursor)
-        card.setMinimumHeight(56)
+        # 增加最小高度以适配放大后的字体，避免内容垂直被裁剪
+        card.setMinimumHeight(84)
 
         # Style based on status
         if step.status == 'current':
@@ -1309,19 +1310,30 @@ class ProcessExecutionWindow(QWidget):
 
         name_label = QLabel(step.name)
         if step.status == 'current':
-            name_label.setStyleSheet("font-size: 17px; color: #fb923c; font-weight: bold;")
+            name_label.setStyleSheet("font-size: 26px; color: #fb923c; font-weight: bold;")
         elif step.status == 'completed':
-            name_label.setStyleSheet("font-size: 17px; color: #22c55e;")
+            name_label.setStyleSheet("font-size: 26px; color: #22c55e;")
         else:
-            name_label.setStyleSheet("font-size: 17px; color: #9ca3af;")
+            name_label.setStyleSheet("font-size: 26px; color: #9ca3af;")
+        # 允许根据内容自适应高度
+        try:
+            name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        except Exception:
+            pass
 
         desc_label = QLabel(step.description)
         if step.status == 'current':
-            desc_label.setStyleSheet("font-size: 14px; color: #ffffff;")
+            desc_label.setStyleSheet("font-size: 21px; color: #ffffff;")
         elif step.status == 'completed':
-            desc_label.setStyleSheet("font-size: 14px; color: #d1d5db;")
+            desc_label.setStyleSheet("font-size: 21px; color: #d1d5db;")
         else:
-            desc_label.setStyleSheet("font-size: 14px; color: #6b7280;")
+            desc_label.setStyleSheet("font-size: 21px; color: #6b7280;")
+        # 开启自动换行，避免文本被裁剪；允许根据内容自适应高度
+        try:
+            desc_label.setWordWrap(True)
+            desc_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        except Exception:
+            pass
 
         text_layout.addWidget(name_label)
         text_layout.addWidget(desc_label)

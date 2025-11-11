@@ -46,11 +46,13 @@ class PreviewWorker(QtCore.QThread):
                 LOG.error(error_msg)
                 self.error_occurred.emit(error_msg)
                 self.stats_updated.emit({"error": str(exc)})
+                self._running = False
                 break
             except Exception as exc:
                 error_msg = f"Unexpected error: {exc}"
                 LOG.error(error_msg, exc_info=True)
                 self.error_occurred.emit(error_msg)
+                self._running = False
                 break
 
             if frame is None:
@@ -91,5 +93,6 @@ class PreviewWorker(QtCore.QThread):
         LOG.debug("Stopping preview worker...")
         self._running = False
         # Wait up to 2 seconds for thread to finish
-        self.wait(2000)
+        if not self.wait(2000):
+            LOG.warning("Preview worker did not terminate promptly")
         LOG.debug("Preview worker stopped")

@@ -9,16 +9,18 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 from ..components.process_card import ProcessCard
+from ..windows.process_execution_window import ProcessExecutionWindow
 
 logger = logging.getLogger(__name__)
 
 
 class ProcessPage(QFrame):
     """Process information page implementation."""
-    
-    def __init__(self, parent=None):
+
+    def __init__(self, parent=None, camera_service=None):
         super().__init__(parent)
         self.setObjectName("processPage")
+        self.camera_service = camera_service
         self.init_ui()
         
     def init_ui(self):
@@ -130,6 +132,7 @@ class ProcessPage(QFrame):
 
         for index, process_data in enumerate(processes_data):
             card = ProcessCard(process_data)
+            card.start_process_clicked.connect(self.on_start_process)
             cards_layout.addWidget(card, index, 0)
 
         # Add stretch to push cards up
@@ -139,3 +142,17 @@ class ProcessPage(QFrame):
 
         scroll_area.setWidget(cards_container)
         layout.addWidget(scroll_area)
+
+    def on_start_process(self, process_data: dict):
+        """Handle start process signal from process card."""
+        logger.info(f"Launching process execution window for: {process_data['name']}")
+
+        # Create and show process execution window with camera service
+        self.execution_window = ProcessExecutionWindow(
+            process_data,
+            None,
+            camera_service=self.camera_service
+        )
+        self.execution_window.show_centered()
+
+        logger.info("Process execution window launched")

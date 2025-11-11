@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
         self.camera_page = CameraPage(camera_service=self.camera_service)
         self.system_page = SystemPage()
         self.model_page = ModelPage()
-        self.process_page = ProcessPage()  # 默认页面
+        self.process_page = ProcessPage(camera_service=self.camera_service)  # 默认页面
         self.records_page = RecordsPage()
 
         # Add pages to stack

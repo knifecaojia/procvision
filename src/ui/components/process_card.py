@@ -6,13 +6,16 @@ import logging
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QGridLayout
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 
 logger = logging.getLogger(__name__)
 
 
 class ProcessCard(QFrame):
     """Process card widget to display process information."""
+
+    # Signal emitted when "启动工艺" button is clicked
+    start_process_clicked = Signal(dict)  # Emits process_data
 
     def __init__(self, process_data, parent=None):
         super().__init__(parent)
@@ -236,8 +239,14 @@ class ProcessCard(QFrame):
         start_btn = QPushButton("启动工艺")
         start_btn.setObjectName("startButton")
         start_btn.setFixedHeight(32)
+        start_btn.clicked.connect(self.on_start_process_clicked)
 
         actions_layout.addWidget(view_btn)
         actions_layout.addWidget(start_btn)
 
         layout.addLayout(actions_layout)
+
+    def on_start_process_clicked(self):
+        """Handle start process button click."""
+        logger.info(f"Start process clicked for: {self.process_data['name']}")
+        self.start_process_clicked.emit(self.process_data)

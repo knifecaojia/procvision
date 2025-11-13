@@ -1,148 +1,115 @@
-# 工业视觉登录页面
+# SMART-VISION 工业视觉系统
 
-基于 PySide6 创建的工业视觉软件登录界面，严格遵循工业视觉 UI 设计规范。
+基于 PySide6 的工业视觉桌面应用，包含用户认证、相机管理、参数预设、相机标定等完整功能，遵循工业视觉 UI 设计规范。
 
-## 功能特性
-
-- ✅ 符合工业视觉 UI 设计规范的深色主题
-- ✅ 左右分栏布局，左侧显示系统信息，右侧为登录表单
-- ✅ 支持用户名/密码登录
-- ✅ 语言切换功能（中文/英文）
-- ✅ 记住用户名选项
-- ✅ 摄像头连接状态显示
-- ✅ 主题切换功能按钮
-- ✅ 悬停和焦点状态的交互反馈
-
-## 设计规范
-
-- **主色调**: 深石墨色 `#1A1D23` 和钢铁灰 `#1F232B`
-- **强调色**: 悬停橙色 `#FF8C32`
-- **文本颜色**: 北极白 `#F2F4F8` 和冷灰色 `#8C92A0`
-- **字体**: 无衬线字体，标题和状态信息使用全大写
-- **布局**: 严格对齐，合理留白，工业质感
-
-## 运行要求
+## 技术栈
 
 - Python 3.8+
-- PySide6
+- PySide6 6.8.0.2
+- OpenCV 4.5.0+
+- NumPy 1.21.0+
+- bcrypt 4.2.0
+- 海康威视 MVS SDK（可选）
 
-## 环境设置
+## 核心功能
 
-### 方法1: 自动设置虚拟环境（推荐）
-```bash
-# 运行自动设置脚本
-python setup_env.py
+- 登录认证：用户名/密码、语言切换（中文/英文）、记住用户名、安全哈希存储
+- 相机管理：发现与连接、实时预览、参数调节、预设管理、截图
+- 相机标定：棋盘格角点检测、≥15 张采集、内参/畸变系数计算、重投影误差评估、历史管理
+- UI 交互：工业深色主题、悬停/焦点反馈、参数滑块联动、进度与状态提示
+- 工艺执行：工艺流程页面与执行窗口（进度监控）
 
-# 激活虚拟环境（Windows）
-venv\Scripts\activate
-
-# 激活虚拟环境（Linux/Mac）
-source venv/bin/activate
-
-# 运行登录页面
-python login_page.py
-```
-
-### 方法2: 手动安装依赖
-```bash
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境（Windows）
-venv\Scripts\activate
-
-# 激活虚拟环境（Linux/Mac）
-source venv/bin/activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 运行登录页面
-python login_page.py
-```
-
-## 快速开始（无需虚拟环境）
-
-如果你不想使用虚拟环境，可以直接安装依赖：
-
-```bash
-pip install PySide6==6.8.0
-python login_page.py
-```
-
-## 界面预览
-
-登录界面包含以下主要组件：
-
-### 左侧面板
-- **SMART-VISION** 系统标题
-- 版本信息显示
-- 摄像头连接状态列表
-- 状态指示灯（绿色=已连接，灰色=未连接）
-
-### 右侧面板
-- **USER LOGIN** 登录表单标题
-- 用户名输入框（默认占位符: admin）
-- 密码输入框（遮蔽显示）
-- 语言选择下拉框（中/English）
-- "Remember username" 复选框
-- **LOGIN** 橙色主按钮
-- 底部 Preset 和 Theme 功能按钮
-
-## 交互特性
-
-- 所有输入框支持焦点状态，边框变为橙色
-- 登录按钮支持悬停效果
-- 底部按钮支持边框高亮
-- 符合工业软件的操作习惯
-
-## 文件结构
+## 目录结构（精简）
 
 ```
 05ui-poc/
-├── login_page.py          # 登录页面主程序
-├── run_login.py          # 启动脚本
-├── setup_env.py          # 虚拟环境自动设置脚本
-├── requirements.txt      # Python依赖库列表
-├── run.bat              # Windows快速启动脚本
-├── run.sh               # Linux/Mac快速启动脚本
-├── ui_design_guidelines.md  # UI设计规范文档
-├── login.jpg             # 参考设计图片
-└── README.md             # 说明文档
+├── src/
+│  ├── core/                 # 应用核心（入口、配置、会话）
+│  │  ├── app.py             # 应用入口（main）
+│  │  ├── config.py          # 配置与环境变量
+│  │  └── session.py         # 会话管理
+│  ├── auth/                 # 认证模块（模型、服务、存储）
+│  ├── camera/               # 相机模块（服务、后端、标定）
+│  │  └── calibration/       # 标定数据/算法/持久化
+│  ├── ui/                   # UI（主窗体、登录、页面与组件）
+│  │  ├── pages/camera_calibration_dialog.py
+│  │  └── styles/main_window.qss
+│  └── utils/                # 校验与通用工具
+├── scripts/create_default_user.py
+├── requirements.txt
+├── run_app.py               # 启动完整应用
+├── run_login.py             # 登录页面预览
+├── run.bat / run.sh         # 一键启动登录页（含 venv）
+├── setup_env.py             # 自动创建 venv 并安装依赖
+├── config/app_config.json   # 运行时配置（自动生成/更新）
+├── test_login.py / test_model_card.py
+└── README.md
 ```
 
-## 快速启动方式
+## 安装与运行
 
-### Windows用户
-双击 `run.bat` 文件即可自动设置环境并启动
+- 自动安装（推荐）
+  - `python setup_env.py`
+  - Windows 激活：`venv\Scripts\activate`
+  - Linux/macOS 激活：`source venv/bin/activate`
 
-### Linux/Mac用户
-```bash
-./run.sh
+- 手动安装
+  - `python -m venv venv && <激活虚拟环境>`
+  - `pip install -r requirements.txt`
+
+- 快速试用（无需 venv）
+  - `pip install PySide6==6.8.0.2 opencv-python>=4.5.0 numpy>=1.21.0 bcrypt==4.2.0`
+
+## 启动方式
+
+- 完整应用：`python run_app.py`
+- 登录页面：`python run_login.py`，或 Windows `./run.bat`，Linux/macOS `./run.sh`
+
+## 默认账户
+
+- 创建默认用户：`python scripts/create_default_user.py`
+- 默认用户名/密码：`admin` / `admin123`（仅用于开发测试，生产请修改）
+
+## 相机标定使用
+
+- 在“相机页面”进入“标定”对话框，设置棋盘格行/列与方格尺寸
+- 采集 ≥15 张不同角度/距离的图像，执行标定并查看重投影误差（建议 <1.0 像素）
+- 结果自动保存为 JSON，按相机型号分目录管理
+
+保存路径（系统自动选择）：
+- Windows：`C:\ProgramData\SMART-VISION\calibration\<相机型号>\YYYYMMDD_HHMMSS_calibration.json`
+- Linux：`/etc/smart-vision/calibration/<相机型号>/`
+- macOS：`/Library/Application Support/SMART-VISION/calibration/<相机型号>/`
+
+## 配置与环境变量
+
+- `SMART_VISION_DEBUG`（bool）：启用调试模式
+- `SMART_VISION_DEV_MODE`（bool）：开发模式
+- `SMART_VISION_DB_PATH`（str）：认证数据库路径（默认 `data/auth.db`）
+- `SMART_VISION_LOG_LEVEL`（str）：日志级别（INFO/DEBUG 等）
+- `SMART_VISION_SESSION_TIMEOUT`（int）：会话超时小时数
+- `SMART_VISION_LANGUAGE`（str）：默认语言（“中”/“English”）
+- `SMART_VISION_CAMERA_SDK_PATH`（str）：工业相机 SDK 路径
+
+示例（Windows）：
+```
+set SMART_VISION_LOG_LEVEL=DEBUG
+set SMART_VISION_LANGUAGE=English
+python run_app.py
 ```
 
-### 虚拟环境使用
-```bash
-# 激活虚拟环境
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
+## 日志与数据
 
-# 退出虚拟环境
-deactivate
-```
+- 日志文件：`logs/app.log`
+- 认证数据库：`data/auth.db`（自动创建）
+- 相机预设：`data/camera_presets/`
 
-## 技术实现
+## 测试
 
-- **框架**: PySide6 (Qt6 Python 绑定)
-- **布局管理**: QSplitter 实现左右分栏
-- **样式系统**: QSS (Qt Style Sheets)
-- **响应式设计**: 固定尺寸 1200x700，适合工业显示设备
+- 登录模块快速检查：`python test_login.py`
+- 组件演示（模型卡片）：`python test_model_card.py`
 
-## 后续扩展
+## 许可与支持
 
-- 添加实际的用户认证逻辑
-- 连接数据库验证用户信息
-- 实现主题切换功能
-- 添加多语言支持
-- 集成摄像头连接状态检测
-- 添加预设配置功能
+- Copyright (c) 2025 SMART-VISION Project
+- 问题反馈与建议：请提交 Issue 或联系维护团队

@@ -10,6 +10,9 @@ bcrypt==4.2.0
 # 科学计算和图像处理 - NumPy for camera frame data
 numpy>=1.21.0
 
+# 计算机视觉和相机标定 - OpenCV for chessboard detection and calibration
+opencv-python>=4.5.0
+
 # 开发和调试工具（可选）
 # Development and debugging tools (optional)
 

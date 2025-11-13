@@ -42,6 +42,22 @@ class HikvisionBackend(CameraBackend):  # pragma: no cover - requires vendor SDK
     # ------------------------------------------------------------------
     def _load_sdk_modules(self, sdk_path: Optional[str]) -> None:
         search_paths = []
+        # ============================================================
+        # VVVV 在这里添加下面的代码 VVVV
+        # ============================================================
+
+        # 针对 Python 3.8+ 的DLL加载策略，主动添加SDK运行时目录
+        # 这个目录包含了 MvCameraControl.dll 及其所有依赖项
+        dll_runtime_path = r"C:\\Program Files (x86)\\Common Files\\MVS\\Runtime\Win64_x64"
+        
+        # 检查Python版本和路径是否存在
+        if sys.version_info >= (3, 8) and os.path.exists(dll_runtime_path):
+            print(f"INFO - Adding DLL search directory for Python 3.8+: {dll_runtime_path}")
+            os.add_dll_directory(dll_runtime_path)
+
+        # ============================================================
+        # ^^^^ 添加代码结束 ^^^^
+        # ============================================================
         env_path = os.getenv("MVCAM_COMMON_RUNENV")
         if env_path:
             # Add DLL path to system PATH for Windows

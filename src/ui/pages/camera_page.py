@@ -6,17 +6,28 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+import cv2
+import numpy as np
+from PySide6.QtCore import Qt, QSize, Slot, QTimer
+from PySide6.QtGui import QIcon, QPixmap, QImage
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QComboBox, QPushButton, QGridLayout, QSizePolicy,
-    QToolButton, QMessageBox, QInputDialog, QScrollArea, QFormLayout
+    QToolButton, QMessageBox, QInputDialog, QScrollArea, QFormLayout,
+    QListWidget, QListWidgetItem, QSpinBox, QDoubleSpinBox,
+    QGroupBox, QProgressBar, QLayout
 )
-from PySide6.QtCore import Qt, QSize, Slot
-from PySide6.QtGui import QIcon, QPixmap
 
 from src.camera.camera_service import CameraService
 from src.camera.types import CameraInfo
+from src.camera.calibration import (
+    CalibrationService,
+    ChessboardConfig,
+    CalibrationResult,
+    CalibrationStorage
+)
 from src.ui.components import SliderField, PreviewWorker
+from .camera_calibration_panel import CameraCalibrationPanel
 
 logger = logging.getLogger("camera.ui")
 
@@ -43,12 +54,18 @@ class CameraPage(QFrame):
         self.fps_value_label: Optional[QLabel] = None
         self.preset_combo: Optional[QComboBox] = None
         self.params_container: Optional[QFrame] = None
+        self.param_controls_holder: Optional[QFrame] = None
+        self.param_controls_layout: Optional[QVBoxLayout] = None
+        self.calibration_panel_container: Optional[QFrame] = None
+        self.calibration_panel: Optional[CameraCalibrationPanel] = None
+        self.calibration_panel_visible = False
 
         # Control buttons
         self.connect_btn: Optional[QToolButton] = None
         self.disconnect_btn: Optional[QToolButton] = None
         self.start_preview_btn: Optional[QToolButton] = None
         self.stop_preview_btn: Optional[QToolButton] = None
+        self.screenshot_btn: Optional[QToolButton] = None
 
         self.init_ui()
         self.update_connection_state()
@@ -121,9 +138,11 @@ class CameraPage(QFrame):
 
     def _apply_service_unavailable_state(self):
         """Disable interactive controls when camera service is missing."""
-        for button in (self.connect_btn, self.disconnect_btn, self.start_preview_btn, self.stop_preview_btn):
+        for button in (self.connect_btn, self.disconnect_btn, self.start_preview_btn, self.stop_preview_btn, self.screenshot_btn, self.calibrate_btn):
             if button:
                 button.setEnabled(False)
+        if self.calibrate_btn:
+            self._set_calibrate_button_checked(False)
 
         if self.preview_label:
             self.preview_label.setText("相机服务不可用\n请通过完整应用启动")
@@ -146,11 +165,53 @@ class CameraPage(QFrame):
         """Show or hide the parameter panel."""
         if self.params_frame:
             self.params_frame.setVisible(visible)
+        if not visible:
+            self._hide_calibration_panel()
+
+    def _clear_layout(self, layout: QLayout):
+        """Remove all child widgets/layouts from the given layout."""
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget:
+                widget.deleteLater()
+            if child_layout:
+                self._clear_layout(child_layout)
+
+    def _ensure_calibration_panel(self) -> Optional[CameraCalibrationPanel]:
+        """Create calibration panel widget if needed."""
+        if not self.camera_service:
+            return None
+
+        if not self.calibration_panel:
+            self.calibration_panel = CameraCalibrationPanel(self.camera_service, self)
+            if self.calibration_panel_container and self.calibration_panel_container.layout():
+                self.calibration_panel_container.layout().addWidget(self.calibration_panel)
+
+        return self.calibration_panel
+
+    def _hide_calibration_panel(self):
+        """Hide calibration panel and stop its activity."""
+        if self.calibration_panel:
+            self.calibration_panel.deactivate()
+        self.calibration_panel_visible = False
+        if self.calibration_panel_container:
+            self.calibration_panel_container.setVisible(False)
+        self._set_calibrate_button_checked(False)
+
+    def _set_calibrate_button_checked(self, checked: bool):
+        """Helper to update calibrate button state without triggering callbacks."""
+        if self.calibrate_btn:
+            self.calibrate_btn.blockSignals(True)
+            self.calibrate_btn.setChecked(checked)
+            self.calibrate_btn.blockSignals(False)
 
     def _create_preview_section(self) -> QFrame:
         """Create the preview section with controls and preview area."""
         preview_frame = QFrame()
         preview_frame.setObjectName("previewFrame")
+        preview_frame.setMinimumWidth(560)
         preview_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         preview_layout = QVBoxLayout(preview_frame)
@@ -171,6 +232,7 @@ class CameraPage(QFrame):
             ("startPreview", "开始预览", "preview.svg", "▶", self.on_start_preview),
             ("stopPreview", "停止预览", "stop.svg", "■", self.on_stop_preview),
             ("screenshot", "截图", "snapshot.svg", "⎙", self.on_screenshot),
+            ("calibrate", "相机标定", "calibrate.svg", "📐", self.on_calibrate_camera),
         ]
 
         for control_id, tooltip, icon_name, fallback_symbol, callback in control_specs:
@@ -180,6 +242,8 @@ class CameraPage(QFrame):
             button.setToolTip(tooltip)
             button.setCursor(Qt.PointingHandCursor)
             button.setFixedSize(32, 32)
+            if control_id == "calibrate":
+                button.setCheckable(True)
             button.clicked.connect(callback)
 
             icon_path = self.assets_dir / icon_name
@@ -201,6 +265,10 @@ class CameraPage(QFrame):
                 self.start_preview_btn = button
             elif control_id == "stopPreview":
                 self.stop_preview_btn = button
+            elif control_id == "screenshot":
+                self.screenshot_btn = button
+            elif control_id == "calibrate":
+                self.calibrate_btn = button
 
         controls_layout.addStretch()
 
@@ -220,7 +288,7 @@ class CameraPage(QFrame):
         """Create the parameters section with sliders and presets."""
         params_frame = QFrame()
         params_frame.setObjectName("paramsFrame")
-        params_frame.setFixedWidth(320)
+        params_frame.setFixedWidth(400)
         self.params_frame = params_frame
 
         params_layout = QVBoxLayout(params_frame)
@@ -264,6 +332,27 @@ class CameraPage(QFrame):
         self.params_container.setObjectName("paramsContainer")
         self.params_container.setStyleSheet("background: transparent;")
         self.params_container.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        container_layout = QVBoxLayout(self.params_container)
+        container_layout.setContentsMargins(0, 0, 0, 10)
+        container_layout.setSpacing(15)
+
+        self.param_controls_holder = QFrame()
+        self.param_controls_holder.setObjectName("paramControlsHolder")
+        self.param_controls_layout = QVBoxLayout(self.param_controls_holder)
+        self.param_controls_layout.setContentsMargins(0, 0, 0, 0)
+        self.param_controls_layout.setSpacing(15)
+        container_layout.addWidget(self.param_controls_holder)
+
+        self.calibration_panel_container = QFrame()
+        self.calibration_panel_container.setObjectName("calibrationPanelContainer")
+        self.calibration_panel_container.setVisible(False)
+        calib_layout = QVBoxLayout(self.calibration_panel_container)
+        calib_layout.setContentsMargins(0, 0, 0, 0)
+        calib_layout.setSpacing(10)
+
+        container_layout.addWidget(self.calibration_panel_container)
+        container_layout.addStretch()
+
         scroll_area.setWidget(self.params_container)
 
         params_layout.addWidget(scroll_area)
@@ -330,20 +419,19 @@ class CameraPage(QFrame):
 
     def rebuild_parameter_controls(self):
         """Rebuild parameter controls based on connected camera."""
-        if not self.params_container:
+        if not self.param_controls_layout:
+            if not self.param_controls_holder:
+                return
+            self.param_controls_layout = QVBoxLayout(self.param_controls_holder)
+            self.param_controls_layout.setContentsMargins(0, 0, 0, 0)
+            self.param_controls_layout.setSpacing(15)
+
+        controls_layout = self.param_controls_layout
+        if not controls_layout:
             return
 
-        # Ensure container layout exists
-        container_layout = self.params_container.layout()
-        if not container_layout:
-            container_layout = QVBoxLayout(self.params_container)
-
         # Clear existing widgets
-        while container_layout.count():
-            item = container_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
+        self._clear_layout(controls_layout)
 
         self.parameter_sliders.clear()
 
@@ -351,8 +439,8 @@ class CameraPage(QFrame):
             label = QLabel("相机服务未初始化，参数设置不可用")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setObjectName("paramLabel")
-            container_layout.addWidget(label)
-            container_layout.addStretch()
+            controls_layout.addWidget(label)
+            controls_layout.addStretch()
             return
 
         # Get parameters from camera
@@ -361,8 +449,8 @@ class CameraPage(QFrame):
             label = QLabel("无可用参数")
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setObjectName("paramLabel")
-            container_layout.addWidget(label)
-            container_layout.addStretch()
+            controls_layout.addWidget(label)
+            controls_layout.addStretch()
             return
 
         form_layout = QFormLayout()
@@ -403,8 +491,8 @@ class CameraPage(QFrame):
             form_layout.addRow(label, slider)
 
         # Add form layout to container
-        container_layout.addLayout(form_layout)
-        container_layout.addStretch()
+        controls_layout.addLayout(form_layout)
+        controls_layout.addStretch()
 
     @Slot()
     def on_connect_camera(self):
@@ -504,8 +592,55 @@ class CameraPage(QFrame):
     @Slot()
     def on_screenshot(self):
         """Take a screenshot."""
+        if not self.camera_service or not self.camera_service.is_streaming():
+            QMessageBox.information(self, "提示", "截图仅在预览进行时可用，请先开始预览。")
+            return
         # TODO: Implement screenshot functionality
         QMessageBox.information(self, "提示", "截图功能开发中")
+
+    @Slot()
+    def on_calibrate_camera(self):
+        """Toggle inline camera calibration panel."""
+        toggle_on = True
+        if self.calibrate_btn and self.calibrate_btn.isCheckable():
+            toggle_on = self.calibrate_btn.isChecked()
+
+        if not toggle_on:
+            self._hide_calibration_panel()
+            return
+
+        if not self._require_service("打开标定面板"):
+            self._set_calibrate_button_checked(False)
+            return
+
+        try:
+            camera = self.camera_service.get_connected_camera()
+            if not camera:
+                QMessageBox.warning(self, "错误", "请先连接相机")
+                self._set_calibrate_button_checked(False)
+                return
+
+            if not self.camera_service.is_streaming():
+                self.on_start_preview()
+
+            panel = self._ensure_calibration_panel()
+            if not panel:
+                QMessageBox.warning(self, "错误", "初始化标定面板失败")
+                self._set_calibrate_button_checked(False)
+                return
+
+            if panel.activate():
+                self.calibration_panel_visible = True
+                if self.calibration_panel_container:
+                    self.calibration_panel_container.setVisible(True)
+            else:
+                QMessageBox.warning(self, "错误", "标定面板不可用")
+                self._set_calibrate_button_checked(False)
+
+        except Exception as exc:
+            logger.error("Calibration dialog error: %s", exc, exc_info=True)
+            self._set_calibrate_button_checked(False)
+            QMessageBox.critical(self, "错误", f"无法打开标定面板:\n{exc}")
 
     @Slot(object)
     def on_frame_ready(self, image):
@@ -644,6 +779,10 @@ class CameraPage(QFrame):
             self.start_preview_btn.setEnabled(is_connected and not is_streaming)
         if self.stop_preview_btn:
             self.stop_preview_btn.setEnabled(is_streaming)
+        if self.screenshot_btn:
+            self.screenshot_btn.setEnabled(is_streaming)
+        if self.calibrate_btn:
+            self.calibrate_btn.setEnabled(is_connected)
 
         # Update status labels
         if is_connected:
@@ -660,3 +799,5 @@ class CameraPage(QFrame):
     def cleanup(self):
         """Cleanup resources."""
         self.on_stop_preview()
+        if self.calibration_panel:
+            self.calibration_panel.deactivate()

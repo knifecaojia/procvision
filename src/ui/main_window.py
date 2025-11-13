@@ -99,6 +99,10 @@ class MainWindow(QMainWindow):
         # Set default page
         self.show_process_page()
 
+        # Default to maximized window after login
+        self.showMaximized()
+        self.setProperty("maximized", "true")
+
     def _load_custom_font(self):
         """Load Source Han Sans font for the main window and its widgets."""
         font_path = Path(__file__).resolve().parent.parent / "assets" / "SourceHanSansSC-Normal-2.otf"

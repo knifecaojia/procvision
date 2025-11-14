@@ -683,7 +683,7 @@ class HikvisionDevice(BackendDevice):  # pragma: no cover - requires vendor SDK
         convert_param.nSrcDataLen = frame_info.nFrameLen
         convert_param.enSrcPixelType = frame_info.enPixelType
         convert_param.enDstPixelType = self._backend._PixelType_RGB
-        convert_param.pDstBuffer = dst_buffer.ctypes.data_as(ctypes.c_void_p)
+        convert_param.pDstBuffer = dst_buffer.ctypes.data_as(ctypes.POINTER(ctypes.c_ubyte))
         convert_param.nDstBufferSize = dst_buffer.size
 
         ret = self._camera.MV_CC_ConvertPixelType(convert_param)

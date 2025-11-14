@@ -18,6 +18,9 @@ from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent,
 from PySide6.QtCore import QRect
 from PySide6.QtSvgWidgets import QSvgWidget
 from datetime import datetime
+import numpy as np
+import importlib.util
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -125,13 +128,17 @@ class ProcessExecutionWindow(QWidget):
 
         # State management
         self.product_sn = "SN-2025-VM-00123"
-        self.order_number = process_data.get('name', 'ME-ASM-2024-001')
+        self.order_number = process_data.get('pid', process_data.get('name', 'ME-ASM-2024-001'))
         self.operator_name = "张三"
         self.operator_station = "A01"
         self.network_status: Literal['online', 'offline'] = "online"
-        self.total_steps = process_data.get('steps', 12)
+        self.total_steps = len(process_data.get('steps_detail', [])) or process_data.get('steps', 12)
         self.current_step_index = 0
         self.detection_status: DetectionStatus = "idle"
+        self.is_simulated = self._is_simulated_process()
+        self._last_qimage: Optional[QImage] = None
+        self._last_display_size = None
+        self.detection_boxes: List[QRect] = []
         # Overlay-related attributes (initialized early to avoid AttributeError)
         self.overlay_widget: Optional[QWidget] = None
         self.pass_overlay: Optional[QWidget] = None
@@ -205,7 +212,23 @@ class ProcessExecutionWindow(QWidget):
         logger.info("Custom font applied to ProcessExecutionWindow: %s", font_family)
 
     def _initialize_steps(self) -> List[ProcessStep]:
-        """Initialize process steps with sample data."""
+        """Initialize process steps from provided JSON (steps_detail) or fallback."""
+        provided = self.process_data.get('steps_detail')
+        steps: List[ProcessStep] = []
+        if isinstance(provided, list) and provided:
+            for i, item in enumerate(provided):
+                step_number = item.get('step_number', i + 1)
+                step_name = item.get('step_name', f"步骤 {step_number}")
+                operation_guide = item.get('operation_guide', step_name)
+                status: StepStatus = 'current' if i == 0 else 'pending'
+                steps.append(ProcessStep(
+                    id=i,
+                    name=(step_name if step_name else f"步骤 {step_number}"),
+                    description=operation_guide,
+                    status=status
+                ))
+            return steps
+
         step_templates = [
             ("步骤 1", "安装电容 C101"),
             ("步骤 2", "安装电容 C102"),
@@ -220,8 +243,6 @@ class ProcessExecutionWindow(QWidget):
             ("步骤 11", "电气测试"),
             ("步骤 12", "最终检验"),
         ]
-
-        steps = []
         for i, (name, description) in enumerate(step_templates[: self.total_steps]):
             status: StepStatus = 'current' if i == 0 else 'pending'
             steps.append(ProcessStep(
@@ -230,7 +251,6 @@ class ProcessExecutionWindow(QWidget):
                 description=description,
                 status=status
             ))
-
         return steps
 
     def get_current_step(self) -> Optional[ProcessStep]:
@@ -320,7 +340,7 @@ class ProcessExecutionWindow(QWidget):
         return header_frame
 
     def create_product_info_section(self) -> QWidget:
-        """Create the left section with product SN and order number."""
+        """Create the left section with product SN, PID, and algorithm info."""
         section = QWidget()
         section.setObjectName("productInfoSection")
         section.setStyleSheet("""
@@ -344,9 +364,19 @@ class ProcessExecutionWindow(QWidget):
         sn_widget = self.create_info_item("📦", "产品 SN", self.product_sn)
         layout.addWidget(sn_widget)
 
-        # Order number
-        order_widget = self.create_info_item("📄", "订单号", self.order_number)
-        layout.addWidget(order_widget)
+        # PID
+        pid_widget = self.create_info_item("🏷", "PID", self.order_number)
+        layout.addWidget(pid_widget)
+
+        # Algorithm name
+        algo_name = self.process_data.get('algorithm_name', self.process_data.get('name', ''))
+        if algo_name:
+            layout.addWidget(self.create_info_item("🧠", "算法", str(algo_name)))
+
+        # Algorithm version
+        algo_ver = self.process_data.get('algorithm_version', self.process_data.get('version', ''))
+        if algo_ver:
+            layout.addWidget(self.create_info_item("🔖", "版本", str(algo_ver)))
 
         return section
 
@@ -742,12 +772,20 @@ class ProcessExecutionWindow(QWidget):
             self.camera_toggle_btn.setText("📷 停止相机")
 
             logger.info(f"Camera preview started: {camera_info.name}")
+            try:
+                self.rebuild_status_section()
+            except Exception:
+                pass
 
         except Exception as e:
             logger.error(f"Failed to start camera preview: {e}")
             self.camera_toggle_btn.setChecked(False)
             if self.camera_service.current_camera:
                 self.camera_service.disconnect_camera()
+            try:
+                self.rebuild_status_section()
+            except Exception:
+                pass
 
     def stop_camera_preview(self):
         """Stop camera preview."""
@@ -777,31 +815,35 @@ class ProcessExecutionWindow(QWidget):
             self.reset_camera_placeholder()
 
             logger.info("Camera preview stopped")
+            try:
+                self.rebuild_status_section()
+            except Exception:
+                pass
 
         except Exception as e:
             logger.error(f"Error stopping camera preview: {e}")
 
     def on_frame_ready(self, qimage: QImage):
-        """Handle new frame from camera preview."""
         if not self.camera_active:
             return
 
-        # Convert QImage to QPixmap and display
         pixmap = QPixmap.fromImage(qimage)
         if not pixmap.isNull():
-            # Store original frame size to keep aspect ratio during resizes
             try:
                 self._last_frame_size = qimage.size()  # type: ignore[attr-defined]
             except Exception:
                 self._last_frame_size = None
-
-            # Scale to fit while maintaining aspect ratio
+            self._last_qimage = qimage
             scaled_pixmap = pixmap.scaled(
                 self.base_image_label.width(),
                 self.base_image_label.height(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
+            try:
+                self._last_display_size = scaled_pixmap.size()
+            except Exception:
+                self._last_display_size = None
             self.base_image_label.setPixmap(scaled_pixmap)
 
     def on_preview_error(self, error_msg: str):
@@ -820,6 +862,43 @@ class ProcessExecutionWindow(QWidget):
             font-size: 18px;
             qproperty-alignment: AlignCenter;
         """)
+
+    def _qimage_to_numpy(self, qimage: QImage):
+        qi = qimage.convertToFormat(QImage.Format.Format_RGB888)
+        w = qi.width()
+        h = qi.height()
+        bpl = qi.bytesPerLine()
+        mv = qi.bits()
+        buf = mv.tobytes()
+        arr = np.frombuffer(buf, dtype=np.uint8)
+        arr = arr.reshape(h, bpl)
+        arr = arr[:, : w * 3]
+        arr = arr.reshape(h, w, 3)
+        return arr[:, :, ::-1].copy()
+
+    def _ng_regions_to_rects(self, regions: List[Dict[str, Any]]) -> List[QRect]:
+        rects: List[QRect] = []
+        try:
+            lw = self.base_image_label.width()
+            lh = self.base_image_label.height()
+            ow = self._last_frame_size.width() if self._last_frame_size else lw
+            oh = self._last_frame_size.height() if self._last_frame_size else lh
+            dw = self._last_display_size.width() if self._last_display_size else lw
+            dh = self._last_display_size.height() if self._last_display_size else lh
+            sx = dw / float(ow) if ow else 1.0
+            sy = dh / float(oh) if oh else 1.0
+            ox = int((lw - dw) / 2)
+            oy = int((lh - dh) / 2)
+            for r in regions:
+                x1, y1, x2, y2 = r.get('box_coords', [0, 0, 0, 0])
+                x = ox + int(x1 * sx)
+                y = oy + int(y1 * sy)
+                w = int((x2 - x1) * sx)
+                h = int((y2 - y1) * sy)
+                rects.append(QRect(x, y, max(1, w), max(1, h)))
+        except Exception:
+            pass
+        return rects
 
     def create_content_area(self) -> QWidget:
         """Create the main content area with step list and visual guidance."""
@@ -912,7 +991,7 @@ class ProcessExecutionWindow(QWidget):
 
     def create_overlay_widget(self) -> QWidget:
         """Create overlay for detection drawings and pass/fail cards"""
-        w = QWidget()
+        w = OverlayWidget()
         # 叠加层不改变布局尺寸，仅覆盖视频区域
         w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1176,6 +1255,11 @@ class ProcessExecutionWindow(QWidget):
         fail_ov = getattr(self, 'fail_overlay', None)
         if overlay is not None:
             overlay.setVisible(is_pass or is_fail)
+            try:
+                overlay.set_status(self.detection_status)
+                overlay.set_boxes(self.detection_boxes or [])
+            except Exception:
+                pass
         if pass_ov is not None:
             pass_ov.setVisible(is_pass)
         if fail_ov is not None:
@@ -1405,6 +1489,7 @@ class ProcessExecutionWindow(QWidget):
 
         # 统一使用一个按钮；检测中时仅改文案并禁用，不显示任何“检测中”标签
         detecting = self.detection_status == "detecting"
+        allowed = self.camera_active and not detecting
         btn_text = "检测中" if detecting else "开始检测"
         self.start_detection_btn = QPushButton(btn_text)
         self.start_detection_btn.setObjectName("startDetectionButton")
@@ -1424,16 +1509,25 @@ class ProcessExecutionWindow(QWidget):
             QPushButton#startDetectionButton:hover {{
                 background-color: #ea580c;
             }}
+            QPushButton#startDetectionButton:disabled {{
+                background-color: #3a3a3a;
+                color: #9ca3af;
+            }}
         """)
         # Ensure button uses the loaded custom font
         try:
             self.start_detection_btn.setFont(self.custom_font)
         except Exception:
             pass
-        self.start_detection_btn.setEnabled(not detecting)
-        if not detecting:
+        self.start_detection_btn.setEnabled(allowed)
+        if allowed:
             try:
                 self.start_detection_btn.clicked.connect(self.on_start_detection)
+            except Exception:
+                pass
+        else:
+            try:
+                self.start_detection_btn.setToolTip("请先开启相机")
             except Exception:
                 pass
         layout.addWidget(self.start_detection_btn)
@@ -1460,21 +1554,73 @@ class ProcessExecutionWindow(QWidget):
 
     def on_start_detection(self):
         """Handle start detection button click."""
-        if self.detection_status != 'idle':
+        if self.detection_status != 'idle' or not self.camera_active:
             return
 
-        logger.info("Starting detection simulation")
-        self.detection_status = 'detecting'
+        if self.is_simulated:
+            logger.info("Starting detection simulation")
+            self.detection_status = 'detecting'
+            self.update_overlay_visibility()
+            self.rebuild_status_section()
+            self.detection_timer = QTimer()
+            self.detection_timer.setSingleShot(True)
+            self.detection_timer.timeout.connect(self.on_detection_complete)
+            self.detection_timer.start(1500)
+            return
 
-        # Update UI
+        if self._last_qimage is None:
+            logger.warning("No camera frame available for external detection")
+            return
+
+        self.detection_status = 'detecting'
         self.update_overlay_visibility()
         self.rebuild_status_section()
 
-        # Simulate detection with 1.5 second delay
-        self.detection_timer = QTimer()
-        self.detection_timer.setSingleShot(True)
-        self.detection_timer.timeout.connect(self.on_detection_complete)
-        self.detection_timer.start(1500)  # 1.5 seconds
+        try:
+            img = self._qimage_to_numpy(self._last_qimage)
+            idx = self.current_step_index
+            sd = self.process_data.get('steps_detail', [])
+            step_number = sd[idx].get('step_number', idx + 1) if isinstance(sd, list) and idx < len(sd) else (idx + 1)
+            pid = self.process_data.get('pid', None)
+            base_dir = Path(__file__).resolve().parents[3] / "3rd" / "assembly_direction_checker"
+            sys.path.insert(0, str(base_dir))
+            inner_dir = base_dir / "assembly_direction_checker"
+            if inner_dir.exists():
+                sys.path.insert(0, str(inner_dir))
+            original_src = sys.modules.get("src")
+            try:
+                if original_src is not None:
+                    del sys.modules["src"]
+                spec = importlib.util.spec_from_file_location("main_findal", str(base_dir / "main_findal.py"))
+                module = importlib.util.module_from_spec(spec)
+                assert spec is not None and spec.loader is not None
+                spec.loader.exec_module(module)
+                result = module.execute_step(img, step_number, pid=pid)
+            finally:
+                if original_src is not None:
+                    sys.modules["src"] = original_src
+            status = str(result.get('status', '')).upper()
+            if status == 'OK':
+                self.detection_boxes = []
+                self.detection_status = 'pass'
+                self.update_overlay_visibility()
+                self.rebuild_status_section()
+                self.advance_timer = QTimer()
+                self.advance_timer.setSingleShot(True)
+                self.advance_timer.timeout.connect(self.advance_to_next_step)
+                self.advance_timer.start(2000)
+            else:
+                ng_regions = result.get('ng_regions', [])
+                self.detection_boxes = self._ng_regions_to_rects(ng_regions)
+                self.detection_status = 'fail'
+                self.update_overlay_visibility()
+                self.rebuild_status_section()
+        except Exception as e:
+            logger.error(f"External detection failed: {e}")
+            self.detection_status = 'fail'
+            self.detection_boxes = []
+            self.update_overlay_visibility()
+            self.rebuild_status_section()
 
     def on_detection_complete(self):
         """Handle detection completion with simulated result."""
@@ -1533,6 +1679,11 @@ class ProcessExecutionWindow(QWidget):
         self.rebuild_status_section()
 
         logger.info(f"Advanced to step {self.current_step_index + 1}")
+
+    def _is_simulated_process(self) -> bool:
+        name = str(self.process_data.get('algorithm_name', self.process_data.get('name', '')))
+        pid = str(self.process_data.get('pid', ''))
+        return ('模拟' in name) or pid.startswith('SIM-')
 
     def on_retry_detection(self):
         """Handle retry detection button click (from FAIL overlay)."""

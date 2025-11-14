@@ -8,6 +8,10 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QGridLayout
 )
 from PySide6.QtCore import Qt
+import json
+from pathlib import Path
+import importlib.util
+import sys
 from ..components.process_card import ProcessCard
 from ..windows.process_execution_window import ProcessExecutionWindow
 
@@ -56,11 +60,43 @@ class ProcessPage(QFrame):
         cards_container.setStyleSheet("QWidget#cardsContainer { background-color: #1f232b; border: 1px solid #1f232b; }")
         # cards_layout will be created later as QGridLayout
         
-        processes_data = [
+        base_dir = Path(__file__).resolve().parents[3] / "3rd" / "assembly_direction_checker"
+        excel_dir = base_dir / "data" / "process_excel"
+        external_info = None
+        try:
+            pids = sorted([p.stem for p in excel_dir.glob("*.xlsx")] + [p.stem for p in excel_dir.glob("*.xls")])
+            pids = [pid for pid in pids if not pid.startswith("~$")]
+            if pids:
+                logger.info(f"Discovered external pids: {', '.join(pids)}")
+                sys.path.insert(0, str(base_dir))
+                inner_dir = base_dir / "assembly_direction_checker"
+                if inner_dir.exists():
+                    sys.path.insert(0, str(inner_dir))
+                spec = importlib.util.spec_from_file_location("main_findal", str(base_dir / "main_findal.py"))
+                module = importlib.util.module_from_spec(spec)
+                assert spec is not None and spec.loader is not None
+                spec.loader.exec_module(module)
+                external_info = module.get_info(pids[0])
+                external_info["pid"] = pids[0]
+        except Exception as e:
+            logger.error(f"Failed to load external process info: {e}")
+            try:
+                candidates = [base_dir / f"process_info_{pid}.json" for pid in pids] if 'pids' in locals() else []
+                for candidate in candidates:
+                    if candidate.exists():
+                        external_info = json.loads(candidate.read_text(encoding="utf-8"))
+                        external_info["pid"] = candidate.stem.split("_")[-1]
+                        logger.info(f"Loaded external process info from JSON: {candidate.name}")
+                        break
+            except Exception as e2:
+                logger.error(f"Failed to fallback load external JSON: {e2}")
+
+        processes_data_simulated = [
             {
-                "algorithm_name": "视觉装配引导与质检算法",
+                "algorithm_name": "视觉装配引导与质检算法（模拟）",
                 "algorithm_version": "v1.0.1",
                 "summary": "本算法用于10287产品的装配引导与关键步骤的缺陷检测。",
+                "pid": "SIM-10287",
                 "steps": [
                     {
                         "step_number": 1,
@@ -97,9 +133,10 @@ class ProcessPage(QFrame):
                 ]
             },
             {
-                "algorithm_name": "PCB 装配引导算法",
+                "algorithm_name": "PCB 装配引导算法（模拟）",
                 "algorithm_version": "v1.2.0",
                 "summary": "用于 PCB 装配过程中的元件放置引导与方向确认。",
+                "pid": "SIM-PCB-001",
                 "steps": [
                     {
                         "step_number": 1,
@@ -120,9 +157,10 @@ class ProcessPage(QFrame):
                 ]
             },
             {
-                "algorithm_name": "机械总成装配算法",
+                "algorithm_name": "机械总成装配算法（模拟）",
                 "algorithm_version": "v0.9.4",
                 "summary": "用于机械总成的装配引导，含方向与紧固标准。",
+                "pid": "SIM-MECH-001",
                 "steps": [
                     {
                         "step_number": 1,
@@ -151,9 +189,10 @@ class ProcessPage(QFrame):
                 ]
             },
             {
-                "algorithm_name": "包装与打码检测算法",
+                "algorithm_name": "包装与打码检测算法（模拟）",
                 "algorithm_version": "v1.3.2",
                 "summary": "用于包装流程的标签、打码与扫码校验。",
+                "pid": "SIM-PKG-001",
                 "steps": [
                     {
                         "step_number": 1,
@@ -182,9 +221,10 @@ class ProcessPage(QFrame):
                 ]
             },
             {
-                "algorithm_name": "航电组件装配引导算法",
+                "algorithm_name": "航电组件装配引导算法（模拟）",
                 "algorithm_version": "v2.0.0",
                 "summary": "用于航电组件的装配与线缆连接引导。",
+                "pid": "SIM-AVN-001",
                 "steps": [
                     {
                         "step_number": 1,
@@ -213,6 +253,7 @@ class ProcessPage(QFrame):
                 ]
             }
         ]
+        processes_data = ([external_info] if external_info else []) + processes_data_simulated
         
         # Create and add cards in single column
         cards_layout = QGridLayout()

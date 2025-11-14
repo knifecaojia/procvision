@@ -137,7 +137,7 @@ class ProcessCard(QFrame):
         title_label = QLabel(self.process_data["algorithm_name"])
         title_label.setObjectName("cardTitle")
 
-        id_label = QLabel(f"版本 {self.process_data['algorithm_version']}")
+        id_label = QLabel(f"PID {self.process_data.get('pid', 'N/A')} · 版本 {self.process_data['algorithm_version']}")
         id_label.setObjectName("cardId")
 
         title_layout.addWidget(title_label)
@@ -239,5 +239,6 @@ class ProcessCard(QFrame):
             "algorithm_version": self.process_data.get("algorithm_version", ""),
             "summary": self.process_data.get("summary", ""),
             "steps_detail": self.process_data.get("steps", []),
+            "pid": self.process_data.get("pid", None),
         }
         self.start_process_clicked.emit(normalized)

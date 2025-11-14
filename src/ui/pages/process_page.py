@@ -56,72 +56,161 @@ class ProcessPage(QFrame):
         cards_container.setStyleSheet("QWidget#cardsContainer { background-color: #1f232b; border: 1px solid #1f232b; }")
         # cards_layout will be created later as QGridLayout
         
-        # Sample process data
         processes_data = [
             {
-                "id": 1,
-                "name": "ME-ASM-2024-001",
-                "title": "机械底座装配工艺",
-                "type": "mechanical",
-                "type_label": "机械安装",
-                "version": "v3.2",
-                "steps": 12,
-                "models": ["Edge Detection Standard", "Screw Detection"],
-                "status": "active",
-                "status_label": "已发布",
-                "last_modified": "2024-11-05"
+                "algorithm_name": "视觉装配引导与质检算法",
+                "algorithm_version": "v1.0.1",
+                "summary": "本算法用于10287产品的装配引导与关键步骤的缺陷检测。",
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "step_name": "安装连接器",
+                        "operation_guide": "开始第 1 步：请装配『连接器』，方向为：下",
+                        "quality_standard": "方向为：下",
+                        "object": "连接器",
+                        "direction": "下"
+                    },
+                    {
+                        "step_number": 2,
+                        "step_name": "安装航向铭牌",
+                        "operation_guide": "开始第 2 步：请装配『航向铭牌』，方向为：左",
+                        "quality_standard": "方向为：左",
+                        "object": "航向铭牌",
+                        "direction": "左"
+                    },
+                    {
+                        "step_number": 3,
+                        "step_name": "安装铭牌",
+                        "operation_guide": "开始第 3 步：请装配『铭牌』，方向为：正",
+                        "quality_standard": "方向为：正",
+                        "object": "铭牌",
+                        "direction": "正"
+                    },
+                    {
+                        "step_number": 4,
+                        "step_name": "安装X1铭牌",
+                        "operation_guide": "开始第 4 步：请装配『X1铭牌』，方向为：正",
+                        "quality_standard": "方向为：正",
+                        "object": "X1铭牌",
+                        "direction": "正"
+                    }
+                ]
             },
             {
-                "id": 2,
-                "name": "PCB-ASM-2024-015",
-                "title": "主控板PCB装配工艺",
-                "type": "pcb",
-                "type_label": "PCB安装",
-                "version": "v2.8",
-                "steps": 8,
-                "models": ["PCB Defect Detection", "Component Position Check"],
-                "status": "active",
-                "status_label": "已发布",
-                "last_modified": "2024-11-03"
+                "algorithm_name": "PCB 装配引导算法",
+                "algorithm_version": "v1.2.0",
+                "summary": "用于 PCB 装配过程中的元件放置引导与方向确认。",
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "step_name": "安装电容 C101",
+                        "operation_guide": "开始第 1 步：请装配『电容 C101』，方向为：正",
+                        "quality_standard": "方向为：正",
+                        "object": "电容 C101",
+                        "direction": "正"
+                    },
+                    {
+                        "step_number": 2,
+                        "step_name": "安装连接器 J101",
+                        "operation_guide": "开始第 2 步：请装配『连接器 J101』，方向为：下",
+                        "quality_standard": "方向为：下",
+                        "object": "连接器 J101",
+                        "direction": "下"
+                    }
+                ]
             },
             {
-                "id": 3,
-                "name": "PKG-STD-2024-003",
-                "title": "标准包装工艺流程",
-                "type": "packaging",
-                "type_label": "包装",
-                "version": "v1.5",
-                "steps": 5,
-                "models": ["QR Code Reader", "Assembly Classification"],
-                "status": "active",
-                "status_label": "已发布",
-                "last_modified": "2024-10-28"
+                "algorithm_name": "机械总成装配算法",
+                "algorithm_version": "v0.9.4",
+                "summary": "用于机械总成的装配引导，含方向与紧固标准。",
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "step_name": "安装支架",
+                        "operation_guide": "开始第 1 步：请装配『支架』，方向为：正",
+                        "quality_standard": "方向为：正",
+                        "object": "支架",
+                        "direction": "正"
+                    },
+                    {
+                        "step_number": 2,
+                        "step_name": "压入轴承",
+                        "operation_guide": "开始第 2 步：请装配『轴承』，方向为：下",
+                        "quality_standard": "方向为：下",
+                        "object": "轴承",
+                        "direction": "下"
+                    },
+                    {
+                        "step_number": 3,
+                        "step_name": "紧固螺钉",
+                        "operation_guide": "开始第 3 步：请装配『螺钉』，方向为：正",
+                        "quality_standard": "方向为：正",
+                        "object": "螺钉",
+                        "direction": "正"
+                    }
+                ]
             },
             {
-                "id": 4,
-                "name": "ME-ASM-2024-002",
-                "title": "外壳组件装配工艺",
-                "type": "mechanical",
-                "type_label": "机械安装",
-                "version": "v2.1",
-                "steps": 10,
-                "models": ["Edge Detection Standard", "Component Position Check"],
-                "status": "draft",
-                "status_label": "草稿",
-                "last_modified": "2024-11-01"
+                "algorithm_name": "包装与打码检测算法",
+                "algorithm_version": "v1.3.2",
+                "summary": "用于包装流程的标签、打码与扫码校验。",
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "step_name": "贴标签",
+                        "operation_guide": "开始第 1 步：请装配『标签』，方向为：左",
+                        "quality_standard": "方向为：左",
+                        "object": "标签",
+                        "direction": "左"
+                    },
+                    {
+                        "step_number": 2,
+                        "step_name": "打码",
+                        "operation_guide": "开始第 2 步：请进行『打码』，方向为：正",
+                        "quality_standard": "字符清晰完整",
+                        "object": "打码",
+                        "direction": "正"
+                    },
+                    {
+                        "step_number": 3,
+                        "step_name": "扫描校验",
+                        "operation_guide": "开始第 3 步：请执行『扫码校验』",
+                        "quality_standard": "扫码通过",
+                        "object": "二维码",
+                        "direction": "正"
+                    }
+                ]
             },
             {
-                "id": 5,
-                "name": "PCB-ASM-2024-016",
-                "title": "接口板PCB装配工艺",
-                "type": "pcb",
-                "type_label": "PCB安装",
-                "version": "v1.9",
-                "steps": 6,
-                "models": ["PCB Defect Detection"],
-                "status": "active",
-                "status_label": "已发布",
-                "last_modified": "2024-10-30"
+                "algorithm_name": "航电组件装配引导算法",
+                "algorithm_version": "v2.0.0",
+                "summary": "用于航电组件的装配与线缆连接引导。",
+                "steps": [
+                    {
+                        "step_number": 1,
+                        "step_name": "安装航电板",
+                        "operation_guide": "开始第 1 步：请装配『航电板』，方向为：正",
+                        "quality_standard": "方向为：正",
+                        "object": "航电板",
+                        "direction": "正"
+                    },
+                    {
+                        "step_number": 2,
+                        "step_name": "连接排线",
+                        "operation_guide": "开始第 2 步：请装配『排线』，方向为：右",
+                        "quality_standard": "方向为：右",
+                        "object": "排线",
+                        "direction": "右"
+                    },
+                    {
+                        "step_number": 3,
+                        "step_name": "紧固螺钉",
+                        "operation_guide": "开始第 3 步：请装配『螺钉』，方向为：正",
+                        "quality_standard": "方向为：正",
+                        "object": "螺钉",
+                        "direction": "正"
+                    }
+                ]
             }
         ]
         

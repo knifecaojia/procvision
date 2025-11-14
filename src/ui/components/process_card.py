@@ -128,35 +128,24 @@ class ProcessCard(QFrame):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
 
-        # Header with title and badges
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Title section
         title_layout = QVBoxLayout()
         title_layout.setSpacing(2)
 
-        title_label = QLabel(self.process_data["title"])
+        title_label = QLabel(self.process_data["algorithm_name"])
         title_label.setObjectName("cardTitle")
 
-        id_label = QLabel(f"{self.process_data['name']} · {self.process_data['version']}")
+        id_label = QLabel(f"版本 {self.process_data['algorithm_version']}")
         id_label.setObjectName("cardId")
 
         title_layout.addWidget(title_label)
         title_layout.addWidget(id_label)
 
-        # Badges
         badges_layout = QHBoxLayout()
         badges_layout.setSpacing(5)
 
-        type_badge = QLabel(self.process_data["type_label"])
-        type_badge.setObjectName("typeBadge")
-
-        status_badge = QLabel(self.process_data["status_label"])
-        status_badge.setObjectName("statusBadge")
-
-        badges_layout.addWidget(type_badge)
-        badges_layout.addWidget(status_badge)
         badges_layout.addStretch()
 
         header_layout.addLayout(title_layout)
@@ -169,59 +158,56 @@ class ProcessCard(QFrame):
         info_grid.setSpacing(8)
         info_grid.setObjectName("infoGrid")
 
-        # Steps
         steps_frame = QFrame()
         steps_frame.setObjectName("infoFrame")
         steps_layout = QVBoxLayout(steps_frame)
         steps_layout.setContentsMargins(8, 8, 8, 8)
         steps_label = QLabel("工艺步骤")
         steps_label.setObjectName("infoLabel")
-        steps_value = QLabel(f"{self.process_data['steps']} 步")
+        steps_value = QLabel(f"{len(self.process_data['steps'])} 步")
         steps_value.setObjectName("infoValue")
         steps_layout.addWidget(steps_label)
         steps_layout.addWidget(steps_value)
 
-        # Models
-        models_frame = QFrame()
-        models_frame.setObjectName("infoFrame")
-        models_layout = QVBoxLayout(models_frame)
-        models_layout.setContentsMargins(8, 8, 8, 8)
-        models_label = QLabel("使用模型")
-        models_label.setObjectName("infoLabel")
-        models_value = QLabel(f"{len(self.process_data['models'])} 个")
-        models_value.setObjectName("infoValue")
-        models_layout.addWidget(models_label)
-        models_layout.addWidget(models_value)
+        summary_frame = QFrame()
+        summary_frame.setObjectName("infoFrame")
+        summary_layout = QVBoxLayout(summary_frame)
+        summary_layout.setContentsMargins(8, 8, 8, 8)
+        summary_label = QLabel("摘要")
+        summary_label.setObjectName("infoLabel")
+        summary_value = QLabel(self.process_data["summary"])
+        summary_value.setObjectName("infoValue")
+        summary_value.setWordWrap(True)
+        summary_layout.addWidget(summary_label)
+        summary_layout.addWidget(summary_value)
 
-        # Last modified
-        modified_frame = QFrame()
-        modified_frame.setObjectName("infoFrame")
-        modified_layout = QVBoxLayout(modified_frame)
-        modified_layout.setContentsMargins(8, 8, 8, 8)
-        modified_label = QLabel("最后修改")
-        modified_label.setObjectName("infoLabel")
-        modified_value = QLabel(self.process_data["last_modified"])
-        modified_value.setObjectName("infoValue")
-        modified_layout.addWidget(modified_label)
-        modified_layout.addWidget(modified_value)
+        version_frame = QFrame()
+        version_frame.setObjectName("infoFrame")
+        version_layout = QVBoxLayout(version_frame)
+        version_layout.setContentsMargins(8, 8, 8, 8)
+        version_label = QLabel("版本")
+        version_label.setObjectName("infoLabel")
+        version_value = QLabel(self.process_data["algorithm_version"])
+        version_value.setObjectName("infoValue")
+        version_layout.addWidget(version_label)
+        version_layout.addWidget(version_value)
 
         info_grid.addWidget(steps_frame, 0, 0)
-        info_grid.addWidget(models_frame, 0, 1)
-        info_grid.addWidget(modified_frame, 0, 2)
+        info_grid.addWidget(summary_frame, 0, 1)
+        info_grid.addWidget(version_frame, 0, 2)
 
         layout.addLayout(info_grid)
 
-        # Models list
-        models_title = QLabel("关联模型：")
-        models_title.setObjectName("modelsTitle")
-        layout.addWidget(models_title)
+        steps_title = QLabel("步骤预览：")
+        steps_title.setObjectName("modelsTitle")
+        layout.addWidget(steps_title)
 
         models_layout = QHBoxLayout()
         models_layout.setSpacing(5)
         models_layout.setContentsMargins(0, 0, 0, 0)
 
-        for model in self.process_data["models"]:
-            model_badge = QLabel(model)
+        for step in self.process_data["steps"]:
+            model_badge = QLabel(step["step_name"])
             model_badge.setObjectName("modelBadge")
             models_layout.addWidget(model_badge)
 
@@ -232,21 +218,26 @@ class ProcessCard(QFrame):
         actions_layout = QHBoxLayout()
         actions_layout.setSpacing(8)
 
-        view_btn = QPushButton("查看详情")
-        view_btn.setObjectName("viewButton")
-        view_btn.setFixedHeight(32)
-
         start_btn = QPushButton("启动工艺")
         start_btn.setObjectName("startButton")
         start_btn.setFixedHeight(32)
         start_btn.clicked.connect(self.on_start_process_clicked)
 
-        actions_layout.addWidget(view_btn)
         actions_layout.addWidget(start_btn)
 
         layout.addLayout(actions_layout)
 
     def on_start_process_clicked(self):
         """Handle start process button click."""
-        logger.info(f"Start process clicked for: {self.process_data['name']}")
-        self.start_process_clicked.emit(self.process_data)
+        logger.info(f"Start process clicked for: {self.process_data['algorithm_name']}")
+        normalized = {
+            "name": self.process_data.get("algorithm_name", ""),
+            "title": self.process_data.get("algorithm_name", ""),
+            "version": self.process_data.get("algorithm_version", ""),
+            "steps": len(self.process_data.get("steps", [])),
+            "algorithm_name": self.process_data.get("algorithm_name", ""),
+            "algorithm_version": self.process_data.get("algorithm_version", ""),
+            "summary": self.process_data.get("summary", ""),
+            "steps_detail": self.process_data.get("steps", []),
+        }
+        self.start_process_clicked.emit(normalized)

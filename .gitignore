@@ -93,3 +93,5 @@ config/
 *.backup
 # reference assets
 ref
+3rd/
+tutorial/

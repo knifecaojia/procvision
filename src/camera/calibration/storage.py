@@ -70,29 +70,12 @@ class CalibrationStorage:
         result: CalibrationResult,
         camera_model: str
     ) -> Path:
-        """Save calibration result to JSON file.
-
-        Args:
-            result: CalibrationResult object to save
-            camera_model: Camera model name
-
-        Returns:
-            Path to the saved file
-
-        Raises:
-            PermissionDeniedException: If directory cannot be created or file written
-        """
+        """Save calibration result to root config.json."""
         timestamp = result.timestamp
-        file_name = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_calibration.json"
-
-        storage_dir = self.get_storage_path(camera_model, create=True)
-        file_path = storage_dir / file_name
-
-        logger.info(f"Saving calibration result to {file_path}")
+        config_path = Path.cwd() / "config.json"
 
         try:
-            # Convert numpy arrays to lists for JSON serialization
-            data: Dict[str, Any] = {
+            payload: Dict[str, Any] = {
                 "calibration_id": timestamp.strftime('%Y%m%d_%H%M%S'),
                 "timestamp": timestamp.isoformat(),
                 "camera_model": camera_model,
@@ -113,22 +96,26 @@ class CalibrationStorage:
                 "calibration_version": "1.0"
             }
 
-            # Add OpenCV version
             try:
                 import cv2
-                data["opencv_version"] = cv2.__version__
-            except ImportError:
-                data["opencv_version"] = "unknown"
+                payload["opencv_version"] = cv2.__version__
+            except Exception:
+                payload["opencv_version"] = "unknown"
 
-            # Write JSON file
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            else:
+                cfg = {}
 
-            logger.info(f"Calibration result saved successfully: {file_path}")
-            return file_path
+            cfg["calibration"] = payload
 
-        except PermissionError as e:
-            raise PermissionDeniedException(str(storage_dir), e) from e
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+            logger.info(f"Calibration result saved to {config_path}")
+            return config_path
+
         except Exception as e:
             logger.error(f"Failed to save calibration: {e}", exc_info=True)
             raise

@@ -2,6 +2,10 @@
 
 import cv2
 import numpy as np
+import logging
+
+
+logger = logging.getLogger("camera.calibration.detector")
 
 
 def detect_chessboard_corners(
@@ -27,16 +31,74 @@ def detect_chessboard_corners(
     else:
         gray = image
 
-    # Find chessboard corners
-    flags = (
-        cv2.CALIB_CB_ADAPTIVE_THRESH |
-        cv2.CALIB_CB_NORMALIZE_IMAGE |
-        cv2.CALIB_CB_FAST_CHECK
-    )
+    normalized = normalize_image_for_detection(gray)
+    pattern_size = (board_size[1], board_size[0])
 
-    success, corners = cv2.findChessboardCorners(
-        gray, board_size, None, flags
-    )
+    success = False
+    corners = None
+
+    # Attempt 1: Robust SB detector (OpenCV 4.5+)
+    try:
+        sb_flags = (
+            cv2.CALIB_CB_EXHAUSTIVE |
+            cv2.CALIB_CB_ACCURACY |
+            cv2.CALIB_CB_NORMALIZE_IMAGE
+        )
+        success, corners = cv2.findChessboardCornersSB(normalized, pattern_size, flags=sb_flags)
+    except Exception:
+        success = False
+        corners = None
+
+    # Attempt 2: Standard detector without FAST_CHECK on normalized image
+    if not success:
+        try:
+            flags_std = (
+                cv2.CALIB_CB_ADAPTIVE_THRESH |
+                cv2.CALIB_CB_NORMALIZE_IMAGE
+            )
+            success, corners = cv2.findChessboardCorners(normalized, pattern_size, None, flags_std)
+        except Exception:
+            success = False
+            corners = None
+
+    # Attempt 3: Standard detector on original gray image
+    if not success:
+        try:
+            flags_std = (
+                cv2.CALIB_CB_ADAPTIVE_THRESH |
+                cv2.CALIB_CB_NORMALIZE_IMAGE
+            )
+            success, corners = cv2.findChessboardCorners(gray, pattern_size, None, flags_std)
+        except Exception:
+            success = False
+            corners = None
+
+    # Attempt 4: Inverted image (helps with lighting conditions)
+    if not success:
+        try:
+            inv = cv2.bitwise_not(normalized)
+            flags_std = (
+                cv2.CALIB_CB_ADAPTIVE_THRESH |
+                cv2.CALIB_CB_NORMALIZE_IMAGE
+            )
+            success, corners = cv2.findChessboardCorners(inv, pattern_size, None, flags_std)
+        except Exception:
+            success = False
+            corners = None
+
+    # Attempt 5: Slight blur then normalized
+    if not success:
+        try:
+            blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            norm_blur = normalize_image_for_detection(blur)
+            flags_std = (
+                cv2.CALIB_CB_ADAPTIVE_THRESH |
+                cv2.CALIB_CB_NORMALIZE_IMAGE
+            )
+            success, corners = cv2.findChessboardCorners(norm_blur, pattern_size, None, flags_std)
+        except Exception:
+            success = False
+            corners = None
 
     if success and refine:
         # Refine corners to sub-pixel accuracy
@@ -45,9 +107,17 @@ def detect_chessboard_corners(
             30,  # Max iterations
             0.001  # Epsilon
         )
-        corners = cv2.cornerSubPix(
-            gray, corners, (11, 11), (-1, -1), criteria
-        )
+        try:
+            corners = cv2.cornerSubPix(
+                normalized, corners, (11, 11), (-1, -1), criteria
+            )
+        except Exception:
+            try:
+                corners = cv2.cornerSubPix(
+                    gray, corners, (11, 11), (-1, -1), criteria
+                )
+            except Exception:
+                pass
 
     return success, corners
 
@@ -73,7 +143,8 @@ def draw_corners(
     output = image.copy()
 
     # Draw chessboard corners
-    cv2.drawChessboardCorners(output, board_size, corners, True)
+    pattern_size = (board_size[1], board_size[0])
+    cv2.drawChessboardCorners(output, pattern_size, corners, True)
 
     if show_numbers:
         # Draw corner indices (for every 5th corner to avoid clutter)

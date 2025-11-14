@@ -11,12 +11,13 @@ from typing import Optional
 
 import cv2
 from PySide6.QtCore import Qt, QTimer, QSize, Slot
-from PySide6.QtGui import QPixmap, QImage
+from PySide6.QtGui import QPixmap, QImage, QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
+    QCheckBox,
     QPushButton,
     QListWidget,
     QListWidgetItem,
@@ -34,6 +35,8 @@ from src.camera.calibration import (
     CalibrationService,
     CalibrationStorage,
     ChessboardConfig,
+    detect_chessboard_corners,
+    draw_corners,
 )
 
 logger = logging.getLogger("camera.ui.calibration_panel")
@@ -46,7 +49,7 @@ class CameraCalibrationPanel(QFrame):
         super().__init__(parent)
         self.camera_service = camera_service
         self.calibration_service: Optional[CalibrationService] = None
-        self.board_config = ChessboardConfig(rows=9, cols=6, square_size_mm=25.0)
+        self.board_config = ChessboardConfig(rows=9, cols=6, square_size_mm=20.0)
 
         # UI references
         self.image_list: Optional[QListWidget] = None
@@ -59,6 +62,7 @@ class CameraCalibrationPanel(QFrame):
         self.progress_bar: Optional[QProgressBar] = None
         self.status_label: Optional[QLabel] = None
         self.progress_label: Optional[QLabel] = None
+        self.live_detect_checkbox: Optional[QCheckBox] = None
 
         self.setObjectName("cameraCalibrationPanel")
         self.setFrameShape(QFrame.NoFrame)
@@ -68,7 +72,8 @@ class CameraCalibrationPanel(QFrame):
             #cameraCalibrationPanel QListWidget,
             #cameraCalibrationPanel QPushButton,
             #cameraCalibrationPanel QSpinBox,
-            #cameraCalibrationPanel QDoubleSpinBox {
+            #cameraCalibrationPanel QDoubleSpinBox,
+            #cameraCalibrationPanel QCheckBox {
                 color: #E6EAF3;
             }
 
@@ -144,6 +149,10 @@ class CameraCalibrationPanel(QFrame):
 
         layout.addWidget(settings_group)
 
+        self.live_detect_checkbox = QCheckBox("实时棋盘格检测")
+        self.live_detect_checkbox.setChecked(True)
+        layout.addWidget(self.live_detect_checkbox)
+
         # Capture progress + list
         self.progress_label = QLabel("已采集: 0/15")
         self.progress_label.setObjectName("paramLabel")
@@ -210,6 +219,18 @@ class CameraCalibrationPanel(QFrame):
                 QMessageBox.critical(self, "错误", f"初始化标定服务失败:\n{exc}")
                 return False
 
+        try:
+            if not self.camera_service.is_streaming():
+                started = self.camera_service.start_preview()
+                if not started:
+                    QMessageBox.warning(self, "错误", "无法启动预览流，请先开始预览")
+                    return False
+        except Exception as exc:
+            logger.error("Failed to ensure streaming: %s", exc, exc_info=True)
+            QMessageBox.critical(self, "错误", f"启动预览失败:\n{exc}")
+            return False
+
+        
         self._update_image_list()
         self._update_progress()
         self._set_status("请调整棋盘格位置，点击【采集图像】", "#8C92A0")
@@ -249,6 +270,19 @@ class CameraCalibrationPanel(QFrame):
         if not self.calibration_service:
             QMessageBox.warning(self, "错误", "标定服务未初始化")
             return
+        # Ensure streaming is active
+        try:
+            if not self.camera_service.is_streaming():
+                started = self.camera_service.start_preview()
+                if not started:
+                    self._set_status("✗ 预览未启动，请先开始预览", "#E85454")
+                    QMessageBox.warning(self, "错误", "预览未启动，请点击开始预览后再采集")
+                    return
+        except Exception as exc:
+            logger.error("Failed to start preview before capture: %s", exc, exc_info=True)
+            self._set_status(f"✗ 启动预览失败: {exc}", "#E85454")
+            QMessageBox.critical(self, "错误", f"启动预览失败:\n{exc}")
+            return
 
         self._set_status("正在采集图像...", "#FF8C32")
 
@@ -264,6 +298,8 @@ class CameraCalibrationPanel(QFrame):
             logger.error("Failed to capture image: %s", exc, exc_info=True)
             self._set_status(f"✗ 采集失败: {exc}", "#E85454")
             QMessageBox.critical(self, "错误", f"图像采集失败:\n{exc}")
+
+    
 
     @Slot()
     def _on_calibrate(self):

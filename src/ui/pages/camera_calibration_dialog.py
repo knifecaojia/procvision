@@ -44,7 +44,7 @@ class CameraCalibrationDialog(QDialog):
         self.preview_image: Optional[np.ndarray] = None
 
         # Configuration
-        self.board_config = ChessboardConfig(rows=9, cols=6, square_size_mm=25.0)
+        self.board_config = ChessboardConfig(rows=9, cols=6, square_size_mm=20.0)
 
         # UI references
         self.preview_label: Optional[QLabel] = None
@@ -154,7 +154,7 @@ class CameraCalibrationDialog(QDialog):
         # Square size spinbox
         self.square_size_spinbox = QDoubleSpinBox()
         self.square_size_spinbox.setRange(1.0, 200.0)
-        self.square_size_spinbox.setValue(25.0)
+        self.square_size_spinbox.setValue(20.0)
         self.square_size_spinbox.setSuffix(" mm")
         self.square_size_spinbox.valueChanged.connect(self._on_board_params_changed)
         settings_layout.addRow("方格大小:", self.square_size_spinbox)
@@ -320,7 +320,7 @@ class CameraCalibrationDialog(QDialog):
             camera = self.camera_service.get_connected_camera()
             if camera:
                 camera_model = camera.info.model_name or "unknown"
-                from .storage import CalibrationStorage
+                from src.camera.calibration import CalibrationStorage
                 storage = CalibrationStorage()
                 file_path = storage.save_calibration_result(result, camera_model)
 

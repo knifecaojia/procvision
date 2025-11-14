@@ -87,8 +87,17 @@ class CalibrationService:
             return False
 
         # Store calibration image
+        try:
+            meta_ts = None
+            if hasattr(frame_data, 'metadata') and isinstance(frame_data.metadata, dict):
+                meta_ts = frame_data.metadata.get('timestamp')
+            # Use current time for robustness; device timestamps may be non-epoch
+            capture_time = datetime.now()
+        except Exception:
+            capture_time = datetime.now()
+
         cal_image = CalibrationImage(
-            timestamp=frame_data.timestamp,
+            timestamp=capture_time,
             image_data=image,
             corners_detected=corners,
             board_size=board_config.board_size

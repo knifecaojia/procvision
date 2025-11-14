@@ -6,8 +6,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-import cv2
-import numpy as np
+ 
 from PySide6.QtCore import Qt, QSize, Slot, QTimer
 from PySide6.QtGui import QIcon, QPixmap, QImage
 from PySide6.QtWidgets import (
@@ -59,6 +58,9 @@ class CameraPage(QFrame):
         self.calibration_panel_container: Optional[QFrame] = None
         self.calibration_panel: Optional[CameraCalibrationPanel] = None
         self.calibration_panel_visible = False
+        self.calibration_live_detect_enabled: bool = False
+        self._last_overlay_time: float = 0.0
+        self._overlay_interval_ms: int = 300
 
         # Control buttons
         self.connect_btn: Optional[QToolButton] = None
@@ -188,6 +190,27 @@ class CameraPage(QFrame):
             self.calibration_panel = CameraCalibrationPanel(self.camera_service, self)
             if self.calibration_panel_container and self.calibration_panel_container.layout():
                 self.calibration_panel_container.layout().addWidget(self.calibration_panel)
+            if self.calibration_panel.live_detect_checkbox:
+                try:
+                    self.calibration_panel.live_detect_checkbox.toggled.connect(
+                        self._on_live_detect_state_changed
+                    )
+                except Exception:
+                    # Fallback for environments lacking toggled
+                    self.calibration_panel.live_detect_checkbox.stateChanged.connect(
+                        lambda state: self._on_live_detect_state_changed(state == Qt.Checked)
+                    )
+            try:
+                if self.calibration_panel.rows_spinbox:
+                    self.calibration_panel.rows_spinbox.valueChanged.connect(lambda _: self._apply_detection_config())
+                if self.calibration_panel.cols_spinbox:
+                    self.calibration_panel.cols_spinbox.valueChanged.connect(lambda _: self._apply_detection_config())
+            except Exception:
+                pass
+            self.calibration_live_detect_enabled = (
+                self.calibration_panel.live_detect_checkbox.isChecked()
+                if self.calibration_panel.live_detect_checkbox else False
+            )
 
         return self.calibration_panel
 
@@ -199,6 +222,8 @@ class CameraPage(QFrame):
         if self.calibration_panel_container:
             self.calibration_panel_container.setVisible(False)
         self._set_calibrate_button_checked(False)
+        self.calibration_live_detect_enabled = False
+        self._apply_detection_config()
 
     def _set_calibrate_button_checked(self, checked: bool):
         """Helper to update calibrate button state without triggering callbacks."""
@@ -566,6 +591,9 @@ class CameraPage(QFrame):
             self.preview_worker.error_occurred.connect(self.on_preview_error)
             self.preview_worker.start()
 
+            # Apply live detection configuration to worker
+            self._apply_detection_config()
+
             self.update_connection_state()
             logger.info("Preview started")
         except Exception as exc:
@@ -633,6 +661,7 @@ class CameraPage(QFrame):
                 self.calibration_panel_visible = True
                 if self.calibration_panel_container:
                     self.calibration_panel_container.setVisible(True)
+                self._apply_detection_config()
             else:
                 QMessageBox.warning(self, "错误", "标定面板不可用")
                 self._set_calibrate_button_checked(False)
@@ -645,14 +674,15 @@ class CameraPage(QFrame):
     @Slot(object)
     def on_frame_ready(self, image):
         """Handle new frame from preview worker."""
-        if self.preview_label:
-            # Scale image to fit label while maintaining aspect ratio
-            scaled_pixmap = QPixmap.fromImage(image).scaled(
-                self.preview_label.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
-            )
-            self.preview_label.setPixmap(scaled_pixmap)
+        if not self.preview_label:
+            return
+
+        scaled_pixmap = QPixmap.fromImage(image).scaled(
+            self.preview_label.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.preview_label.setPixmap(scaled_pixmap)
 
     @Slot(dict)
     def on_stats_updated(self, stats):
@@ -669,6 +699,22 @@ class CameraPage(QFrame):
         logger.error("Preview error: %s", error_msg)
         self.on_stop_preview()
         QMessageBox.critical(self, "预览错误", error_msg)
+
+    def _on_live_detect_state_changed(self, enabled: bool):
+        self.calibration_live_detect_enabled = enabled
+        self._apply_detection_config()
+
+    def _apply_detection_config(self):
+        try:
+            if not self.preview_worker:
+                return
+            board_size = (9, 6)
+            if self.calibration_panel:
+                board_size = self.calibration_panel.board_config.board_size
+            self.preview_worker.configure_detection(self.calibration_live_detect_enabled, board_size)
+            self.preview_worker.set_detection_rate(interval_ms=300, downscale_height=480)
+        except Exception as exc:
+            logger.error("Failed to apply detection config: %s", exc, exc_info=True)
 
     def on_parameter_changed(self, key: str, value: float):
         """Handle parameter value change."""

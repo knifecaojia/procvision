@@ -1,0 +1,16 @@
+{
+  "server": {
+    "address": "192.168.1.100",
+    "port": 8080
+  },
+  "storage": {
+    "image": {
+      "path": "F:\\Ai-LLM\\southwest\\05ui-poc\\logs",
+      "retention_days": 30
+    },
+    "log": {
+      "path": "F:\\Ai-LLM\\southwest\\05ui-poc",
+      "retention_days": 90
+    }
+  }
+}

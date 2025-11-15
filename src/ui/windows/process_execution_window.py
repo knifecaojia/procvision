@@ -1753,7 +1753,7 @@ class ProcessExecutionWindow(QWidget):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("任务完成")
-        dialog.setFixedSize(400, 200)
+        dialog.setFixedSize(520, 360)
         dialog.setStyleSheet("""
             QDialog {
                 background-color: #252525;
@@ -1776,6 +1776,7 @@ class ProcessExecutionWindow(QWidget):
         """)
 
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(24, 16, 24, 16)
         layout.setSpacing(20)
 
         # Success icon and message
@@ -1784,10 +1785,18 @@ class ProcessExecutionWindow(QWidget):
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         message = QLabel("所有工艺步骤已完成!")
+        try:
+            message.setWordWrap(True)
+        except Exception:
+            pass
         message.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         summary = QLabel(f"工艺: {self.process_data.get('name')}\n完成步骤: {self.total_steps}/{self.total_steps}")
         summary.setStyleSheet("color: #9ca3af; font-size: 14px;")
+        try:
+            summary.setWordWrap(True)
+        except Exception:
+            pass
         summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Buttons

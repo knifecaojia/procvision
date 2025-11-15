@@ -1486,7 +1486,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Instruction text
         self.instruction_label = QLabel(self.current_instruction)
-        self.instruction_label.setStyleSheet("font-size: 36px; color: #ffffff; font-weight: bold;")
+        self.instruction_label.setStyleSheet("font-size: 36px; color: #f97316; font-weight: bold;")
         self.instruction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.instruction_label)
 
@@ -1505,7 +1505,7 @@ class ProcessExecutionWindow(QWidget):
         layout.setSpacing(0)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # 固定状态区宽度与按钮一致，确保左侧内容能撑满剩余空间
-        section.setFixedWidth(120)
+        section.setFixedWidth(250)
         section.setFixedHeight(120)
 
         # 统一使用一个按钮；检测中时仅改文案并禁用，不显示任何“检测中”标签
@@ -1515,7 +1515,7 @@ class ProcessExecutionWindow(QWidget):
         self.start_detection_btn = QPushButton(btn_text)
         self.start_detection_btn.setObjectName("startDetectionButton")
         # 方形按钮，尺寸与底部信息栏高度一致
-        self.start_detection_btn.setFixedSize(120, 120)
+        self.start_detection_btn.setFixedSize(250, 120)
         self.start_detection_btn.setStyleSheet(f"""
             QPushButton#startDetectionButton {{
                 background-color: #f97316;

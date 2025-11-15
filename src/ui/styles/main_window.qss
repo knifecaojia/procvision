@@ -1,4 +1,4 @@
-            QMainWindow {
+QMainWindow {
                 background-color: @deep_graphite;
                 border-radius: 10px;
                 font-family: "@font_family";
@@ -235,7 +235,7 @@
                 font-size: 16px;
             }
 
-            #paramsFrame, #serverFrame, #imageFrame, #logFrame, #statusFrame {
+            #paramsFrame, #serverFrame, #imageFrame, #logFrame, #statusFrame, #generalFrame {
                 background-color: @steel_grey;
                 border: 1px solid @dark_border;
                 border-radius: 8px;

@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QSpacerItem, QSizePolicy,
-    QFileDialog
+    QFileDialog, QCheckBox
 )
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
@@ -44,6 +44,28 @@ class SystemPage(QFrame):
         header_layout.addStretch()
         
         layout.addWidget(header_frame)
+
+        general_frame = QFrame()
+        general_frame.setObjectName("generalFrame")
+        general_layout = QVBoxLayout(general_frame)
+        general_layout.setContentsMargins(20, 20, 20, 20)
+        general_layout.setSpacing(15)
+
+        general_title = QLabel("基本配置")
+        general_title.setObjectName("sectionTitle")
+
+        auto_layout = QHBoxLayout()
+        auto_label = QLabel("完成后自动开始下一产品检测:")
+        auto_label.setObjectName("paramLabel")
+        self.auto_start_next_checkbox = QCheckBox()
+        self.auto_start_next_checkbox.setObjectName("paramInput")
+        auto_layout.addWidget(auto_label)
+        auto_layout.addWidget(self.auto_start_next_checkbox)
+
+        general_layout.addWidget(general_title)
+        general_layout.addLayout(auto_layout)
+
+        layout.addWidget(general_frame)
         
         # Server configuration
         server_frame = QFrame()
@@ -217,6 +239,7 @@ class SystemPage(QFrame):
                 storage = data.get("storage", {})
                 image = storage.get("image", {})
                 log = storage.get("log", {})
+                general = data.get("general", {})
                 if "address" in server:
                     self.addr_input.setText(str(server.get("address", "")))
                 if "port" in server:
@@ -229,6 +252,7 @@ class SystemPage(QFrame):
                     self.log_path_input.setText(self.normalize_path_for_os(str(log.get("path", ""))))
                 if "retention_days" in log:
                     self.log_retention_input.setText(str(log.get("retention_days", "")))
+                self.auto_start_next_checkbox.setChecked(bool(general.get("auto_start_next", False)))
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
 
@@ -259,6 +283,8 @@ class SystemPage(QFrame):
                 data["storage"]["log"]["retention_days"] = int(self.log_retention_input.text().strip())
             except ValueError:
                 data["storage"]["log"]["retention_days"] = self.log_retention_input.text().strip()
+            data.setdefault("general", {})
+            data["general"]["auto_start_next"] = bool(self.auto_start_next_checkbox.isChecked())
             p.parent.mkdir(parents=True, exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)

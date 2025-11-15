@@ -21,6 +21,7 @@ from datetime import datetime
 import numpy as np
 import importlib.util
 import sys
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,7 @@ class ProcessExecutionWindow(QWidget):
         self._last_qimage: Optional[QImage] = None
         self._last_display_size = None
         self.detection_boxes: List[QRect] = []
+        self.auto_start_next = self._read_auto_start_next_setting()
         # Overlay-related attributes (initialized early to avoid AttributeError)
         self.overlay_widget: Optional[QWidget] = None
         self.pass_overlay: Optional[QWidget] = None
@@ -293,6 +295,25 @@ class ProcessExecutionWindow(QWidget):
                 font-family: {self.custom_font_family};
             }}
         """)
+
+        self.toast_container = QFrame(self)
+        self.toast_container.setObjectName("toastOverlay")
+        self.toast_container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.toast_container.setStyleSheet("background-color: transparent;")
+        self.toast_container.setFixedHeight(60)
+        toast_layout = QHBoxLayout(self.toast_container)
+        toast_layout.setContentsMargins(0, 0, 0, 0)
+        toast_layout.addStretch()
+        self.toast_label = QLabel()
+        self.toast_label.setVisible(False)
+        self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#3CC37A; color:#FFFFFF;")
+        toast_layout.addWidget(self.toast_label)
+        toast_layout.addStretch()
+        self.toast_container.setVisible(False)
+        try:
+            self._position_toast()
+        except Exception:
+            pass
 
     def create_header_bar(self) -> QWidget:
         """Create the top header bar with product info, progress, and controls."""
@@ -1649,10 +1670,16 @@ class ProcessExecutionWindow(QWidget):
     def advance_to_next_step(self):
         """Advance to the next process step."""
         if self.current_step_index >= len(self.steps) - 1:
-            # Last step completed
             logger.info("All steps completed")
             self.set_step_status(self.current_step_index, 'completed')
-            self.show_completion_dialog()
+            if getattr(self, 'auto_start_next', False):
+                self.reset_for_next_product()
+                try:
+                    self.show_toast("已自动开始下一产品工艺检测", True)
+                except Exception:
+                    pass
+            else:
+                self.show_completion_dialog()
             return
 
         # Mark current step as completed
@@ -1680,10 +1707,55 @@ class ProcessExecutionWindow(QWidget):
 
         logger.info(f"Advanced to step {self.current_step_index + 1}")
 
+    def show_toast(self, text: str, success: bool = True):
+        if not hasattr(self, "toast_label"):
+            return
+        self.toast_label.setText(text)
+        if success:
+            self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#3CC37A; color:#FFFFFF;")
+        else:
+            self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#E85454; color:#FFFFFF;")
+        self.toast_label.setVisible(True)
+        self.toast_container.setVisible(True)
+        try:
+            self._position_toast()
+        except Exception:
+            pass
+        QTimer.singleShot(2000, self.hide_toast)
+
+    def hide_toast(self):
+        if hasattr(self, "toast_label"):
+            self.toast_label.setVisible(False)
+            self.toast_container.setVisible(False)
+
+    def _position_toast(self):
+        h = self.toast_container.height() if self.toast_container.height() > 0 else 60
+        y = max(0, self.height() - h - 16)
+        self.toast_container.setGeometry(0, y, self.width(), h)
+
+    def resizeEvent(self, event: QResizeEvent):
+        super().resizeEvent(event)
+        try:
+            if hasattr(self, 'toast_container') and self.toast_container.isVisible():
+                self._position_toast()
+        except Exception:
+            pass
+
     def _is_simulated_process(self) -> bool:
         name = str(self.process_data.get('algorithm_name', self.process_data.get('name', '')))
         pid = str(self.process_data.get('pid', ''))
         return ('模拟' in name) or pid.startswith('SIM-')
+
+    def _read_auto_start_next_setting(self) -> bool:
+        try:
+            p = Path.cwd() / "config.json"
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                general = data.get("general", {})
+                return bool(general.get("auto_start_next", False))
+        except Exception:
+            pass
+        return False
 
     def on_retry_detection(self):
         """Handle retry detection button click (from FAIL overlay)."""

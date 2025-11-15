@@ -12,5 +12,8 @@
       "path": "F:\\Ai-LLM\\southwest\\05ui-poc",
       "retention_days": 90
     }
+  },
+  "general": {
+    "auto_start_next": true
   }
 }

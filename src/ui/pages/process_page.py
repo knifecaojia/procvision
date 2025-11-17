@@ -62,13 +62,23 @@ class ProcessPage(QFrame):
         
         base_dir = Path(__file__).resolve().parents[3] / "3rd" / "assembly_direction_checker"
         excel_dir = base_dir / "data" / "process_excel"
-        external_info = None
+        external_infos = []
         try:
             pids = sorted([p.stem for p in excel_dir.glob("*.xlsx")] + [p.stem for p in excel_dir.glob("*.xls")])
             pids = [pid for pid in pids if not pid.startswith("~$")]
             if pids:
                 logger.info(f"Discovered external pids: {', '.join(pids)}")
                 sys.path.insert(0, str(base_dir))
+                third_src = base_dir / "src"
+                if third_src.exists():
+                    sys.path.insert(0, str(third_src))
+                    try:
+                        pkg = sys.modules.get("src")
+                        if pkg is not None and hasattr(pkg, "__path__"):
+                            if str(third_src) not in pkg.__path__:
+                                pkg.__path__.insert(0, str(third_src))
+                    except Exception:
+                        pass
                 inner_dir = base_dir / "assembly_direction_checker"
                 if inner_dir.exists():
                     sys.path.insert(0, str(inner_dir))
@@ -76,18 +86,23 @@ class ProcessPage(QFrame):
                 module = importlib.util.module_from_spec(spec)
                 assert spec is not None and spec.loader is not None
                 spec.loader.exec_module(module)
-                external_info = module.get_info(pids[0])
-                external_info["pid"] = pids[0]
+                for pid in pids:
+                    try:
+                        info = module.get_info(pid)
+                        info["pid"] = pid
+                        external_infos.append(info)
+                    except Exception as e2:
+                        logger.error(f"Failed to load external info for pid {pid}: {e2}")
         except Exception as e:
             logger.error(f"Failed to load external process info: {e}")
             try:
                 candidates = [base_dir / f"process_info_{pid}.json" for pid in pids] if 'pids' in locals() else []
                 for candidate in candidates:
                     if candidate.exists():
-                        external_info = json.loads(candidate.read_text(encoding="utf-8"))
-                        external_info["pid"] = candidate.stem.split("_")[-1]
+                        info = json.loads(candidate.read_text(encoding="utf-8"))
+                        info["pid"] = candidate.stem.split("_")[-1]
+                        external_infos.append(info)
                         logger.info(f"Loaded external process info from JSON: {candidate.name}")
-                        break
             except Exception as e2:
                 logger.error(f"Failed to fallback load external JSON: {e2}")
 
@@ -253,7 +268,7 @@ class ProcessPage(QFrame):
                 ]
             }
         ]
-        processes_data = ([external_info] if external_info else []) + processes_data_simulated
+        processes_data = external_infos + processes_data_simulated
         
         # Create and add cards in single column
         cards_layout = QGridLayout()

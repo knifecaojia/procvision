@@ -11,7 +11,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QProgressBar,
-    QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy
+    QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy, QDialog, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent
 from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont
@@ -22,6 +22,7 @@ import numpy as np
 import importlib.util
 import sys
 import json
+from ...procedure_engine.engine import execute_step as engine_execute_step
 
 logger = logging.getLogger(__name__)
 
@@ -1020,12 +1021,33 @@ class ProcessExecutionWindow(QWidget):
 
         self.pass_overlay = self.create_pass_overlay()
         self.fail_overlay = self.create_fail_overlay()
+        self.preview_overlay = QWidget()
+        self.preview_overlay.setObjectName("previewOverlay")
+        self.preview_overlay.setStyleSheet("background-color: rgba(0,0,0,140); border: 1px solid #3a3a3a; border-radius: 10px;")
+        pv_layout = QVBoxLayout(self.preview_overlay)
+        pv_layout.setContentsMargins(8, 8, 8, 8)
+        pv_layout.setSpacing(8)
+        self.preview_title = QLabel("预览")
+        self.preview_title.setStyleSheet("color: #ffffff; font-size: 16px;")
+        self.preview_image = QLabel()
+        self.preview_image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_image.setStyleSheet("background-color: transparent;")
+        self.preview_close = QPushButton("关闭")
+        self.preview_close.setFixedHeight(32)
+        self.preview_close.setStyleSheet("background-color:#f97316; color:#ffffff; border:none; border-radius:4px;")
+        self.preview_close.clicked.connect(lambda: self.show_preview_overlay(None, None))
+        pv_layout.addWidget(self.preview_title)
+        pv_layout.addWidget(self.preview_image, 1)
+        pv_layout.addWidget(self.preview_close)
+        self.preview_visible = False
         self.pass_overlay.setParent(w)
         self.fail_overlay.setParent(w)
+        self.preview_overlay.setParent(w)
         # 初始状态均为隐藏，避免在尚未完成父子绑定时触发可见性更新
         w.setVisible(False)
         self.pass_overlay.setVisible(False)
         self.fail_overlay.setVisible(False)
+        self.preview_overlay.setVisible(False)
         return w
 
     def create_guidance_overlay(self) -> QWidget:
@@ -1270,12 +1292,14 @@ class ProcessExecutionWindow(QWidget):
         # Show overlays only for pass/fail results
         is_pass = self.detection_status == 'pass'
         is_fail = self.detection_status == 'fail'
+        is_preview = getattr(self, 'preview_visible', False)
         # 顶层叠加层显示与隐藏（属性存在时才处理）
         overlay = getattr(self, 'overlay_widget', None)
         pass_ov = getattr(self, 'pass_overlay', None)
         fail_ov = getattr(self, 'fail_overlay', None)
+        prev_ov = getattr(self, 'preview_overlay', None)
         if overlay is not None:
-            overlay.setVisible(is_pass or is_fail)
+            overlay.setVisible(is_pass or is_fail or is_preview)
             try:
                 overlay.set_status(self.detection_status)
                 overlay.set_boxes(self.detection_boxes or [])
@@ -1285,6 +1309,8 @@ class ProcessExecutionWindow(QWidget):
             pass_ov.setVisible(is_pass)
         if fail_ov is not None:
             fail_ov.setVisible(is_fail)
+        if prev_ov is not None:
+            prev_ov.setVisible(is_preview)
         # 确保充满覆盖区域并位于顶层
         try:
             if overlay is not None and overlay.isVisible():
@@ -1292,6 +1318,8 @@ class ProcessExecutionWindow(QWidget):
                     pass_ov.setGeometry(overlay.rect())
                 if fail_ov is not None:
                     fail_ov.setGeometry(overlay.rect())
+                if prev_ov is not None and prev_ov.isVisible():
+                    prev_ov.setGeometry(overlay.rect())
                 overlay.raise_()
         except Exception:
             pass
@@ -1322,6 +1350,14 @@ class ProcessExecutionWindow(QWidget):
             padding: 12px;
             border-bottom: 1px solid #3a3a3a;
         """)
+        try:
+            if not hasattr(self, "_event_filters"):
+                self._event_filters = []
+            gf = self._make_global_preview_dbl()
+            header.installEventFilter(gf)
+            self._event_filters.append(gf)
+        except Exception:
+            pass
         layout.addWidget(header)
 
         # Scroll area for step cards
@@ -1444,6 +1480,17 @@ class ProcessExecutionWindow(QWidget):
         text_layout.addWidget(desc_label)
 
         layout.addLayout(text_layout, 1)
+
+        try:
+            if not hasattr(self, "_event_filters"):
+                self._event_filters = []
+            sf = self._make_step_card_dbl(step.id)
+            card.installEventFilter(sf)
+            name_label.installEventFilter(sf)
+            desc_label.installEventFilter(sf)
+            self._event_filters.append(sf)
+        except Exception:
+            pass
 
         return card
 
@@ -1602,24 +1649,7 @@ class ProcessExecutionWindow(QWidget):
             idx = self.current_step_index
             sd = self.process_data.get('steps_detail', [])
             step_number = sd[idx].get('step_number', idx + 1) if isinstance(sd, list) and idx < len(sd) else (idx + 1)
-            pid = self.process_data.get('pid', None)
-            base_dir = Path(__file__).resolve().parents[3] / "3rd" / "assembly_direction_checker"
-            sys.path.insert(0, str(base_dir))
-            inner_dir = base_dir / "assembly_direction_checker"
-            if inner_dir.exists():
-                sys.path.insert(0, str(inner_dir))
-            original_src = sys.modules.get("src")
-            try:
-                if original_src is not None:
-                    del sys.modules["src"]
-                spec = importlib.util.spec_from_file_location("main_findal", str(base_dir / "main_findal.py"))
-                module = importlib.util.module_from_spec(spec)
-                assert spec is not None and spec.loader is not None
-                spec.loader.exec_module(module)
-                result = module.execute_step(img, step_number, pid=pid)
-            finally:
-                if original_src is not None:
-                    sys.modules["src"] = original_src
+            result = engine_execute_step(img, step_number, self.process_data)
             status = str(result.get('status', '')).upper()
             if status == 'OK':
                 self.detection_boxes = []
@@ -1738,6 +1768,8 @@ class ProcessExecutionWindow(QWidget):
         try:
             if hasattr(self, 'toast_container') and self.toast_container.isVisible():
                 self._position_toast()
+            if getattr(self, 'preview_visible', False):
+                self.update_overlay_visibility()
         except Exception:
             pass
 
@@ -1923,6 +1955,116 @@ class ProcessExecutionWindow(QWidget):
         self.rebuild_status_section()
 
         logger.info("Reset for next product")
+
+    def _make_step_card_dbl(self, index: int):
+        class _D(QObject):
+            def __init__(self, outer, idx):
+                super().__init__()
+                self._outer = outer
+                self._idx = idx
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.MouseButtonDblClick:
+                    try:
+                        self._outer._on_step_card_dbl(self._idx)
+                    except Exception:
+                        pass
+                    return True
+                return False
+        return _D(self, index)
+
+    def _on_step_card_dbl(self, index: int):
+        try:
+            sd = self.process_data.get('steps_detail', [])
+            if not isinstance(sd, list) or index < 0 or index >= len(sd):
+                return
+            item = sd[index]
+            img_np = item.get('template_image_np')
+            img_b64 = item.get('image_base64')
+            qimg = None
+            if img_np is not None:
+                try:
+                    bgr = img_np
+                    h, w = bgr.shape[:2]
+                    rgb = bgr[:, :, ::-1]
+                    qimg = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+                except Exception:
+                    qimg = None
+            if qimg is None and isinstance(img_b64, str) and img_b64:
+                try:
+                    import base64
+                    raw = base64.b64decode(img_b64)
+                    qimg = QImage()
+                    qimg.loadFromData(raw)
+                except Exception:
+                    qimg = None
+            if qimg is None:
+                return
+            self.show_preview_overlay(str(item.get('step_name', f'步骤 {index+1}')), qimg)
+        except Exception:
+            pass
+
+    def _make_global_preview_dbl(self):
+        class _G(QObject):
+            def __init__(self, outer):
+                super().__init__()
+                self._outer = outer
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.MouseButtonDblClick:
+                    try:
+                        self._outer._on_global_preview()
+                    except Exception:
+                        pass
+                    return True
+                return False
+        return _G(self)
+
+    def _on_global_preview(self):
+        try:
+            g = self.process_data.get('globals', {})
+            tpl_np = g.get('global_template_np')
+            qimg = None
+            if tpl_np is not None:
+                try:
+                    bgr = tpl_np
+                    h, w = bgr.shape[:2]
+                    rgb = bgr[:, :, ::-1]
+                    qimg = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+                except Exception:
+                    qimg = None
+            if qimg is None:
+                gt = g.get('global_template', {})
+                img_b64 = gt.get('image_base64')
+                if isinstance(img_b64, str) and img_b64:
+                    try:
+                        import base64
+                        raw = base64.b64decode(img_b64)
+                        qimg = QImage()
+                        qimg.loadFromData(raw)
+                    except Exception:
+                        qimg = None
+            if qimg is None:
+                return
+            self.show_preview_overlay('全局模板', qimg)
+        except Exception:
+            pass
+
+    def show_preview_overlay(self, title: Optional[str], qimg: Optional[QImage]):
+        try:
+            if title is None or qimg is None:
+                self.preview_visible = False
+                self.update_overlay_visibility()
+                return
+            self.preview_title.setText(str(title))
+            pix = QPixmap.fromImage(qimg)
+            rect = self.overlay_widget.rect()
+            w = min(rect.width() - 40, 900)
+            h = min(rect.height() - 40, 700)
+            pix = pix.scaled(w - 40, h - 100, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self.preview_image.setPixmap(pix)
+            self.preview_visible = True
+            self.update_overlay_visibility()
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         """Handle window close event."""

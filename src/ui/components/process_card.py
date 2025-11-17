@@ -146,6 +146,11 @@ class ProcessCard(QFrame):
         badges_layout = QHBoxLayout()
         badges_layout.setSpacing(5)
 
+        json_file = self.process_data.get("json_file")
+        if json_file:
+            json_badge = QLabel(f"JSON {json_file}")
+            json_badge.setObjectName("typeBadge")
+            badges_layout.addWidget(json_badge)
         badges_layout.addStretch()
 
         header_layout.addLayout(title_layout)
@@ -164,7 +169,7 @@ class ProcessCard(QFrame):
         steps_layout.setContentsMargins(8, 8, 8, 8)
         steps_label = QLabel("工艺步骤")
         steps_label.setObjectName("infoLabel")
-        steps_value = QLabel(f"{len(self.process_data['steps'])} 步")
+        steps_value = QLabel(f"{len(self.process_data.get('steps_detail', self.process_data.get('steps', [])))} 步")
         steps_value.setObjectName("infoValue")
         steps_layout.addWidget(steps_label)
         steps_layout.addWidget(steps_value)
@@ -234,11 +239,15 @@ class ProcessCard(QFrame):
             "name": self.process_data.get("algorithm_name", ""),
             "title": self.process_data.get("algorithm_name", ""),
             "version": self.process_data.get("algorithm_version", ""),
-            "steps": len(self.process_data.get("steps", [])),
+            "steps": len(self.process_data.get("steps_detail", self.process_data.get("steps", []))),
             "algorithm_name": self.process_data.get("algorithm_name", ""),
             "algorithm_version": self.process_data.get("algorithm_version", ""),
             "summary": self.process_data.get("summary", ""),
-            "steps_detail": self.process_data.get("steps", []),
+            "steps_detail": self.process_data.get("steps_detail", []),
             "pid": self.process_data.get("pid", None),
+            "json_file": self.process_data.get("json_file", None),
+            "json_path": self.process_data.get("json_path", None),
+            "globals": self.process_data.get("globals", {}),
+            "process_file_info": self.process_data.get("process_file_info", {}),
         }
         self.start_process_clicked.emit(normalized)

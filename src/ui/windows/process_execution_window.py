@@ -11,7 +11,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QProgressBar,
-    QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy
+    QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent
 from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont
@@ -167,6 +167,8 @@ class ProcessExecutionWindow(QWidget):
         # Initialize process steps
         self.steps: List[ProcessStep] = self._initialize_steps()
         self.current_instruction = self.steps[0].description if self.steps else "No steps available"
+        self._debug_input_enabled = False
+        self._debug_image_path: Optional[str] = None
 
         # Set window properties
         self.setWindowTitle(f"工艺执行 - {process_data.get('name', '')}")
@@ -571,6 +573,12 @@ class ProcessExecutionWindow(QWidget):
         self.time_label = QLabel(datetime.now().strftime("%H:%M:%S"))
         self.time_label.setObjectName("timeLabel")
         self.time_label.setStyleSheet("font-size: 18px; color: #22c55e;")
+        try:
+            f = self._make_time_debug_filter()
+            self.time_label.installEventFilter(f)
+            self._time_debug_filter = f
+        except Exception:
+            pass
 
         clock_layout.addWidget(self.date_label)
         clock_layout.addWidget(self.time_label)
@@ -862,6 +870,8 @@ class ProcessExecutionWindow(QWidget):
     def on_frame_ready(self, qimage: QImage):
         if not self.camera_active:
             return
+        if getattr(self, "_debug_input_enabled", False):
+            return
 
         pixmap = QPixmap.fromImage(qimage)
         if not pixmap.isNull():
@@ -1029,6 +1039,58 @@ class ProcessExecutionWindow(QWidget):
                         pass
                 return False
         return _Sync(self.overlay_widget, self)
+
+    def _make_time_debug_filter(self):
+        class _Time(QObject):
+            def __init__(self, window):
+                super().__init__()
+                self._w = window
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.MouseButtonDblClick:
+                    try:
+                        self._w._on_debug_pick_image()
+                    except Exception:
+                        pass
+                    return True
+                return False
+        return _Time(self)
+
+    def _on_debug_pick_image(self):
+        initial = str(Path.cwd())
+        path, _ = QFileDialog.getOpenFileName(self, "选择调试图片", initial, "Images (*.png *.jpg *.jpeg *.bmp)")
+        if not path:
+            return
+        qi = QImage(path)
+        if qi.isNull():
+            try:
+                self.show_toast("图片加载失败", False)
+            except Exception:
+                pass
+            return
+        self._debug_image_path = path
+        self._debug_input_enabled = True
+        self._last_qimage = qi
+        try:
+            self._last_frame_size = qi.size()  # type: ignore[attr-defined]
+        except Exception:
+            self._last_frame_size = None
+        pm = QPixmap.fromImage(qi)
+        spm = pm.scaled(
+            self.base_image_label.width(),
+            self.base_image_label.height(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        try:
+            self._last_display_size = spm.size()
+        except Exception:
+            self._last_display_size = None
+        self.base_image_label.setPixmap(spm)
+        self.detection_status = 'idle'
+        try:
+            self.rebuild_status_section()
+        except Exception:
+            pass
 
     def create_overlay_widget(self) -> QWidget:
         """Create overlay for detection drawings and pass/fail cards"""
@@ -1552,7 +1614,7 @@ class ProcessExecutionWindow(QWidget):
 
         # 统一使用一个按钮；检测中时仅改文案并禁用，不显示任何“检测中”标签
         detecting = self.detection_status == "detecting"
-        allowed = self.camera_active and not detecting
+        allowed = (self.camera_active or (self._last_qimage is not None)) and not detecting
         btn_text = "检测中" if detecting else "开始检测"
         self.start_detection_btn = QPushButton(btn_text)
         self.start_detection_btn.setObjectName("startDetectionButton")
@@ -1617,7 +1679,7 @@ class ProcessExecutionWindow(QWidget):
 
     def on_start_detection(self):
         """Handle start detection button click."""
-        if self.detection_status != 'idle' or not self.camera_active:
+        if self.detection_status != 'idle' or (not self.camera_active and self._last_qimage is None):
             return
 
         if self.is_simulated:
@@ -1664,7 +1726,8 @@ class ProcessExecutionWindow(QWidget):
                     sys.modules["src"] = original_src
             status = str(result.get('status', '')).upper()
             if status == 'OK':
-                self.detection_boxes = []
+                matched = result.get('matched_objects', [])
+                self.detection_boxes = self._ng_regions_to_rects(matched) if isinstance(matched, list) else []
                 self.detection_status = 'pass'
                 self.update_overlay_visibility()
                 self.rebuild_status_section()
@@ -1672,6 +1735,12 @@ class ProcessExecutionWindow(QWidget):
                 self.advance_timer.setSingleShot(True)
                 self.advance_timer.timeout.connect(self.advance_to_next_step)
                 self.advance_timer.start(2000)
+            elif status == 'NG':
+                ng_regions = result.get('ng_regions', [])
+                self.detection_boxes = self._ng_regions_to_rects(ng_regions)
+                self.detection_status = 'fail'
+                self.update_overlay_visibility()
+                self.rebuild_status_section()
             else:
                 ng_regions = result.get('ng_regions', [])
                 self.detection_boxes = self._ng_regions_to_rects(ng_regions)

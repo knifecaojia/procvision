@@ -1,5 +1,5 @@
 """
-Process information page for the industrial vision system.
+Assembly guidance and inspection page for the industrial vision system.
 """
 
 import logging
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProcessPage(QFrame):
-    """Process information page implementation."""
+    """Assembly guidance and inspection page implementation."""
 
     def __init__(self, parent=None, camera_service=None):
         super().__init__(parent)
@@ -39,7 +39,7 @@ class ProcessPage(QFrame):
         header_layout = QHBoxLayout(header_frame)
         header_layout.setContentsMargins(0, 0, 0, 0)
         
-        title_label = QLabel("工艺信息")
+        title_label = QLabel("装配引导与检测")
         title_label.setObjectName("processTitle")
         
         header_layout.addWidget(title_label)

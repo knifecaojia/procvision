@@ -302,7 +302,7 @@ class MainWindow(QMainWindow):
             ("camera", "相机设置", "Camera Settings"),
             ("system", "系统设置", "System Settings"),
             ("model", "模型管理", "Model Management"),
-            ("process", "工艺信息", "Process Information"),
+            ("process", "装配引导与检测", "Assembly Guidance & Inspection"),
             ("records", "工作记录", "Work Records")
         ]
 
@@ -444,7 +444,7 @@ class MainWindow(QMainWindow):
         pass
 
     def create_process_page(self):
-        """Create process information page."""
+        """Create assembly guidance and inspection page."""
         # This method is no longer needed as we're using dynamic page loading
         pass
 
@@ -454,7 +454,7 @@ class MainWindow(QMainWindow):
         pass
 
     def show_process_page(self):
-        """Show the process page by default during startup."""
+        """Show the assembly guidance and inspection page by default during startup."""
         if getattr(self, "content_stack", None):
             self.switch_page("process")
 

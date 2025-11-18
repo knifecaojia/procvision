@@ -14,6 +14,9 @@
     }
   },
   "general": {
-    "auto_start_next": true
+    "auto_start_next": true,
+    "result_prompt_position": "top_right",
+    "draw_boxes_ok": false,
+    "draw_boxes_ng": true
   }
 }

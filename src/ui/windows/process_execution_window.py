@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent
 from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, QSize
 from PySide6.QtSvgWidgets import QSvgWidget
 from datetime import datetime
 import numpy as np
@@ -49,6 +49,8 @@ class OverlayWidget(QWidget):
         self.setStyleSheet("background-color: transparent;")
         self._boxes: List[QRect] = []
         self._status: DetectionStatus = 'idle'
+        self._draw_ok: bool = True
+        self._draw_ng: bool = True
 
     def set_boxes(self, boxes: List[QRect]):
         self._boxes = boxes
@@ -58,9 +60,20 @@ class OverlayWidget(QWidget):
         self._status = status
         self.update()
 
+    def set_draw_options(self, draw_ok: bool, draw_ng: bool):
+        self._draw_ok = bool(draw_ok)
+        self._draw_ng = bool(draw_ng)
+        self.update()
+
     def paintEvent(self, event):
         super().paintEvent(event)
-        if self._status not in ('pass', 'fail') or not self._boxes:
+        if self._status not in ('pass', 'fail'):
+            return
+        if self._status == 'pass' and not self._draw_ok:
+            return
+        if self._status == 'fail' and not self._draw_ng:
+            return
+        if not self._boxes:
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -141,6 +154,8 @@ class ProcessExecutionWindow(QWidget):
         self._last_display_size = None
         self.detection_boxes: List[QRect] = []
         self.auto_start_next = self._read_auto_start_next_setting()
+        self.result_prompt_position = self._read_result_prompt_position()
+        self.draw_boxes_ok, self.draw_boxes_ng = self._read_draw_box_settings()
         # Overlay-related attributes (initialized early to avoid AttributeError)
         self.overlay_widget: Optional[QWidget] = None
         self.pass_overlay: Optional[QWidget] = None
@@ -990,25 +1005,30 @@ class ProcessExecutionWindow(QWidget):
             pass
 
     def _make_overlay_sync(self):
-        """Factory an event filter to sync overlay geometry with base label"""
         class _Sync(QObject):
-            def __init__(self, overlay):
+            def __init__(self, overlay, window):
                 super().__init__()
                 self._overlay = overlay
+                self._window = window
             def eventFilter(self, obj, event):
                 if event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
-                    # 保持叠加层与视频区域完全对齐
                     self._overlay.setGeometry(obj.geometry())
-                    # 同步子控件尺寸以充满叠加层
                     try:
                         parent = self._overlay
+                        target = None
                         for child in parent.children():
-                            if isinstance(child, QWidget):
-                                child.setGeometry(parent.rect())
+                            if isinstance(child, QWidget) and child.isVisible():
+                                target = child
+                                break
+                        if target is not None:
+                            target.adjustSize()
+                            sz = target.sizeHint()
+                            g = self._window._compute_prompt_geometry(sz)
+                            target.setGeometry(g)
                     except Exception:
                         pass
                 return False
-        return _Sync(self.overlay_widget)
+        return _Sync(self.overlay_widget, self)
 
     def create_overlay_widget(self) -> QWidget:
         """Create overlay for detection drawings and pass/fail cards"""
@@ -1034,7 +1054,7 @@ class ProcessExecutionWindow(QWidget):
         widget.setObjectName("guidanceOverlay")
 
         layout = QVBoxLayout(widget)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
 
         # Guidance box container
         box_container = QFrame()
@@ -1197,14 +1217,6 @@ class ProcessExecutionWindow(QWidget):
         error_layout = QVBoxLayout(error_card)
         error_layout.setSpacing(12)
 
-        # Error title
-        error_title = QLabel("检测到缺陷")
-        error_title.setStyleSheet("""
-            color: #fecaca;
-            font-size: 16px;
-            font-weight: bold;
-        """)
-
         # Error details
         error_details = QLabel("未检测到元件或位置偏移超出容差范围")
         error_details.setStyleSheet("""
@@ -1255,7 +1267,6 @@ class ProcessExecutionWindow(QWidget):
         button_layout.addWidget(self.retry_btn)
         button_layout.addWidget(self.skip_btn)
 
-        error_layout.addWidget(error_title)
         error_layout.addWidget(error_details)
         error_layout.addLayout(button_layout)
 
@@ -1279,6 +1290,7 @@ class ProcessExecutionWindow(QWidget):
             try:
                 overlay.set_status(self.detection_status)
                 overlay.set_boxes(self.detection_boxes or [])
+                overlay.set_draw_options(bool(self.draw_boxes_ok), bool(self.draw_boxes_ng))
             except Exception:
                 pass
         if pass_ov is not None:
@@ -1288,13 +1300,43 @@ class ProcessExecutionWindow(QWidget):
         # 确保充满覆盖区域并位于顶层
         try:
             if overlay is not None and overlay.isVisible():
-                if pass_ov is not None:
-                    pass_ov.setGeometry(overlay.rect())
-                if fail_ov is not None:
-                    fail_ov.setGeometry(overlay.rect())
+                target = pass_ov if is_pass else (fail_ov if is_fail else None)
+                if target is not None:
+                    target.adjustSize()
+                    sz = target.sizeHint()
+                    g = self._compute_prompt_geometry(sz)
+                    target.setGeometry(g)
                 overlay.raise_()
         except Exception:
             pass
+
+    def _compute_prompt_geometry(self, child_size: QSize) -> QRect:
+        r = self.overlay_widget.rect() if hasattr(self, 'overlay_widget') and self.overlay_widget is not None else QRect(0, 0, 0, 0)
+        w = max(1, min(child_size.width(), r.width()))
+        h = max(1, min(child_size.height(), r.height()))
+        m = 16
+        pos = str(getattr(self, 'result_prompt_position', 'center'))
+        if pos == 'top_left':
+            x = m; y = m
+        elif pos == 'top_center':
+            x = (r.width() - w) // 2; y = m
+        elif pos == 'top_right':
+            x = max(0, r.width() - w - m); y = m
+        elif pos == 'center_left':
+            x = m; y = (r.height() - h) // 2
+        elif pos == 'center':
+            x = (r.width() - w) // 2; y = (r.height() - h) // 2
+        elif pos == 'center_right':
+            x = max(0, r.width() - w - m); y = (r.height() - h) // 2
+        elif pos == 'bottom_left':
+            x = m; y = max(0, r.height() - h - m)
+        elif pos == 'bottom_center':
+            x = (r.width() - w) // 2; y = max(0, r.height() - h - m)
+        elif pos == 'bottom_right':
+            x = max(0, r.width() - w - m); y = max(0, r.height() - h - m)
+        else:
+            x = (r.width() - w) // 2; y = (r.height() - h) // 2
+        return QRect(x, y, w, h)
 
     def create_step_list_panel(self) -> QWidget:
         """Create the left sidebar with scrollable step list."""
@@ -1756,6 +1798,34 @@ class ProcessExecutionWindow(QWidget):
         except Exception:
             pass
         return False
+
+    def _read_result_prompt_position(self) -> str:
+        try:
+            p = Path.cwd() / "config.json"
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                general = data.get("general", {})
+                val = str(general.get("result_prompt_position", "center"))
+                allowed = {
+                    "top_left", "top_center", "top_right",
+                    "center_left", "center", "center_right",
+                    "bottom_left", "bottom_center", "bottom_right"
+                }
+                return val if val in allowed else "center"
+        except Exception:
+            pass
+        return "center"
+
+    def _read_draw_box_settings(self) -> tuple[bool, bool]:
+        try:
+            p = Path.cwd() / "config.json"
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                general = data.get("general", {})
+                return bool(general.get("draw_boxes_ok", True)), bool(general.get("draw_boxes_ng", True))
+        except Exception:
+            pass
+        return True, True
 
     def on_retry_detection(self):
         """Handle retry detection button click (from FAIL overlay)."""

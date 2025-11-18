@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QSpacerItem, QSizePolicy,
-    QFileDialog, QCheckBox
+    QFileDialog, QCheckBox, QComboBox
 )
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
@@ -64,6 +64,58 @@ class SystemPage(QFrame):
 
         general_layout.addWidget(general_title)
         general_layout.addLayout(auto_layout)
+
+        pos_layout = QHBoxLayout()
+        pos_label = QLabel("检测结果提示位置:")
+        pos_label.setObjectName("paramLabel")
+        self.result_position_combo = QComboBox()
+        self.result_position_combo.setObjectName("paramInput")
+        self.result_position_combo.setStyleSheet(
+            "QComboBox {"
+            "background-color: #252525;"
+            "border: 1px solid #3a3a3a;"
+            "color: #ffffff;"
+            "border-radius: 6px;"
+            "padding: 6px 12px;"
+            "}"
+            "QComboBox::drop-down { border: none; }"
+            "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #9ca3af; margin-right: 6px; }"
+            "QComboBox QAbstractItemView {"
+            "background-color: #252525;"
+            "border: 1px solid #3a3a3a;"
+            "color: #ffffff;"
+            "selection-background-color: #f97316;"
+            "}"
+        )
+        self.result_position_combo.addItem("左上", "top_left")
+        self.result_position_combo.addItem("正上", "top_center")
+        self.result_position_combo.addItem("右上", "top_right")
+        self.result_position_combo.addItem("左中", "center_left")
+        self.result_position_combo.addItem("正中", "center")
+        self.result_position_combo.addItem("右中", "center_right")
+        self.result_position_combo.addItem("左下", "bottom_left")
+        self.result_position_combo.addItem("正下", "bottom_center")
+        self.result_position_combo.addItem("右下", "bottom_right")
+        pos_layout.addWidget(pos_label)
+        pos_layout.addWidget(self.result_position_combo)
+
+        boxopt_layout = QHBoxLayout()
+        ok_box_label = QLabel("OK绘制框线:")
+        ok_box_label.setObjectName("paramLabel")
+        self.draw_ok_checkbox = QCheckBox()
+        self.draw_ok_checkbox.setObjectName("paramInput")
+        ng_box_label = QLabel("NG绘制框线:")
+        ng_box_label.setObjectName("paramLabel")
+        self.draw_ng_checkbox = QCheckBox()
+        self.draw_ng_checkbox.setObjectName("paramInput")
+        boxopt_layout.addWidget(ok_box_label)
+        boxopt_layout.addWidget(self.draw_ok_checkbox)
+        boxopt_layout.addSpacerItem(QSpacerItem(20, 20, QSizePolicy.MinimumExpanding, QSizePolicy.Minimum))
+        boxopt_layout.addWidget(ng_box_label)
+        boxopt_layout.addWidget(self.draw_ng_checkbox)
+
+        general_layout.addLayout(pos_layout)
+        general_layout.addLayout(boxopt_layout)
 
         layout.addWidget(general_frame)
         
@@ -253,6 +305,15 @@ class SystemPage(QFrame):
                 if "retention_days" in log:
                     self.log_retention_input.setText(str(log.get("retention_days", "")))
                 self.auto_start_next_checkbox.setChecked(bool(general.get("auto_start_next", False)))
+                rp = str(general.get("result_prompt_position", "center"))
+                idx = 0
+                for i in range(self.result_position_combo.count()):
+                    if self.result_position_combo.itemData(i) == rp:
+                        idx = i
+                        break
+                self.result_position_combo.setCurrentIndex(idx)
+                self.draw_ok_checkbox.setChecked(bool(general.get("draw_boxes_ok", True)))
+                self.draw_ng_checkbox.setChecked(bool(general.get("draw_boxes_ng", True)))
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
 
@@ -285,6 +346,13 @@ class SystemPage(QFrame):
                 data["storage"]["log"]["retention_days"] = self.log_retention_input.text().strip()
             data.setdefault("general", {})
             data["general"]["auto_start_next"] = bool(self.auto_start_next_checkbox.isChecked())
+            try:
+                sel_idx = self.result_position_combo.currentIndex()
+                data["general"]["result_prompt_position"] = str(self.result_position_combo.itemData(sel_idx))
+            except Exception:
+                data["general"]["result_prompt_position"] = "center"
+            data["general"]["draw_boxes_ok"] = bool(self.draw_ok_checkbox.isChecked())
+            data["general"]["draw_boxes_ng"] = bool(self.draw_ng_checkbox.isChecked())
             p.parent.mkdir(parents=True, exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)

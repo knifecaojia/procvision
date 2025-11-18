@@ -103,3 +103,6 @@ specs/
 tests/
 user_spec/
 .claude/
+process/
+algorithm-sdk/
+architecture.md

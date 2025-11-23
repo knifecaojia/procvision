@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPoint, Signal, QSize, QFileSystemWatcher, QEvent, QTimer
 from PySide6.QtGui import QFontDatabase, QFont
 
+from .styles import ThemeLoader, build_theme_variables
+
 try:
     from ..core.session import SessionManager
     from ..core.config import AppConfig, get_config
@@ -77,7 +79,8 @@ class MainWindow(QMainWindow):
         self.config: AppConfig = config or get_config()
         self.app_display_name = "ProcVision"
         self.colors = self.config.ui.colors
-        self.stylesheet_path = Path(__file__).resolve().parent / "styles" / "main_window.qss"
+        self.theme_loader = ThemeLoader()
+        self.stylesheet_path = self.theme_loader.stylesheet_path("main_window")
         self.stylesheet_watcher: Optional[QFileSystemWatcher] = None
         self.custom_font_family = "Arial"
         self.custom_font = QFont(self.custom_font_family)
@@ -190,9 +193,6 @@ class MainWindow(QMainWindow):
         self.time_label = QLabel()
         self.time_label.setObjectName("timeInfo")
         self.time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.time_label.setStyleSheet(
-            f"color: {self.colors.get('success_green', '#3cc37a')}; font-size: 13px;"
-        )
         self._register_time_label(self.time_label)
 
         info_layout = QVBoxLayout()
@@ -256,9 +256,6 @@ class MainWindow(QMainWindow):
         time_label = QLabel()
         time_label.setObjectName("timeInfo")
         time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        time_label.setStyleSheet(
-            f"color: {self.colors.get('success_green', '#3cc37a')}; font-size: 13px;"
-        )
         self._register_time_label(time_label)
 
         info_layout = QVBoxLayout()
@@ -523,12 +520,13 @@ class MainWindow(QMainWindow):
     def apply_stylesheet(self):
         """Load stylesheet template and apply runtime variables."""
         try:
-            template = self.stylesheet_path.read_text(encoding="utf-8")
+            stylesheet = self.theme_loader.load(
+                "main_window",
+                variables=self._build_stylesheet_variables(),
+            )
         except FileNotFoundError:
             logger.error("Stylesheet file not found: %s", self.stylesheet_path)
             return
-
-        stylesheet = self._inject_stylesheet_variables(template)
         self.setStyleSheet(stylesheet)
 
     def reload_stylesheet(self):
@@ -539,15 +537,10 @@ class MainWindow(QMainWindow):
             if str(self.stylesheet_path) not in watched_files:
                 self.stylesheet_watcher.addPath(str(self.stylesheet_path))
 
-    def _inject_stylesheet_variables(self, template: str) -> str:
-        """Replace placeholder tokens with values from config and fonts."""
-        replacements = {f"@{name}": value for name, value in self.colors.items()}
+    def _build_stylesheet_variables(self) -> dict[str, str]:
+        """Prepare placeholder replacements for theme files."""
         font_family = getattr(self, "custom_font_family", "Arial") or "Arial"
-        replacements["@font_family"] = font_family
-
-        for placeholder, value in replacements.items():
-            template = template.replace(placeholder, value)
-        return template
+        return build_theme_variables(self.colors, font_family)
 
     def _register_stylesheet_watcher(self):
         """Watch the stylesheet for changes to enable live reload."""

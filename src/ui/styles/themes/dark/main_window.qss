@@ -610,6 +610,492 @@ QMainWindow {
                 font-size: 13px;
             }
 
-            #deleteButton:hover {
+#deleteButton:hover {
                 background-color: rgba(239, 68, 68, 0.1);
             }
+
+/* Process card component */
+QFrame#processCard {
+    background-color: #252525;
+    border: 1px solid #3a3a3a;
+    border-radius: 8px;
+    font-family: "@font_family";
+}
+
+QFrame#processCard:hover {
+    border: 1px solid rgba(255, 165, 0, 0.5);
+}
+
+#cardTitle {
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+#cardId {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+#typeBadge {
+    background-color: #1a1d23;
+    color: #8C92A0;
+    border: 1px solid #242831;
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 12px;
+}
+
+#infoFrame {
+    background-color: #1a1a1a;
+    border-radius: 4px;
+}
+
+#infoLabel {
+    color: #6b7280;
+    font-size: 12px;
+}
+
+#infoValue {
+    color: #ffffff;
+    font-size: 14px;
+}
+
+#modelsTitle {
+    color: #9ca3af;
+    font-size: 13px;
+}
+
+#modelBadge {
+    background-color: #1a1a1a;
+    color: #ffffff;
+    border: 1px solid #3a3a3a;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 12px;
+    margin-right: 5px;
+}
+
+#viewButton {
+    background-color: transparent;
+    border: 1px solid #3a3a3a;
+    color: #9ca3af;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+#viewButton:hover {
+    border: 1px solid #ffa500;
+    color: #ffffff;
+}
+
+#startButton {
+    background-color: rgba(60, 195, 122, 0.15);
+    border: 1px solid rgba(60, 195, 122, 0.55);
+    color: #6ff3b3;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+#startButton:hover {
+    border: 1px solid #6ff3b3;
+    color: #ffffff;
+    background-color: rgba(60, 195, 122, 0.35);
+}
+
+/* Header time info */
+#timeInfo {
+    color: @success_green;
+    font-size: 13px;
+}
+
+#dateLabel {
+    color: @success_green;
+    font-size: 14px;
+}
+
+#timeLabel {
+    color: @success_green;
+    font-size: 18px;
+    font-weight: bold;
+}
+
+/* Records page */
+#recordsPage {
+    background-color: @deep_graphite;
+}
+
+#recordsHeader {
+    background-color: transparent;
+}
+
+#recordsTitleLabel {
+    color: @arctic_white;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+#recordsSubtitleLabel {
+    color: @cool_grey;
+    font-size: 13px;
+}
+
+#recordsFilterBar {
+    background-color: @steel_grey;
+    border: 1px solid @dark_border;
+    border-radius: 12px;
+}
+
+#recordsSearchContainer {
+    background-color: @deep_graphite;
+    border: 1px solid @dark_border;
+    border-radius: 10px;
+}
+
+#recordsSearchIcon {
+    color: @cool_grey;
+    font-size: 14px;
+}
+
+#recordsSearchInput {
+    border: none;
+    background: transparent;
+    color: @arctic_white;
+    font-size: 14px;
+}
+
+#statusFilterCombo {
+    background-color: @deep_graphite;
+    border: 1px solid @dark_border;
+    color: @arctic_white;
+    border-radius: 10px;
+    padding: 6px 12px;
+}
+
+#statusFilterCombo QAbstractItemView {
+    background-color: @steel_grey;
+    color: @arctic_white;
+    border: 1px solid @dark_border;
+    selection-background-color: @deep_graphite;
+}
+
+#recordsContentFrame {
+    background-color: @steel_grey;
+    border: 1px solid @dark_border;
+    border-radius: 12px;
+}
+
+#recordsPaginationLabel {
+    color: @cool_grey;
+    font-size: 13px;
+}
+
+#recordsPrimaryButton {
+    background-color: @hover_orange;
+    border: none;
+    color: @arctic_white;
+    border-radius: 8px;
+    font-weight: 600;
+    padding: 0 20px;
+}
+
+#recordsPrimaryButton:hover {
+    background-color: #ea580c;
+}
+
+#recordsSecondaryButton {
+    background-color: transparent;
+    border: 1px solid #3a3a3a;
+    color: @cool_grey;
+    border-radius: 8px;
+    font-weight: 600;
+    padding: 0 20px;
+}
+
+#recordsSecondaryButton:hover {
+    background-color: #2a2a2a;
+    color: @arctic_white;
+}
+
+#recordsActionButton {
+    background-color: transparent;
+    border: 1px solid #3a3a3a;
+    color: @cool_grey;
+    border-radius: 6px;
+    font-weight: 600;
+    padding: 0 16px;
+}
+
+#recordsActionButton:hover {
+    background-color: @steel_grey;
+    color: @arctic_white;
+}
+
+/* Model/process scroll areas */
+QScrollArea#modelScrollArea,
+QScrollArea#processScrollArea {
+    background-color: #1f232b;
+    border: none;
+}
+
+QWidget#cardsContainer {
+    background-color: #1f232b;
+    border: 1px solid #1f232b;
+}
+
+/* Camera page */
+QScrollArea#paramsScrollArea {
+    border: none;
+    background: transparent;
+}
+
+QWidget#paramsScrollViewport,
+QFrame#paramsContainer {
+    background: transparent;
+}
+
+QToolButton#previewToolButton[iconFallback="true"] {
+    font-size: 24px;
+}
+
+#paramValue[connectionState="connected"] {
+    color: @success_green;
+}
+
+#paramValue[connectionState="disconnected"],
+#paramValue[connectionState="unavailable"] {
+    color: @cool_grey;
+}
+
+QSlider#cameraParamSlider::groove:horizontal {
+    border: 1px solid @dark_border;
+    height: 4px;
+    background: @steel_grey;
+    margin: 2px 0;
+    border-radius: 2px;
+}
+
+QSlider#cameraParamSlider::handle:horizontal {
+    background: @hover_orange;
+    border: 1px solid @hover_orange;
+    width: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+}
+
+QSlider#cameraParamSlider::handle:horizontal:hover {
+    background: @amber;
+    border: 1px solid @amber;
+}
+
+QSlider#cameraParamSlider::sub-page:horizontal {
+    background: @hover_orange;
+    border-radius: 2px;
+}
+
+QDoubleSpinBox#cameraParamSpin {
+    background-color: @steel_grey;
+    border: 1px solid @dark_border;
+    border-radius: 4px;
+    color: @arctic_white;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+QDoubleSpinBox#cameraParamSpin:focus {
+    border: 1px solid @hover_orange;
+}
+
+QDoubleSpinBox#cameraParamSpin:hover {
+    border: 1px solid @cool_grey;
+}
+
+/* Camera calibration panel */
+#cameraCalibrationPanel QLabel,
+#cameraCalibrationPanel QGroupBox,
+#cameraCalibrationPanel QListWidget,
+#cameraCalibrationPanel QPushButton,
+#cameraCalibrationPanel QSpinBox,
+#cameraCalibrationPanel QDoubleSpinBox,
+#cameraCalibrationPanel QCheckBox {
+    color: #E6EAF3;
+}
+
+QListWidget#calibrationImageList {
+    border: 1px solid #2F3744;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.03);
+    padding: 6px;
+}
+
+QPushButton#calibrationActionButton {
+    background-color: #2F3A4D;
+    border: 1px solid #3F4B61;
+    border-radius: 6px;
+    color: #E6EAF3;
+    padding: 8px 12px;
+}
+
+QPushButton#calibrationActionButton:hover:enabled {
+    background-color: #3C4961;
+}
+
+QPushButton#calibrationActionButton:disabled {
+    background-color: #1F2633;
+    border-color: #2B3345;
+    color: #6A7284;
+}
+
+#calibrationStatusLabel {
+    padding: 8px;
+    color: @cool_grey;
+}
+
+#calibrationStatusLabel[statusLevel="warning"] {
+    color: @hover_orange;
+}
+
+#calibrationStatusLabel[statusLevel="success"] {
+    color: @success_green;
+}
+
+#calibrationStatusLabel[statusLevel="error"] {
+    color: @error_red;
+}
+
+#calibrationStatusLabel[statusLevel="info"] {
+    color: @cool_grey;
+}
+
+/* Camera calibration dialog */
+#calibrationPreview {
+    background-color: #1F232B;
+    border: 2px dashed #242831;
+    border-radius: 8px;
+    padding: 10px;
+    color: #888888;
+}
+
+QPushButton#calibrateButton {
+    background-color: @hover_orange;
+    color: @arctic_white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-weight: 600;
+}
+
+QPushButton#calibrateButton:disabled {
+    background-color: #3a3a3a;
+    color: @cool_grey;
+}
+
+#calibrationStatusLabel[statusLevel="warning"],
+#calibrationStatusLabel[statusLevel="success"],
+#calibrationStatusLabel[statusLevel="error"],
+#calibrationStatusLabel[statusLevel="info"] {
+    font-weight: 600;
+}
+
+/* Records table */
+QFrame#recordsTableContainer {
+    background-color: #252525;
+    border: 1px solid #3a3a3a;
+    border-radius: 12px;
+}
+
+QTableWidget#recordsTable,
+QTableView#recordsTable {
+    background-color: #252525;
+    border: none;
+    color: #f8fafc;
+    gridline-color: #3a3a3a;
+    font-size: 14px;
+}
+
+QHeaderView::section {
+    background-color: #1f232b;
+    color: #9ca3af;
+    border: none;
+    border-right: 1px solid #3a3a3a;
+    padding: 12px 10px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+QTableWidget#recordsTable::item,
+QTableView#recordsTable::item {
+    border-bottom: 1px solid #3a3a3a;
+    padding: 16px 10px;
+    color: #f8fafc;
+    background-color: transparent;
+}
+
+QTableWidget#recordsTable::item:selected,
+QTableView#recordsTable::item:selected {
+    background-color: rgba(37, 46, 64, 0.9);
+    color: #f8fafc;
+}
+
+#recordsProcessTitle {
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#recordsProcessCode {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+#recordsDefectsLabel {
+    color: #f87171;
+    font-size: 12px;
+}
+
+QLabel#recordsBadge {
+    border-radius: 14px;
+    padding: 0 16px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+QLabel#recordsBadge[badgeRole="status-ok"] {
+    color: #aefacb;
+    background-color: rgba(34, 197, 94, 0.2);
+    border: 1px solid rgba(34, 197, 94, 0.55);
+}
+
+QLabel#recordsBadge[badgeRole="status-ng"] {
+    color: #ffb3b3;
+    background-color: rgba(239, 68, 68, 0.18);
+    border: 1px solid rgba(239, 68, 68, 0.55);
+}
+
+QLabel#recordsBadge[badgeRole="status-conditional"] {
+    color: #ffd7b0;
+    background-color: rgba(249, 115, 22, 0.22);
+    border: 1px solid rgba(249, 115, 22, 0.6);
+}
+
+QLabel#recordsBadge[badgeRole="workstation"] {
+    color: #ffd7b0;
+    background-color: rgba(249, 115, 22, 0.22);
+    border: 1px solid rgba(249, 115, 22, 0.6);
+}
+
+/* System page toast */
+#toastLabel {
+    padding: 8px 12px;
+    border-radius: 16px;
+    color: #ffffff;
+}
+
+#toastLabel[toastState="success"] {
+    background-color: @success_green;
+}
+
+#toastLabel[toastState="error"] {
+    background-color: @error_red;
+}

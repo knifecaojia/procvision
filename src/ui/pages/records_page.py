@@ -44,8 +44,6 @@ class RecordsPage(QFrame):
     # ------------------------------------------------------------------ UI ----
     def init_ui(self):
         """Initialize the records page UI."""
-        self.setStyleSheet(f"background-color: {self.color_deep_graphite};")
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(20)
@@ -57,9 +55,6 @@ class RecordsPage(QFrame):
     def _create_header_section(self):
         frame = QFrame()
         frame.setObjectName("recordsHeader")
-        frame.setStyleSheet(
-            "QFrame#recordsHeader { background-color: transparent; }"
-        )
 
         header_layout = QVBoxLayout(frame)
         header_layout.setContentsMargins(0, 0, 0, 0)
@@ -67,15 +62,9 @@ class RecordsPage(QFrame):
 
         title_label = QLabel("工作记录")
         title_label.setObjectName("recordsTitleLabel")
-        title_label.setStyleSheet(
-            f"color: {self.color_text_primary}; font-size: 24px; font-weight: 700;"
-        )
 
         self.subtitle_label = QLabel("Work Records - 0 条记录")
         self.subtitle_label.setObjectName("recordsSubtitleLabel")
-        self.subtitle_label.setStyleSheet(
-            f"color: {self.color_text_muted}; font-size: 13px;"
-        )
 
         header_layout.addWidget(title_label)
         header_layout.addWidget(self.subtitle_label)
@@ -87,15 +76,15 @@ class RecordsPage(QFrame):
         actions_layout.addStretch()
 
         date_btn = QPushButton("选择日期")
+        date_btn.setObjectName("recordsSecondaryButton")
         date_btn.setFixedHeight(36)
         date_btn.setCursor(Qt.PointingHandCursor)
-        date_btn.setStyleSheet(self._secondary_button_style())
         date_btn.clicked.connect(self.on_select_date)
 
         export_btn = QPushButton("导出报表")
+        export_btn.setObjectName("recordsPrimaryButton")
         export_btn.setFixedHeight(36)
         export_btn.setCursor(Qt.PointingHandCursor)
-        export_btn.setStyleSheet(self._primary_button_style())
         export_btn.clicked.connect(self.on_export)
 
         actions_layout.addWidget(date_btn)
@@ -107,13 +96,6 @@ class RecordsPage(QFrame):
     def _create_filter_bar(self):
         frame = QFrame()
         frame.setObjectName("recordsFilterBar")
-        frame.setStyleSheet(
-            "QFrame#recordsFilterBar {"
-            f"background-color: {self.color_steel_grey};"
-            f"border: 1px solid {self.color_dark_border};"
-            "border-radius: 12px;"
-            "}"
-        )
 
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(20, 12, 20, 12)
@@ -123,26 +105,16 @@ class RecordsPage(QFrame):
         # Search input
         search_container = QFrame()
         search_container.setObjectName("recordsSearchContainer")
-        search_container.setStyleSheet(
-            "QFrame#recordsSearchContainer {"
-            f"background-color: {self.color_deep_graphite};"
-            f"border: 1px solid {self.color_dark_border};"
-            "border-radius: 10px;"
-            "}"
-        )
         search_layout = QHBoxLayout(search_container)
         search_layout.setContentsMargins(12, 6, 12, 6)
         search_layout.setSpacing(8)
 
         search_icon = QLabel("🔍")
-        search_icon.setStyleSheet(f"color: {self.color_text_muted}; font-size: 14px;")
+        search_icon.setObjectName("recordsSearchIcon")
 
         self.search_input = QLineEdit()
         self.search_input.setObjectName("recordsSearchInput")
         self.search_input.setPlaceholderText("搜索记录编号、产品SN或工艺名称...")
-        self.search_input.setStyleSheet(
-            f"border: none; background: transparent; color: {self.color_text_primary}; font-size: 14px;"
-        )
         self.search_input.textChanged.connect(self.on_search_changed)
 
         search_layout.addWidget(search_icon)
@@ -157,21 +129,6 @@ class RecordsPage(QFrame):
         self.status_filter_combo.addItem("NG", "ng")
         self.status_filter_combo.addItem("条件通过", "conditional")
         self.status_filter_combo.setFixedWidth(180)
-        self.status_filter_combo.setStyleSheet(
-            "QComboBox#statusFilterCombo {"
-            f"background-color: {self.color_deep_graphite};"
-            f"border: 1px solid {self.color_dark_border};"
-            f"color: {self.color_text_primary};"
-            "border-radius: 10px;"
-            "padding: 6px 12px;"
-            "}"
-            "QComboBox QAbstractItemView {"
-            f"background-color: {self.color_steel_grey};"
-            f"color: {self.color_text_primary};"
-            f"border: 1px solid {self.color_dark_border};"
-            f"selection-background-color: {self.color_surface_dark};"
-            "}"
-        )
         self.status_filter_combo.currentIndexChanged.connect(self.on_status_changed)
         layout.addWidget(self.status_filter_combo)
 
@@ -180,13 +137,6 @@ class RecordsPage(QFrame):
     def _create_table_section(self):
         frame = QFrame()
         frame.setObjectName("recordsContentFrame")
-        frame.setStyleSheet(
-            "QFrame#recordsContentFrame {"
-            f"background-color: {self.color_steel_grey};"
-            f"border: 1px solid {self.color_dark_border};"
-            "border-radius: 12px;"
-            "}"
-        )
 
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -203,18 +153,18 @@ class RecordsPage(QFrame):
         pagination_layout.setSpacing(12)
 
         self.pagination_label = QLabel("第 1/1 页 · 共 0 条记录")
-        self.pagination_label.setStyleSheet(f"color: {self.color_text_muted}; font-size: 13px;")
+        self.pagination_label.setObjectName("recordsPaginationLabel")
 
         self.prev_page_btn = QPushButton("上一页")
+        self.prev_page_btn.setObjectName("recordsSecondaryButton")
         self.prev_page_btn.setFixedHeight(32)
         self.prev_page_btn.setCursor(Qt.PointingHandCursor)
-        self.prev_page_btn.setStyleSheet(self._secondary_button_style())
         self.prev_page_btn.clicked.connect(self.on_prev_page)
 
         self.next_page_btn = QPushButton("下一页")
+        self.next_page_btn.setObjectName("recordsSecondaryButton")
         self.next_page_btn.setFixedHeight(32)
         self.next_page_btn.setCursor(Qt.PointingHandCursor)
-        self.next_page_btn.setStyleSheet(self._secondary_button_style())
         self.next_page_btn.clicked.connect(self.on_next_page)
 
         pagination_layout.addWidget(self.pagination_label)
@@ -225,37 +175,6 @@ class RecordsPage(QFrame):
         layout.addWidget(pagination_frame)
 
         return frame
-
-    def _primary_button_style(self):
-        return (
-            "QPushButton {"
-            f"background-color: {self.color_hover_orange};"
-            "border: none;"
-            "color: white;"
-            "border-radius: 8px;"
-            "font-weight: 600;"
-            "padding: 0 20px;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #ea580c;"
-            "}"
-        )
-
-    def _secondary_button_style(self):
-        return (
-            "QPushButton {"
-            "background-color: transparent;"
-            f"border: 1px solid {self.color_border_subtle};"
-            f"color: {self.color_text_muted};"
-            "border-radius: 8px;"
-            "font-weight: 600;"
-            "padding: 0 20px;"
-            "}"
-            "QPushButton:hover {"
-            "background-color: #2a2a2a;"
-            "color: white;"
-            "}"
-        )
 
     # ----------------------------------------------------- Data & State ----
     def setup_colors(self):

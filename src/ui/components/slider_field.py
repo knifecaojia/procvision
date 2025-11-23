@@ -33,6 +33,7 @@ class SliderField(QtWidgets.QWidget):
 
         # Create slider
         self._slider = QtWidgets.QSlider(QtCore.Qt.Horizontal, self)
+        self._slider.setObjectName("cameraParamSlider")
         slider_min = int(round(min_value * self._factor))
         slider_max = int(round(max_value * self._factor))
         if slider_min == slider_max:
@@ -41,36 +42,11 @@ class SliderField(QtWidgets.QWidget):
         if step:
             slider_step = int(round(step * self._factor))
             self._slider.setSingleStep(max(1, slider_step))
-
-        # Apply industrial theme styling
-        self._slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                border: 1px solid #242831;
-                height: 4px;
-                background: #1F232B;
-                margin: 2px 0;
-                border-radius: 2px;
-            }
-            QSlider::handle:horizontal {
-                background: #FF8C32;
-                border: 1px solid #FF8C32;
-                width: 14px;
-                margin: -6px 0;
-                border-radius: 7px;
-            }
-            QSlider::handle:horizontal:hover {
-                background: #FFAC54;
-                border: 1px solid #FFAC54;
-            }
-            QSlider::sub-page:horizontal {
-                background: #FF8C32;
-                border-radius: 2px;
-            }
-        """)
         layout.addWidget(self._slider, 1)
 
         # Create spinbox
         self._spin = QtWidgets.QDoubleSpinBox(self)
+        self._spin.setObjectName("cameraParamSpin")
         self._spin.setDecimals(self._decimals)
         self._spin.setMinimum(min_value)
         self._spin.setMaximum(max_value)
@@ -78,24 +54,6 @@ class SliderField(QtWidgets.QWidget):
             self._spin.setSingleStep(step)
         self._spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self._spin.setFixedWidth(90)
-
-        # Apply industrial theme styling
-        self._spin.setStyleSheet("""
-            QDoubleSpinBox {
-                background-color: #1F232B;
-                border: 1px solid #242831;
-                border-radius: 4px;
-                color: #F2F4F8;
-                padding: 4px 8px;
-                font-size: 12px;
-            }
-            QDoubleSpinBox:focus {
-                border: 1px solid #FF8C32;
-            }
-            QDoubleSpinBox:hover {
-                border: 1px solid #8C92A0;
-            }
-        """)
         layout.addWidget(self._spin, 0)
 
         # Connect signals

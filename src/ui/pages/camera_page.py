@@ -27,6 +27,7 @@ from src.camera.calibration import (
 )
 from src.ui.components import SliderField, PreviewWorker
 from .camera_calibration_panel import CameraCalibrationPanel
+from ..styles import refresh_widget_styles
 
 logger = logging.getLogger("camera.ui")
 
@@ -154,7 +155,7 @@ class CameraPage(QFrame):
 
         if self.status_value_label:
             self.status_value_label.setText("服务不可用")
-            self.status_value_label.setStyleSheet("color: #8C92A0;")
+            self._update_status_label_state("unavailable")
 
         if self.temp_value_label:
             self.temp_value_label.setText("--")
@@ -169,6 +170,11 @@ class CameraPage(QFrame):
             self.params_frame.setVisible(visible)
         if not visible:
             self._hide_calibration_panel()
+
+    def _update_status_label_state(self, state: str) -> None:
+        if self.status_value_label:
+            self.status_value_label.setProperty("connectionState", state)
+            refresh_widget_styles(self.status_value_label)
 
     def _clear_layout(self, layout: QLayout):
         """Remove all child widgets/layouts from the given layout."""
@@ -277,7 +283,8 @@ class CameraPage(QFrame):
                 button.setIconSize(QSize(20, 20))
             else:
                 button.setText(fallback_symbol)
-                button.setStyleSheet("font-size: 24px;")
+                button.setProperty("iconFallback", "true")
+                refresh_widget_styles(button)
 
             controls_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -331,31 +338,12 @@ class CameraPage(QFrame):
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background: transparent;
-            }
-            QScrollBar:vertical {
-                background: #1F232B;
-                width: 10px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #8C92A0;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #FF8C32;
-            }
-        """)
         scroll_area.setFrameShape(QFrame.NoFrame)
-        scroll_area.viewport().setStyleSheet("background: transparent;")
+        scroll_area.viewport().setObjectName("paramsScrollViewport")
         scroll_area.viewport().setAutoFillBackground(False)
 
         self.params_container = QFrame()
         self.params_container.setObjectName("paramsContainer")
-        self.params_container.setStyleSheet("background: transparent;")
         self.params_container.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         container_layout = QVBoxLayout(self.params_container)
         container_layout.setContentsMargins(0, 0, 0, 10)
@@ -414,6 +402,7 @@ class CameraPage(QFrame):
         self.status_value_label = QLabel("未连接")
         self.status_value_label.setObjectName("paramValue")
         self.status_value_label.setMinimumWidth(80)
+        self.status_value_label.setProperty("connectionState", "disconnected")
 
         cam_temp_label = QLabel("温度:")
         cam_temp_label.setObjectName("paramLabel")
@@ -834,12 +823,12 @@ class CameraPage(QFrame):
         if is_connected:
             self.model_value_label.setText(camera.info.model_name or "未知")
             self.status_value_label.setText("已连接")
-            self.status_value_label.setStyleSheet("color: #3CC37A;")
+            self._update_status_label_state("connected")
             self._set_params_panel_visible(True)
         else:
             self.model_value_label.setText("未连接")
             self.status_value_label.setText("未连接")
-            self.status_value_label.setStyleSheet("color: #8C92A0;")
+            self._update_status_label_state("disconnected")
             self._set_params_panel_visible(False)
 
     def cleanup(self):

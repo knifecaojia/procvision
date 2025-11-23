@@ -41,6 +41,7 @@ except ImportError:
     from src.auth.services import AuthService, SessionManager  # type: ignore
     from src.core.config import get_config  # type: ignore
 
+from .styles import ThemeLoader, build_theme_variables, refresh_widget_styles
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ class LoginWindow(QMainWindow):
 
         self.config = get_config()
         self.colors = self.config.ui.colors
+        self.theme_loader = ThemeLoader()
 
         self.is_loading = False
         self.login_attempts = 0
@@ -175,6 +177,7 @@ class LoginWindow(QMainWindow):
         self.hero_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hero_label.setScaledContents(True)
         self.hero_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.hero_label.setProperty("contentState", "placeholder")
 
         left_layout.addWidget(self.hero_label)
         parent.addWidget(left_frame)
@@ -219,6 +222,7 @@ class LoginWindow(QMainWindow):
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("请输入密码")
         self.password_input.setFixedHeight(48)
+        self.password_input.setProperty("inputState", "default")
 
         workstation_label = QLabel("工位")
         workstation_label.setObjectName("fieldLabel")
@@ -241,6 +245,7 @@ class LoginWindow(QMainWindow):
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(26)
+        self.status_label.setProperty("statusState", "normal")
 
         self.login_button = QPushButton("登录")
         self.login_button.setObjectName("loginButton")
@@ -278,207 +283,11 @@ class LoginWindow(QMainWindow):
 
     # --- Styling ---------------------------------------------------------
     def setup_style(self) -> None:
-        font_family = getattr(self, "custom_font_family", "Arial")
-        self.setStyleSheet(
-            f"""
-            QMainWindow {{
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 10px;
-                font-family: '{font_family}';
-            }}
+        self.theme_loader.apply(self, "login_window", variables=self._build_theme_variables())
 
-            #centralWidget {{
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 10px;
-                font-family: '{font_family}';
-            }}
-
-            #mainSplitter {{
-                background-color: {self.colors['deep_graphite']};
-                font-family: '{font_family}';
-            }}
-
-            #mainSplitter::handle {{
-                background-color: transparent;
-            }}
-
-            #titleBar {{
-                background-color: {self.colors['title_bar_dark']};
-                border-bottom: 1px solid {self.colors['dark_border']};
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-            }}
-
-            #titleBarLabel {{
-                color: {self.colors['arctic_white']};
-                font-size: 16px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-                font-family: '{font_family}';
-            }}
-
-            #titleVersion {{
-                color: {self.colors['cool_grey']};
-                font-size: 12px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #windowButton {{
-                background-color: transparent;
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-weight: bold;
-                border-radius: 3px;
-                font-family: '{font_family}';
-            }}
-
-            #windowButton:hover {{
-                border: 1px solid {self.colors['hover_orange']};
-                color: {self.colors['hover_orange']};
-            }}
-
-            #closeButton {{
-                background-color: transparent;
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-weight: bold;
-                border-radius: 3px;
-                font-family: '{font_family}';
-            }}
-
-            #closeButton:hover {{
-                background-color: {self.colors['error_red']};
-                border: 1px solid {self.colors['error_red']};
-            }}
-
-            #leftFrame {{
-                border-top-left-radius: 10px;
-                border-bottom-left-radius: 10px;
-                border-right: none;
-            }}
-
-            #leftImage {{
-                border-radius: 10px 0 0 10px;
-            }}
-
-            #rightFrame {{
-                background-color: {self.colors['steel_grey']};
-                border-top-right-radius: 10px;
-                border-bottom-right-radius: 10px;
-                border-left: 1px solid {self.colors['dark_border']};
-            }}
-
-            #brandTitle {{
-                color: {self.colors['arctic_white']};
-                font-size: 30px;
-                font-weight: bold;
-                letter-spacing: 1px;
-                font-family: '{font_family}';
-            }}
-
-            #loginTitle {{
-                color: {self.colors['cool_grey']};
-                font-size: 16px;
-                letter-spacing: 2px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #fieldLabel {{
-                color: {self.colors['cool_grey']};
-                font-size: 14px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #inputField {{
-                background-color: {self.colors['deep_graphite']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-size: 14px;
-                padding: 0 18px;
-                border-radius: 6px;
-                font-family: '{font_family}';
-            }}
-
-            #inputField:focus {{
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #comboBox {{
-                background-color: {self.colors['deep_graphite']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-size: 14px;
-                padding: 0 14px;
-                border-radius: 6px;
-                font-family: '{font_family}';
-            }}
-
-            #comboBox:focus {{
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #comboBox QAbstractItemView {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                selection-background-color: {self.colors['hover_orange']};
-                font-family: '{font_family}';
-            }}
-
-            #checkBox {{
-                color: {self.colors['arctic_white']};
-                font-size: 12px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #checkBox::indicator {{
-                width: 16px;
-                height: 16px;
-                border: 1px solid {self.colors['dark_border']};
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 2px;
-            }}
-
-            #checkBox::indicator:checked {{
-                background-color: {self.colors['hover_orange']};
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #loginButton {{
-                background-color: {self.colors['hover_orange']};
-                color: {self.colors['arctic_white']};
-                border: none;
-                font-size: 15px;
-                font-weight: bold;
-                letter-spacing: 1px;
-                border-radius: 6px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #loginButton:hover {{
-                background-color: {self.colors['amber']};
-            }}
-
-            #loginButton:disabled {{
-                background-color: {self.colors['dark_border']};
-                color: {self.colors['cool_grey']};
-            }}
-
-            #statusLabel {{
-                color: {self.colors['cool_grey']};
-                font-size: 12px;
-                font-weight: bold;
-                font-family: '{font_family}';
-            }}
-            """
-        )
+    def _build_theme_variables(self) -> dict[str, str]:
+        font_family = getattr(self, "custom_font_family", "Arial") or "Arial"
+        return build_theme_variables(self.colors, font_family)
 
     # --- Connections -----------------------------------------------------
     def setup_connections(self) -> None:
@@ -505,9 +314,10 @@ class LoginWindow(QMainWindow):
                     Qt.TransformationMode.SmoothTransformation,
                 )
                 self.hero_label.setPixmap(scaled)
+                self._set_widget_state(self.hero_label, "contentState", "image")
                 return
         self.hero_label.setText("PROC VISION")
-        self.hero_label.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 20px; letter-spacing: 4px;")
+        self._set_widget_state(self.hero_label, "contentState", "placeholder")
 
     # --- Preference handling --------------------------------------------
     def load_saved_preferences(self) -> None:
@@ -594,19 +404,18 @@ class LoginWindow(QMainWindow):
 
     def show_error(self, message: str) -> None:
         self.status_label.setText(message)
-        self.status_label.setStyleSheet(f"color: {self.colors['error_red']}; font-size: 12px;")
-        self.password_input.setStyleSheet(
-            f"border: 1px solid {self.colors['error_red']}; background-color: {self.colors['deep_graphite']};"
-        )
+        self._set_widget_state(self.status_label, "statusState", "error")
+        self._set_widget_state(self.password_input, "inputState", "error")
 
     def show_success(self, message: str) -> None:
         self.status_label.setText(message)
-        self.status_label.setStyleSheet(f"color: {self.colors['success_green']}; font-size: 12px;")
+        self._set_widget_state(self.status_label, "statusState", "success")
+        self._set_widget_state(self.password_input, "inputState", "default")
 
     def clear_status(self) -> None:
         self.status_label.setText("")
-        self.status_label.setStyleSheet("")
-        self.password_input.setStyleSheet("")
+        self._set_widget_state(self.status_label, "statusState", "normal")
+        self._set_widget_state(self.password_input, "inputState", "default")
 
     def lock_login_form(self) -> None:
         self.show_error("Too many failed attempts. Please wait…")
@@ -621,6 +430,13 @@ class LoginWindow(QMainWindow):
         self.password_input.setEnabled(True)
         self.login_button.setEnabled(True)
         self.login_attempts = 0
+
+    @staticmethod
+    def _set_widget_state(widget: Optional[QWidget], prop: str, value: str) -> None:
+        if widget is None:
+            return
+        widget.setProperty(prop, value)
+        refresh_widget_styles(widget)
 
     def on_remember_toggled(self, checked: bool) -> None:  # pragma: no cover - logging only
         logger.info(f"Remember username toggled: {checked}")

@@ -1,11 +1,9 @@
 """
-UI styling definitions for industrial vision application.
+UI styling helpers for the industrial vision application.
 
-Provides color schemes, stylesheets, and visual design
-components following industrial UI standards.
+Provides theme loader utilities to keep all widget styling in QSS files.
 """
 
-from .login_styles import LoginWindowStyles
-from .main_styles import MainWindowStyles
+from .theme_loader import ThemeLoader, build_theme_variables, refresh_widget_styles
 
-__all__ = ['LoginWindowStyles', 'MainWindowStyles']
+__all__ = ["ThemeLoader", "build_theme_variables", "refresh_widget_styles"]

@@ -50,14 +50,12 @@ class ProcessPage(QFrame):
         # Process cards in scroll area
         scroll_area = QScrollArea()
         scroll_area.setObjectName("processScrollArea")
-        scroll_area.setStyleSheet("QScrollArea#processScrollArea { background-color: #1f232b; border: none; }")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # Container for cards
         cards_container = QWidget()
         cards_container.setObjectName("cardsContainer")
-        cards_container.setStyleSheet("QWidget#cardsContainer { background-color: #1f232b; border: 1px solid #1f232b; }")
         # cards_layout will be created later as QGridLayout
         
         base_dir = Path(__file__).resolve().parents[3] / "3rd" / "assembly_direction_checker"

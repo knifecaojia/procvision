@@ -43,14 +43,12 @@ class ModelPage(QFrame):
         # Model cards in scroll area
         scroll_area = QScrollArea()
         scroll_area.setObjectName("modelScrollArea")
-        scroll_area.setStyleSheet("QScrollArea#modelScrollArea { background-color: #1f232b; border: none; }")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         
         # Container for cards
         cards_container = QWidget()
         cards_container.setObjectName("cardsContainer")
-        cards_container.setStyleSheet("QWidget#cardsContainer { background-color: #1f232b; border: 1px solid #1f232b; }")
         # cards_layout will be created later as QGridLayout
         
         # Sample model data

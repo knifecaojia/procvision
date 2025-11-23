@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from PySide6.QtCore import QTimer
 
+from ..styles import refresh_widget_styles
+
 logger = logging.getLogger(__name__)
 
 
@@ -70,23 +72,6 @@ class SystemPage(QFrame):
         pos_label.setObjectName("paramLabel")
         self.result_position_combo = QComboBox()
         self.result_position_combo.setObjectName("paramInput")
-        self.result_position_combo.setStyleSheet(
-            "QComboBox {"
-            "background-color: #252525;"
-            "border: 1px solid #3a3a3a;"
-            "color: #ffffff;"
-            "border-radius: 6px;"
-            "padding: 6px 12px;"
-            "}"
-            "QComboBox::drop-down { border: none; }"
-            "QComboBox::down-arrow { image: none; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 6px solid #9ca3af; margin-right: 6px; }"
-            "QComboBox QAbstractItemView {"
-            "background-color: #252525;"
-            "border: 1px solid #3a3a3a;"
-            "color: #ffffff;"
-            "selection-background-color: #f97316;"
-            "}"
-        )
         self.result_position_combo.addItem("左上", "top_left")
         self.result_position_combo.addItem("正上", "top_center")
         self.result_position_combo.addItem("右上", "top_right")
@@ -256,7 +241,7 @@ class SystemPage(QFrame):
         self.toast_label = QLabel()
         self.toast_label.setObjectName("toastLabel")
         self.toast_label.setVisible(False)
-        self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#3CC37A; color:#FFFFFF;")
+        self.toast_label.setProperty("toastState", "success")
         toast_layout.addWidget(self.toast_label)
         toast_layout.addStretch()
         self.toast_container.setVisible(False)
@@ -372,10 +357,9 @@ class SystemPage(QFrame):
         if not hasattr(self, "toast_label"):
             return
         self.toast_label.setText(text)
-        if success:
-            self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#3CC37A; color:#FFFFFF;")
-        else:
-            self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#E85454; color:#FFFFFF;")
+        state = "success" if success else "error"
+        self.toast_label.setProperty("toastState", state)
+        refresh_widget_styles(self.toast_label)
         self.toast_label.setVisible(True)
         self.toast_container.setVisible(True)
         QTimer.singleShot(2000, self.hide_toast)

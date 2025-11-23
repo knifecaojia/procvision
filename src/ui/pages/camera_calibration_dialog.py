@@ -22,6 +22,7 @@ from src.camera.calibration import (
 )
 from src.camera.camera_service import CameraService
 from src.ui.components import PreviewWorker
+from ..styles import refresh_widget_styles
 
 logger = logging.getLogger("camera.ui.calibration")
 
@@ -102,8 +103,8 @@ class CameraCalibrationDialog(QDialog):
 
         # Status label
         self.status_label = QLabel("请调整棋盘格位置，点击【采集图像】")
-        self.status_label.setObjectName("statusLabel")
-        self.status_label.setStyleSheet("padding: 8px;")
+        self.status_label.setObjectName("calibrationStatusLabel")
+        self.status_label.setProperty("statusLevel", "info")
         main_layout.addWidget(self.status_label)
 
         # Initialize preview timer
@@ -123,6 +124,11 @@ class CameraCalibrationDialog(QDialog):
         except Exception as e:
             logger.error(f"Failed to initialize calibration service: {e}", exc_info=True)
             QMessageBox.critical(self, "错误", f"初始化标定服务失败:\n{e}")
+
+    def _set_status_level(self, level: str) -> None:
+        if self.status_label:
+            self.status_label.setProperty("statusLevel", level)
+            refresh_widget_styles(self.status_label)
 
     def _create_left_panel(self) -> QWidget:
         """Create left panel with settings and image list."""
@@ -192,6 +198,7 @@ class CameraCalibrationDialog(QDialog):
         button_layout.addWidget(self.capture_btn, 0, 0)
 
         self.calibrate_btn = QPushButton("执行标定")
+        self.calibrate_btn.setObjectName("calibrateButton")
         self.calibrate_btn.clicked.connect(self._on_calibrate)
         self.calibrate_btn.setEnabled(False)
         button_layout.addWidget(self.calibrate_btn, 0, 1)
@@ -215,14 +222,6 @@ class CameraCalibrationDialog(QDialog):
         self.preview_label = QLabel()
         self.preview_label.setObjectName("calibrationPreview")
         self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setStyleSheet("""
-            QLabel {
-                background-color: #1F232B;
-                border: 2px solid #242831;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
         self.preview_label.setMinimumSize(600, 450)
 
         layout.addWidget(self.preview_label)
@@ -257,7 +256,7 @@ class CameraCalibrationDialog(QDialog):
             return
 
         self.status_label.setText("正在采集图像...")
-        self.status_label.setStyleSheet("color: #FF8C32; padding: 8px;")
+        self._set_status_level("warning")
 
         try:
             # Capture calibration image
@@ -267,17 +266,17 @@ class CameraCalibrationDialog(QDialog):
                 self._update_image_list()
                 self._update_progress()
                 self.status_label.setText("✓ 采集成功")
-                self.status_label.setStyleSheet("color: #3CC37A; padding: 8px;")
+                self._set_status_level("success")
                 logger.info("Image captured successfully")
             else:
                 self.status_label.setText("✗ 未检测到棋盘格，请调整位置")
-                self.status_label.setStyleSheet("color: #E85454; padding: 8px;")
+                self._set_status_level("error")
                 logger.warning("Chessboard not detected")
 
         except Exception as e:
             logger.error(f"Failed to capture image: {e}", exc_info=True)
             self.status_label.setText(f"✗ 采集失败: {str(e)}")
-            self.status_label.setStyleSheet("color: #E85454; padding: 8px;")
+            self._set_status_level("error")
             QMessageBox.critical(self, "错误", f"图像采集失败:\n{e}")
 
     @Slot()
@@ -302,7 +301,7 @@ class CameraCalibrationDialog(QDialog):
         # Show progress
         self._show_progress(True)
         self.status_label.setText("正在执行标定计算...")
-        self.status_label.setStyleSheet("color: #FF8C32; padding: 8px;")
+        self._set_status_level("warning")
 
         # Disable controls
         self._set_controls_enabled(False)
@@ -333,7 +332,7 @@ class CameraCalibrationDialog(QDialog):
         except Exception as e:
             logger.error(f"Calibration failed: {e}", exc_info=True)
             self.status_label.setText(f"✗ 标定失败: {str(e)}")
-            self.status_label.setStyleSheet("color: #E85454; padding: 8px;")
+            self._set_status_level("error")
             QMessageBox.critical(self, "标定失败", f"标定计算失败:\n{e}")
 
         finally:
@@ -374,7 +373,7 @@ class CameraCalibrationDialog(QDialog):
         msg_box.exec()
 
         self.status_label.setText("✓ 标定完成")
-        self.status_label.setStyleSheet("color: #3CC37A; padding: 8px;")
+        self._set_status_level("success")
 
     def _open_folder(self, folder_path: Path):
         """Open folder in file explorer."""
@@ -414,7 +413,7 @@ class CameraCalibrationDialog(QDialog):
             self._update_image_list()
             self._update_progress()
             self.status_label.setText("已清除所有图像")
-            self.status_label.setStyleSheet("color: #8C92A0; padding: 8px;")
+            self._set_status_level("info")
 
     @Slot()
     def update_preview(self):
@@ -531,15 +530,9 @@ class CameraCalibrationDialog(QDialog):
         # Enable/disable calibrate button
         if captured >= required:
             self.calibrate_btn.setEnabled(True)
-            self.calibrate_btn.setStyleSheet("""
-                QPushButton:enabled {
-                    background-color: #3CC37A;
-                    color: white;
-                }
-            """)
             if captured == required:
                 self.status_label.setText("✓ 已采集足够图像，可以开始标定")
-                self.status_label.setStyleSheet("color: #3CC37A; padding: 8px;")
+                self._set_status_level("success")
         else:
             self.calibrate_btn.setEnabled(False)
 
@@ -561,7 +554,7 @@ class CameraCalibrationDialog(QDialog):
                 self._update_image_list()
                 self._update_progress()
                 self.status_label.setText(f"已删除图像 {idx + 1}")
-                self.status_label.setStyleSheet("color: #FF8C32; padding: 8px;")
+                self._set_status_level("warning")
 
     def _show_progress(self, show: bool):
         """Show/hide progress bar."""

@@ -23,6 +23,13 @@ import importlib.util
 import sys
 import json
 
+try:
+    from ..core.config import get_config
+except Exception:  # pragma: no cover
+    from src.core.config import get_config  # type: ignore
+
+from ..styles import ThemeLoader, refresh_widget_styles, build_theme_variables
+
 logger = logging.getLogger(__name__)
 
 # Type definitions
@@ -46,7 +53,7 @@ class OverlayWidget(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setStyleSheet("background-color: transparent;")
+        self.setObjectName("processOverlay")
         self._boxes: List[QRect] = []
         self._status: DetectionStatus = 'idle'
         self._draw_ok: bool = True
@@ -164,6 +171,9 @@ class ProcessExecutionWindow(QWidget):
         self.custom_font_family = "Arial"
         self.custom_font = QFont(self.custom_font_family)
         self._load_custom_font()
+        self.config = get_config()
+        self.colors = getattr(self.config.ui, "colors", {})
+        self.theme_loader = ThemeLoader()
         # Initialize process steps
         self.steps: List[ProcessStep] = self._initialize_steps()
         self.current_instruction = self.steps[0].description if self.steps else "No steps available"
@@ -191,6 +201,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Initialize UI
         self.init_ui()
+        self._apply_theme()
 
         # Connect signals
         self.setup_connections()
@@ -229,6 +240,14 @@ class ProcessExecutionWindow(QWidget):
         self.custom_font_family = font_family
         self.setFont(self.custom_font)
         logger.info("Custom font applied to ProcessExecutionWindow: %s", font_family)
+
+    def _apply_theme(self) -> None:
+        """Apply the process execution window stylesheet."""
+        try:
+            variables = build_theme_variables(self.colors, self.custom_font_family)
+            self.theme_loader.apply(self, "process_execution_window", variables=variables)
+        except FileNotFoundError:
+            logger.error("Process execution stylesheet missing")
 
     def _initialize_steps(self) -> List[ProcessStep]:
         """Initialize process steps from provided JSON (steps_detail) or fallback."""
@@ -305,25 +324,18 @@ class ProcessExecutionWindow(QWidget):
 
         # Set window background and unify font family (scoped to this window only)
         self.setObjectName("processExecutionWindow")
-        self.setStyleSheet(f"""
-            QWidget#processExecutionWindow {{
-                background-color: #1a1a1a;
-                color: #ffffff;
-                font-family: {self.custom_font_family};
-            }}
-        """)
 
         self.toast_container = QFrame(self)
         self.toast_container.setObjectName("toastOverlay")
         self.toast_container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.toast_container.setStyleSheet("background-color: transparent;")
         self.toast_container.setFixedHeight(60)
         toast_layout = QHBoxLayout(self.toast_container)
         toast_layout.setContentsMargins(0, 0, 0, 0)
         toast_layout.addStretch()
         self.toast_label = QLabel()
         self.toast_label.setVisible(False)
-        self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#3CC37A; color:#FFFFFF;")
+        self.toast_label.setObjectName("toastLabel")
+        self.toast_label.setProperty("toastState", "success")
         toast_layout.addWidget(self.toast_label)
         toast_layout.addStretch()
         self.toast_container.setVisible(False)
@@ -332,16 +344,37 @@ class ProcessExecutionWindow(QWidget):
         except Exception:
             pass
 
+    def _set_toast_state(self, state: str) -> None:
+        if hasattr(self, "toast_label") and self.toast_label:
+            self.toast_label.setProperty("toastState", state)
+            refresh_widget_styles(self.toast_label)
+
+    def _set_video_state(self, state: str) -> None:
+        if hasattr(self, "base_image_label") and self.base_image_label:
+            self.base_image_label.setProperty("videoState", state)
+            refresh_widget_styles(self.base_image_label)
+
+    def _apply_step_card_state(
+        self,
+        card: Optional[QFrame],
+        status: StepStatus,
+        name_label: Optional[QLabel],
+        desc_label: Optional[QLabel],
+    ) -> None:
+        if card:
+            card.setProperty("stepStatus", status)
+            refresh_widget_styles(card)
+        if name_label:
+            name_label.setProperty("stepStatus", status)
+            refresh_widget_styles(name_label)
+        if desc_label:
+            desc_label.setProperty("stepStatus", status)
+            refresh_widget_styles(desc_label)
+
     def create_header_bar(self) -> QWidget:
         """Create the top header bar with product info, progress, and controls."""
         header_frame = QFrame()
         header_frame.setObjectName("headerBar")
-        header_frame.setStyleSheet("""
-            QFrame#headerBar {
-                background-color: #252525;
-                border-bottom: 1px solid #3a3a3a;
-            }
-        """)
         # 顶部整体高度适当增加
         header_frame.setMinimumHeight(56)
 
@@ -357,7 +390,7 @@ class ProcessExecutionWindow(QWidget):
         separator1 = QFrame()
         separator1.setFrameShape(QFrame.Shape.VLine)
         separator1.setFixedHeight(32)
-        separator1.setStyleSheet("background-color: #3a3a3a;")
+        separator1.setObjectName("headerSeparator")
         header_layout.addWidget(separator1)
 
         # Center section: Progress（自适应填充宽度）
@@ -368,7 +401,7 @@ class ProcessExecutionWindow(QWidget):
         separator2 = QFrame()
         separator2.setFrameShape(QFrame.Shape.VLine)
         separator2.setFixedHeight(32)
-        separator2.setStyleSheet("background-color: #3a3a3a;")
+        separator2.setObjectName("headerSeparator")
         header_layout.addWidget(separator2)
 
         # Right section: Controls 最右侧（包含相机/时钟/返回）
@@ -381,11 +414,6 @@ class ProcessExecutionWindow(QWidget):
         """Create the left section with product SN, PID, and algorithm info."""
         section = QWidget()
         section.setObjectName("productInfoSection")
-        section.setStyleSheet("""
-            QWidget#productInfoSection {
-                background-color: #252525;
-            }
-        """)
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
@@ -422,18 +450,13 @@ class ProcessExecutionWindow(QWidget):
         """Create an info item with icon, label, and value."""
         widget = QWidget()
         widget.setObjectName("infoItem")
-        widget.setStyleSheet("""
-            QWidget#infoItem {
-                background-color: #252525;
-            }
-        """)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
         # Icon
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet("font-size: 19px; color: #f97316;")
+        icon_label.setObjectName("productInfoIcon")
         layout.addWidget(icon_label)
 
         # Label and value
@@ -441,10 +464,10 @@ class ProcessExecutionWindow(QWidget):
         text_layout.setSpacing(0)
 
         label_widget = QLabel(label)
-        label_widget.setStyleSheet("font-size: 14px; color: #9ca3af;")
+        label_widget.setObjectName("productInfoLabel")
 
         value_widget = QLabel(value)
-        value_widget.setStyleSheet("font-size: 17px; color: #ffffff;")
+        value_widget.setObjectName("productInfoValue")
 
         text_layout.addWidget(label_widget)
         text_layout.addWidget(value_widget)
@@ -457,18 +480,13 @@ class ProcessExecutionWindow(QWidget):
         """Create the center section with step progress."""
         section = QWidget()
         section.setObjectName("progressSection")
-        section.setStyleSheet("""
-            QWidget#progressSection {
-                background-color: #252525;
-            }
-        """)
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
         # Progress text
         self.progress_label = QLabel(f"步骤: {self.current_step_index + 1} / {self.total_steps}")
-        self.progress_label.setStyleSheet("font-size: 16px; color: #ffffff;")
+        self.progress_label.setObjectName("progressLabel")
         layout.addWidget(self.progress_label)
 
         # Progress bar row
@@ -477,22 +495,11 @@ class ProcessExecutionWindow(QWidget):
         row_layout.setSpacing(8)
 
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("progressBar")
         self.progress_bar.setFixedHeight(6)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setMaximum(self.total_steps)
         self.progress_bar.setValue(self.current_step_index + 1)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                background-color: #1e1e1e;
-                border: none;
-                border-radius: 3px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #f97316, stop:1 #fb923c);
-                border-radius: 3px;
-            }
-        """)
         # 让进度条按可用空间自适应填充宽度
         self.progress_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         row_layout.addWidget(self.progress_bar, 1)
@@ -506,11 +513,6 @@ class ProcessExecutionWindow(QWidget):
         """Create the right section with buttons and status."""
         section = QWidget()
         section.setObjectName("headerControlsSection")
-        section.setStyleSheet("""
-            QWidget#headerControlsSection {
-                background-color: #252525;
-            }
-        """)
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
@@ -518,19 +520,6 @@ class ProcessExecutionWindow(QWidget):
         self.product_img_btn = QPushButton("🖼 产品实物图")
         self.product_img_btn.setObjectName("productImageButton")
         self.product_img_btn.setFixedHeight(36)
-        self.product_img_btn.setStyleSheet("""
-            QPushButton#productImageButton {
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                color: #ffffff;
-                border-radius: 4px;
-                padding: 0 14px;
-                font-size: 16px;
-            }
-            QPushButton#productImageButton:hover {
-                border: 1px solid #f97316;
-            }
-        """)
         layout.addWidget(self.product_img_btn)
 
         # 相机控件内联：列表、刷新、启动
@@ -541,20 +530,6 @@ class ProcessExecutionWindow(QWidget):
         self.return_btn = QPushButton("← 返回任务列表")
         self.return_btn.setObjectName("returnButton")
         self.return_btn.setFixedHeight(36)
-        self.return_btn.setStyleSheet("""
-            QPushButton#returnButton {
-                background-color: #252525;
-                border: 1px solid #f97316;
-                color: #f97316;
-                border-radius: 4px;
-                padding: 0 14px;
-                font-size: 16px;
-            }
-            QPushButton#returnButton:hover {
-                background-color: #f97316;
-                color: #ffffff;
-            }
-        """)
         self.return_btn.clicked.connect(self.close)
         layout.addWidget(self.return_btn)
 
@@ -568,11 +543,9 @@ class ProcessExecutionWindow(QWidget):
 
         self.date_label = QLabel(datetime.now().strftime("%Y-%m-%d"))
         self.date_label.setObjectName("dateLabel")
-        self.date_label.setStyleSheet("font-size: 14px; color: #22c55e;")
 
         self.time_label = QLabel(datetime.now().strftime("%H:%M:%S"))
         self.time_label.setObjectName("timeLabel")
-        self.time_label.setStyleSheet("font-size: 18px; color: #22c55e;")
         try:
             f = self._make_time_debug_filter()
             self.time_label.installEventFilter(f)
@@ -605,14 +578,18 @@ class ProcessExecutionWindow(QWidget):
 
         if self.network_status == "online":
             icon = QLabel("📶")
-            icon.setStyleSheet("font-size: 16px; color: #22c55e;")
+            icon.setObjectName("networkStatusIcon")
+            icon.setProperty("networkState", "online")
             text = QLabel("在线")
-            text.setStyleSheet("font-size: 14px; color: #22c55e;")
+            text.setObjectName("networkStatusText")
+            text.setProperty("networkState", "online")
         else:
             icon = QLabel("📵")
-            icon.setStyleSheet("font-size: 16px; color: #ef4444;")
+            icon.setObjectName("networkStatusIcon")
+            icon.setProperty("networkState", "offline")
             text = QLabel("离线")
-            text.setStyleSheet("font-size: 14px; color: #ef4444;")
+            text.setObjectName("networkStatusText")
+            text.setProperty("networkState", "offline")
 
         layout.addWidget(icon)
         layout.addWidget(text)
@@ -623,11 +600,6 @@ class ProcessExecutionWindow(QWidget):
         """Create the camera controls section with selection and power toggle."""
         section = QWidget()
         section.setObjectName("cameraControlsSection")
-        section.setStyleSheet("""
-            QWidget#cameraControlsSection {
-                background-color: #252525;
-            }
-        """)
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
@@ -637,35 +609,6 @@ class ProcessExecutionWindow(QWidget):
         self.camera_combo.setObjectName("cameraCombo")
         self.camera_combo.setFixedHeight(36)
         self.camera_combo.setMinimumWidth(180)
-        self.camera_combo.setStyleSheet("""
-            QComboBox#cameraCombo {
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                border-radius: 4px;
-                padding: 4px 8px;
-                color: #ffffff;
-                font-size: 16px;
-            }
-            QComboBox#cameraCombo:hover {
-                border: 1px solid #f97316;
-            }
-            QComboBox#cameraCombo::drop-down {
-                border: none;
-            }
-            QComboBox#cameraCombo::down-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 6px solid #9ca3af;
-                margin-right: 6px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                selection-background-color: #f97316;
-                color: #ffffff;
-            }
-        """)
 
         # Populate camera list
         self.refresh_camera_list()
@@ -677,18 +620,6 @@ class ProcessExecutionWindow(QWidget):
         refresh_btn.setObjectName("cameraRefreshButton")
         refresh_btn.setFixedSize(36, 36)
         refresh_btn.setToolTip("刷新相机列表")
-        refresh_btn.setStyleSheet("""
-            QPushButton#cameraRefreshButton {
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                color: #ffffff;
-                border-radius: 4px;
-                font-size: 16px;
-            }
-            QPushButton#cameraRefreshButton:hover {
-                border: 1px solid #f97316;
-            }
-        """)
         refresh_btn.clicked.connect(self.refresh_camera_list)
 
         layout.addWidget(refresh_btn)
@@ -698,28 +629,6 @@ class ProcessExecutionWindow(QWidget):
         self.camera_toggle_btn.setObjectName("cameraToggleButton")
         self.camera_toggle_btn.setFixedHeight(36)
         self.camera_toggle_btn.setCheckable(True)
-        self.camera_toggle_btn.setStyleSheet("""
-            QPushButton#cameraToggleButton {
-                background-color: #252525;
-                border: 1px solid #22c55e;
-                color: #22c55e;
-                border-radius: 4px;
-                padding: 0 14px;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton#cameraToggleButton:hover {
-                border: 1px solid #16a34a;
-            }
-            QPushButton#cameraToggleButton:checked {
-                background-color: #252525;
-                border: 1px solid #ef4444;
-                color: #ef4444;
-            }
-            QPushButton#cameraToggleButton:checked:hover {
-                border: 1px solid #dc2626;
-            }
-        """)
         self.camera_toggle_btn.clicked.connect(self.toggle_camera)
 
         layout.addWidget(self.camera_toggle_btn)
@@ -891,6 +800,7 @@ class ProcessExecutionWindow(QWidget):
             except Exception:
                 self._last_display_size = None
             self.base_image_label.setPixmap(scaled_pixmap)
+            self._set_video_state("active")
 
     def on_preview_error(self, error_msg: str):
         """Handle preview worker error."""
@@ -901,13 +811,7 @@ class ProcessExecutionWindow(QWidget):
         """Show a neutral placeholder before the camera preview starts."""
         self.base_image_label.clear()
         self.base_image_label.setText("等待相机视频")
-        # Ensure consistent styling: dark background and muted text
-        self.base_image_label.setStyleSheet("""
-            background-color: #0a0a0a;
-            color: #6b7280;
-            font-size: 18px;
-            qproperty-alignment: AlignCenter;
-        """)
+        self._set_video_state("placeholder")
 
     def _qimage_to_numpy(self, qimage: QImage):
         qi = qimage.convertToFormat(QImage.Format.Format_RGB888)
@@ -968,11 +872,6 @@ class ProcessExecutionWindow(QWidget):
         # Main container
         container = QFrame()
         container.setObjectName("visualGuidanceArea")
-        container.setStyleSheet("""
-            QFrame#visualGuidanceArea {
-                background-color: #1a1a1a;
-            }
-        """)
 
         # Replace StackAll with single layout where overlay is a sibling overlay of base label
         layout = QVBoxLayout(container)
@@ -980,13 +879,10 @@ class ProcessExecutionWindow(QWidget):
 
         # Base layer: PCB image or camera feed
         self.base_image_label = QLabel()
+        self.base_image_label.setObjectName("baseImageLabel")
         self.base_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.base_image_label.setMinimumSize(720, 480)
         self.base_image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.base_image_label.setStyleSheet("""
-            background-color: #0a0a0a;
-            border: 1px solid #2a2a2a;
-        """)
 
         # Initialize with neutral placeholder
         self.reset_camera_placeholder()
@@ -1086,6 +982,7 @@ class ProcessExecutionWindow(QWidget):
         except Exception:
             self._last_display_size = None
         self.base_image_label.setPixmap(spm)
+        self._set_video_state("active")
         self.detection_status = 'idle'
         try:
             self.rebuild_status_section()
@@ -1098,7 +995,6 @@ class ProcessExecutionWindow(QWidget):
         # 叠加层不改变布局尺寸，仅覆盖视频区域
         w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        w.setStyleSheet("background-color: transparent;")
 
         self.pass_overlay = self.create_pass_overlay()
         self.fail_overlay = self.create_fail_overlay()
@@ -1120,14 +1016,8 @@ class ProcessExecutionWindow(QWidget):
 
         # Guidance box container
         box_container = QFrame()
+        box_container.setObjectName("guidanceBox")
         box_container.setFixedSize(250, 180)
-        box_container.setStyleSheet("""
-            QFrame {
-                background-color: rgba(249, 115, 22, 0.1);
-                border: 3px solid #f97316;
-                border-radius: 8px;
-            }
-        """)
 
         box_layout = QVBoxLayout(box_container)
         box_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
@@ -1135,15 +1025,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Label above the box
         label = QLabel("安装位置")
-        label.setStyleSheet("""
-            background-color: #f97316;
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: bold;
-            padding: 4px 12px;
-            border-radius: 4px;
-            margin-top: -20px;
-        """)
+        label.setObjectName("guidanceBoxLabel")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(label)
 
@@ -1182,7 +1064,7 @@ class ProcessExecutionWindow(QWidget):
                 painter.drawLine(width // 2, v_start, width // 2, v_end)
 
         crosshair = CrosshairWidget()
-        crosshair.setStyleSheet("background-color: transparent;")
+        crosshair.setObjectName("crosshairCanvas")
 
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1194,34 +1076,18 @@ class ProcessExecutionWindow(QWidget):
         """Create the PASS detection result overlay."""
         widget = QWidget()
         widget.setObjectName("passOverlay")
-        widget.setStyleSheet("""
-            background-color: transparent;
-        """)
 
         layout = QVBoxLayout(widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Large checkmark icon
         icon = QLabel("✅")
-        icon.setStyleSheet("""
-            font-size: 96px;
-            color: #ffffff;
-            background: rgba(34, 197, 94, 0.7);
-            padding: 16px;
-            border-radius: 12px;
-        """)
+        icon.setObjectName("passOverlayIcon")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # PASS text
         text = QLabel("PASS")
-        text.setStyleSheet("""
-            font-size: 72px;
-            color: #ffffff;
-            font-weight: bold;
-            background: rgba(34, 197, 94, 0.7);
-            padding: 16px 24px;
-            border-radius: 12px;
-        """)
+        text.setObjectName("passOverlayText")
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(icon)
@@ -1233,9 +1099,6 @@ class ProcessExecutionWindow(QWidget):
         """Create the FAIL detection result overlay with error card."""
         widget = QWidget()
         widget.setObjectName("failOverlay")
-        widget.setStyleSheet("""
-            background-color: transparent;
-        """)
 
         layout = QVBoxLayout(widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1243,48 +1106,25 @@ class ProcessExecutionWindow(QWidget):
 
         # Large alert icon
         icon = QLabel("❌")
-        icon.setStyleSheet("""
-            font-size: 96px;
-            color: #ffffff;
-            background: rgba(239, 68, 68, 0.8);
-            padding: 16px;
-            border-radius: 12px;
-        """)
+        icon.setObjectName("failOverlayIcon")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # FAIL text
         text = QLabel("FAIL")
-        text.setStyleSheet("""
-            font-size: 72px;
-            color: #ffffff;
-            font-weight: bold;
-            background: rgba(239, 68, 68, 0.8);
-            padding: 16px 24px;
-            border-radius: 12px;
-        """)
+        text.setObjectName("failOverlayText")
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Error card
         error_card = QFrame()
+        error_card.setObjectName("failErrorCard")
         error_card.setMaximumWidth(400)
-        error_card.setStyleSheet("""
-            QFrame {
-                background: rgba(25, 25, 25, 0.85);
-                border: 1px solid rgba(239, 68, 68, 0.7);
-                border-radius: 10px;
-                padding: 16px;
-            }
-        """)
 
         error_layout = QVBoxLayout(error_card)
         error_layout.setSpacing(12)
 
         # Error details
         error_details = QLabel("未检测到元件或位置偏移超出容差范围")
-        error_details.setStyleSheet("""
-            color: #fecaca;
-            font-size: 14px;
-        """)
+        error_details.setObjectName("failErrorDetails")
         error_details.setWordWrap(True)
 
         # Action buttons
@@ -1294,37 +1134,10 @@ class ProcessExecutionWindow(QWidget):
         self.retry_btn = QPushButton("重新检测")
         self.retry_btn.setObjectName("retryButton")
         self.retry_btn.setFixedHeight(36)
-        self.retry_btn.setStyleSheet("""
-            QPushButton#retryButton {
-                background-color: #ef4444;
-                border: none;
-                color: #ffffff;
-                border-radius: 4px;
-                padding: 0 16px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton#retryButton:hover {
-                background-color: #dc2626;
-            }
-        """)
 
         self.skip_btn = QPushButton("跳过")
         self.skip_btn.setObjectName("skipButton")
         self.skip_btn.setFixedHeight(36)
-        self.skip_btn.setStyleSheet("""
-            QPushButton#skipButton {
-                background-color: transparent;
-                border: 1px solid #ef4444;
-                color: #ef4444;
-                border-radius: 4px;
-                padding: 0 16px;
-                font-size: 14px;
-            }
-            QPushButton#skipButton:hover {
-                background-color: rgba(239, 68, 68, 0.1);
-            }
-        """)
 
         button_layout.addWidget(self.retry_btn)
         button_layout.addWidget(self.skip_btn)
@@ -1405,12 +1218,6 @@ class ProcessExecutionWindow(QWidget):
         panel = QFrame()
         panel.setFixedWidth(368)
         panel.setObjectName("stepListPanel")
-        panel.setStyleSheet("""
-            QFrame#stepListPanel {
-                background-color: #1e1e1e;
-                border-right: 1px solid #3a3a3a;
-            }
-        """)
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1418,41 +1225,20 @@ class ProcessExecutionWindow(QWidget):
 
         # Header
         header = QLabel("工艺步骤")
-        header.setStyleSheet("""
-            background-color: #1e1e1e;
-            color: #ffffff;
-            font-size: 24px;
-            font-weight: bold;
-            padding: 12px;
-            border-bottom: 1px solid #3a3a3a;
-        """)
+        header.setObjectName("stepListHeader")
         layout.addWidget(header)
 
         # Scroll area for step cards
         scroll_area = QScrollArea()
+        scroll_area.setObjectName("stepListScrollArea")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: #1e1e1e;
-                border: none;
-            }
-            QScrollArea > QWidget {
-                background-color: #1e1e1e;
-            }
-            QScrollArea > QWidget > QWidget {
-                background-color: #1e1e1e;
-            }
-        """)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.viewport().setObjectName("stepListViewport")
 
         # Container for step cards
         steps_container = QWidget()
         steps_container.setObjectName("stepsContainer")
-        steps_container.setStyleSheet("""
-            QWidget#stepsContainer {
-                background-color: #1e1e1e;
-            }
-        """)
         steps_layout = QVBoxLayout(steps_container)
         # 使用外框样式，适当留出内边距与间距，避免“线框叠加”的拥挤感
         steps_layout.setContentsMargins(8, 8, 8, 8)
@@ -1475,39 +1261,12 @@ class ProcessExecutionWindow(QWidget):
     def create_step_card(self, step: ProcessStep) -> QWidget:
         """Create a single step card widget."""
         card = QFrame()
-        card.setObjectName(f"stepCard_{step.id}")
+        card.setObjectName("stepCard")
         card.setCursor(Qt.CursorShape.PointingHandCursor)
         # 增加最小高度以适配放大后的字体，避免内容垂直被裁剪
         card.setMinimumHeight(84)
 
-        # Style based on status
-        if step.status == 'current':
-            card.setStyleSheet(f"""
-                QFrame#stepCard_{step.id} {{
-                    background-color: #262626;
-                    border: 1px solid #f97316; /* ≤2px 外框，仅作用于当前卡片 */
-                    border-radius: 8px;
-                    padding: 10px 12px;
-                }}
-            """)
-        elif step.status == 'completed':
-            card.setStyleSheet(f"""
-                QFrame#stepCard_{step.id} {{
-                    background-color: #1e1e1e;
-                    border: 1px solid rgba(34, 197, 94, 0.5); /* ≤2px 外框，仅作用于当前卡片 */
-                    border-radius: 8px;
-                    padding: 10px 12px;
-                }}
-            """)
-        else:  # pending
-            card.setStyleSheet(f"""
-                QFrame#stepCard_{step.id} {{
-                    background-color: #1e1e1e;
-                    border: 1px solid #2a2a2a; /* ≤2px 外框，仅作用于当前卡片 */
-                    border-radius: 8px;
-                    padding: 10px 12px;
-                }}
-            """)
+        card.setProperty("stepStatus", step.status)
 
         layout = QHBoxLayout(card)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1518,12 +1277,7 @@ class ProcessExecutionWindow(QWidget):
         text_layout.setSpacing(2)
 
         name_label = QLabel(step.name)
-        if step.status == 'current':
-            name_label.setStyleSheet("font-size: 26px; color: #fb923c; font-weight: bold;")
-        elif step.status == 'completed':
-            name_label.setStyleSheet("font-size: 26px; color: #22c55e;")
-        else:
-            name_label.setStyleSheet("font-size: 26px; color: #9ca3af;")
+        name_label.setObjectName("stepNameLabel")
         # 允许根据内容自适应高度
         try:
             name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -1531,12 +1285,7 @@ class ProcessExecutionWindow(QWidget):
             pass
 
         desc_label = QLabel(step.description)
-        if step.status == 'current':
-            desc_label.setStyleSheet("font-size: 21px; color: #ffffff;")
-        elif step.status == 'completed':
-            desc_label.setStyleSheet("font-size: 21px; color: #d1d5db;")
-        else:
-            desc_label.setStyleSheet("font-size: 21px; color: #6b7280;")
+        desc_label.setObjectName("stepDescLabel")
         # 开启自动换行，避免文本被裁剪；允许根据内容自适应高度
         try:
             desc_label.setWordWrap(True)
@@ -1549,18 +1298,14 @@ class ProcessExecutionWindow(QWidget):
 
         layout.addLayout(text_layout, 1)
 
+        self._apply_step_card_state(card, step.status, name_label, desc_label)
+
         return card
 
     def create_footer_bar(self) -> QWidget:
         """Create the bottom footer with current instruction and detection status."""
         footer_frame = QFrame()
         footer_frame.setObjectName("footerBar")
-        footer_frame.setStyleSheet("""
-            QFrame#footerBar {
-                background-color: #252525;
-                border-top: 1px solid #3a3a3a;
-            }
-        """)
         # 固定底部高度以避免状态更新时影响主内容区域尺寸
         footer_frame.setFixedHeight(120)
 
@@ -1590,7 +1335,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Instruction text
         self.instruction_label = QLabel(self.current_instruction)
-        self.instruction_label.setStyleSheet("font-size: 36px; color: #f97316; font-weight: bold;")
+        self.instruction_label.setObjectName("instructionLabel")
         self.instruction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.instruction_label)
 
@@ -1620,25 +1365,6 @@ class ProcessExecutionWindow(QWidget):
         self.start_detection_btn.setObjectName("startDetectionButton")
         # 方形按钮，尺寸与底部信息栏高度一致
         self.start_detection_btn.setFixedSize(250, 120)
-        self.start_detection_btn.setStyleSheet(f"""
-            QPushButton#startDetectionButton {{
-                background-color: #f97316;
-                border: none;
-                color: #ffffff;
-                border-radius: 4px;
-                font-size: 24px;
-                font-weight: 700;
-                font-family: {self.custom_font_family};
-                padding: 0px;
-            }}
-            QPushButton#startDetectionButton:hover {{
-                background-color: #ea580c;
-            }}
-            QPushButton#startDetectionButton:disabled {{
-                background-color: #3a3a3a;
-                color: #9ca3af;
-            }}
-        """)
         # Ensure button uses the loaded custom font
         try:
             self.start_detection_btn.setFont(self.custom_font)
@@ -1822,10 +1548,7 @@ class ProcessExecutionWindow(QWidget):
         if not hasattr(self, "toast_label"):
             return
         self.toast_label.setText(text)
-        if success:
-            self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#3CC37A; color:#FFFFFF;")
-        else:
-            self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#E85454; color:#FFFFFF;")
+        self._set_toast_state("success" if success else "error")
         self.toast_label.setVisible(True)
         self.toast_container.setVisible(True)
         try:
@@ -1911,38 +1634,10 @@ class ProcessExecutionWindow(QWidget):
 
     def rebuild_step_cards(self):
         """Rebuild step cards to reflect updated statuses."""
-        # This is a simplified version - in production you'd update existing widgets
-        # For now, just update the card styles by recreating them
-        for i, (step, card_widget) in enumerate(zip(self.steps, self.step_card_widgets)):
-            # Update styling based on new status
-            obj_name = card_widget.objectName()
-            if step.status == 'current':
-                card_widget.setStyleSheet(f"""
-                    QFrame#{obj_name} {{
-                        background-color: #262626;
-                        border: 1px solid #f97316; /* ≤2px 外框，仅作用于该卡片 */
-                        border-radius: 8px;
-                        padding: 10px 12px;
-                    }}
-                """)
-            elif step.status == 'completed':
-                card_widget.setStyleSheet(f"""
-                    QFrame#{obj_name} {{
-                        background-color: #1e1e1e;
-                        border: 1px solid rgba(34, 197, 94, 0.5); /* ≤2px 外框，仅作用于该卡片 */
-                        border-radius: 8px;
-                        padding: 10px 12px;
-                    }}
-                """)
-            else:
-                card_widget.setStyleSheet(f"""
-                    QFrame#{obj_name} {{
-                        background-color: #1e1e1e;
-                        border: 1px solid #2a2a2a; /* ≤2px 外框，仅作用于该卡片 */
-                        border-radius: 8px;
-                        padding: 10px 12px;
-                    }}
-                """)
+        for step, card_widget in zip(self.steps, self.step_card_widgets):
+            name_label = card_widget.findChild(QLabel, "stepNameLabel")
+            desc_label = card_widget.findChild(QLabel, "stepDescLabel")
+            self._apply_step_card_state(card_widget, step.status, name_label, desc_label)
 
     def rebuild_status_section(self):
         """Rebuild the status section in footer based on current detection status."""
@@ -1963,28 +1658,9 @@ class ProcessExecutionWindow(QWidget):
         from PySide6.QtWidgets import QDialog, QDialogButtonBox
 
         dialog = QDialog(self)
+        dialog.setObjectName("completionDialog")
         dialog.setWindowTitle("任务完成")
         dialog.setFixedSize(520, 360)
-        dialog.setStyleSheet("""
-            QDialog {
-                background-color: #252525;
-            }
-            QLabel {
-                color: #ffffff;
-                font-size: 16px;
-            }
-            QPushButton {
-                background-color: #22c55e;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #16a34a;
-            }
-        """)
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(24, 16, 24, 16)
@@ -1992,7 +1668,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Success icon and message
         icon = QLabel("✅")
-        icon.setStyleSheet("font-size: 64px;")
+        icon.setObjectName("completionDialogIcon")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         message = QLabel("所有工艺步骤已完成!")
@@ -2003,7 +1679,7 @@ class ProcessExecutionWindow(QWidget):
         message.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         summary = QLabel(f"工艺: {self.process_data.get('name')}\n完成步骤: {self.total_steps}/{self.total_steps}")
-        summary.setStyleSheet("color: #9ca3af; font-size: 14px;")
+        summary.setObjectName("completionDialogSummary")
         try:
             summary.setWordWrap(True)
         except Exception:

@@ -1,0 +1,412 @@
+QWidget#processExecutionWindow {
+    background-color: #EBEFF6;
+    color: #1F2933;
+    font-family: "@font_family";
+}
+
+#toastOverlay {
+    background-color: transparent;
+}
+
+#toastLabel {
+    padding: 8px 12px;
+    border-radius: 16px;
+    color: #F8FAFC;
+    font-weight: 600;
+    background-color: rgba(15, 23, 42, 0.85);
+}
+
+#toastLabel[toastState="success"] {
+    background-color: rgba(34, 197, 94, 0.85);
+}
+
+#toastLabel[toastState="error"] {
+    background-color: rgba(220, 38, 38, 0.85);
+}
+
+#headerBar {
+    background-color: #FFFFFF;
+    border-bottom: 1px solid #D0D7E3;
+}
+
+#headerSeparator {
+    background-color: #D0D7E3;
+}
+
+#productInfoSection {
+    background-color: #FFFFFF;
+}
+
+#productInfoIcon {
+    font-size: 19px;
+    color: #2563EB;
+}
+
+#productInfoLabel {
+    font-size: 14px;
+    color: #4B5563;
+}
+
+#productInfoValue {
+    font-size: 17px;
+    color: #1F2933;
+}
+
+#progressSection {
+    background-color: #FFFFFF;
+}
+
+#progressLabel {
+    font-size: 16px;
+    color: #1F2933;
+}
+
+QProgressBar#progressBar {
+    background-color: #F2F4F8;
+    border: none;
+    border-radius: 3px;
+}
+
+QProgressBar#progressBar::chunk {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #2563EB, stop:1 #1D4ED8);
+    border-radius: 3px;
+}
+
+#headerControlsSection {
+    background-color: #FFFFFF;
+}
+
+QComboBox#cameraCombo {
+    background-color: #FFFFFF;
+    border: 1px solid #D0D7E3;
+    border-radius: 4px;
+    padding: 4px 8px;
+    color: #1F2933;
+    font-size: 16px;
+}
+
+QComboBox#cameraCombo:hover {
+    border: 1px solid #2563EB;
+}
+
+QComboBox#cameraCombo::drop-down {
+    border: none;
+}
+
+QComboBox#cameraCombo::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 6px solid #9ca3af;
+    margin-right: 6px;
+}
+
+QComboBox#cameraCombo QAbstractItemView {
+    background-color: #FFFFFF;
+    border: 1px solid #D0D7E3;
+    selection-background-color: #2563EB;
+    color: #1F2933;
+}
+
+QPushButton#cameraRefreshButton {
+    background-color: #FFFFFF;
+    border: 1px solid #D0D7E3;
+    color: #1F2933;
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+QPushButton#cameraRefreshButton:hover {
+    border: 1px solid #2563EB;
+}
+
+QPushButton#cameraToggleButton {
+    background-color: #FFFFFF;
+    border: 1px solid #22c55e;
+    color: #22c55e;
+    border-radius: 4px;
+    padding: 0 14px;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+QPushButton#cameraToggleButton:hover {
+    border: 1px solid #16a34a;
+}
+
+QPushButton#cameraToggleButton:checked {
+    border: 1px solid #ef4444;
+    color: #ef4444;
+}
+
+QPushButton#cameraToggleButton:checked:hover {
+    border: 1px solid #dc2626;
+}
+
+#networkStatusIcon,
+#networkStatusText {
+    font-size: 14px;
+}
+
+#networkStatusIcon[networkState="online"],
+#networkStatusText[networkState="online"] {
+    color: #22c55e;
+}
+
+#networkStatusIcon[networkState="offline"],
+#networkStatusText[networkState="offline"] {
+    color: #ef4444;
+}
+
+#visualGuidanceArea {
+    background-color: #D3DAEB;
+}
+
+#baseImageLabel {
+    background-color: #E7ECF7;
+    border: 1px solid #B7C4DE;
+    color: #364152;
+    font-size: 18px;
+}
+
+#baseImageLabel[videoState="active"] {
+    color: #1F2933;
+}
+
+#guidanceBox {
+    background-color: rgba(249, 115, 22, 0.1);
+    border: 3px solid #2563EB;
+    border-radius: 8px;
+}
+
+#guidanceBoxLabel {
+    background-color: #2563EB;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 4px 12px;
+    border-radius: 4px;
+}
+
+#crosshairCanvas {
+    background-color: transparent;
+}
+
+#passOverlay,
+#failOverlay,
+#processOverlay {
+    background-color: transparent;
+}
+
+#passOverlayIcon,
+#passOverlayText {
+    background: rgba(34, 197, 94, 0.7);
+    color: #ffffff;
+    border-radius: 12px;
+}
+
+#passOverlayIcon {
+    font-size: 96px;
+    padding: 16px;
+}
+
+#passOverlayText {
+    font-size: 72px;
+    font-weight: bold;
+    padding: 16px 24px;
+}
+
+#failOverlayIcon,
+#failOverlayText {
+    background: rgba(239, 68, 68, 0.8);
+    color: #ffffff;
+    border-radius: 12px;
+}
+
+#failOverlayIcon {
+    font-size: 96px;
+    padding: 16px;
+}
+
+#failOverlayText {
+    font-size: 72px;
+    font-weight: bold;
+    padding: 16px 24px;
+}
+
+#failErrorCard {
+    background: #FFF7F7;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 10px;
+    padding: 16px;
+}
+
+#failErrorDetails {
+    color: #B91C1C;
+    font-size: 14px;
+}
+
+QPushButton#retryButton {
+    background-color: #ef4444;
+    border: none;
+    color: #ffffff;
+    border-radius: 4px;
+    padding: 0 16px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+QPushButton#retryButton:hover {
+    background-color: #dc2626;
+}
+
+QPushButton#skipButton {
+    background-color: transparent;
+    border: 1px solid #ef4444;
+    color: #ef4444;
+    border-radius: 4px;
+    padding: 0 16px;
+    font-size: 14px;
+}
+
+QPushButton#skipButton:hover {
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+#stepListPanel {
+    background-color: #E0E7F6;
+    border-right: 1px solid #C7D4EA;
+}
+
+#stepListHeader {
+    background-color: #E0E7F6;
+    color: #1F2933;
+    font-size: 24px;
+    font-weight: bold;
+    padding: 12px;
+    border-bottom: 1px solid #C7D4EA;
+}
+
+QScrollArea#stepListScrollArea {
+    background-color: #E0E7F6;
+    border: none;
+}
+
+QWidget#stepListViewport,
+QWidget#stepsContainer {
+    background-color: #E0E7F6;
+}
+
+QFrame#stepCard {
+    border-radius: 8px;
+    padding: 10px 12px;
+    background-color: #ECF2FF;
+    border: 1px solid #C9D6F0;
+}
+
+QFrame#stepCard[stepStatus="current"] {
+    background-color: #FBE9D5;
+    border: 1px solid #2563EB;
+}
+
+QFrame#stepCard[stepStatus="completed"] {
+    background-color: #E3F7EA;
+    border: 1px solid rgba(34, 197, 94, 0.5);
+}
+
+#stepNameLabel,
+#stepDescLabel {
+    font-size: 21px;
+    color: #6b7280;
+}
+
+#stepNameLabel {
+    font-size: 26px;
+}
+
+#stepNameLabel[stepStatus="current"] {
+    color: #1D4ED8;
+    font-weight: bold;
+}
+
+#stepNameLabel[stepStatus="completed"] {
+    color: #22c55e;
+}
+
+#stepNameLabel[stepStatus="pending"] {
+    color: #9ca3af;
+}
+
+#stepDescLabel[stepStatus="current"] {
+    color: #1F2933;
+}
+
+#stepDescLabel[stepStatus="completed"] {
+    color: #2F855A;
+}
+
+#stepDescLabel[stepStatus="pending"] {
+    color: #6b7280;
+}
+
+#footerBar {
+    background-color: #DADFEF;
+    border-top: 1px solid #B5C3DC;
+}
+
+#instructionLabel {
+    font-size: 36px;
+    color: #2563EB;
+    font-weight: bold;
+}
+
+QPushButton#startDetectionButton {
+    background-color: #2563EB;
+    border: none;
+    color: #ffffff;
+    border-radius: 4px;
+    font-size: 24px;
+    font-weight: 700;
+    padding: 0;
+}
+
+QPushButton#startDetectionButton:hover {
+    background-color: #1E3A8A;
+}
+
+QPushButton#startDetectionButton:disabled {
+    background-color: #D0D7E3;
+    color: #9ca3af;
+}
+
+#completionDialog {
+    background-color: #FFFFFF;
+}
+
+#completionDialog QLabel {
+    color: #1F2933;
+    font-size: 16px;
+}
+
+#completionDialogIcon {
+    font-size: 64px;
+}
+
+#completionDialogSummary {
+    color: #4B5563;
+    font-size: 14px;
+}
+
+#completionDialog QPushButton {
+    background-color: #22c55e;
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 16px;
+    font-size: 14px;
+}
+
+#completionDialog QPushButton:hover {
+    background-color: #16a34a;
+}

@@ -31,7 +31,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPoint, Signal, QSize, QFileSystemWatcher, QEvent, QTimer
 from PySide6.QtGui import QFontDatabase, QFont
 
-from .styles import ThemeLoader, build_theme_variables
+from .styles import (
+    ThemeLoader,
+    build_theme_variables,
+    load_user_theme_preference,
+    resolve_theme_colors,
+)
 
 try:
     from ..core.session import SessionManager
@@ -79,7 +84,8 @@ class MainWindow(QMainWindow):
         self.config: AppConfig = config or get_config()
         self.app_display_name = "ProcVision"
         self.colors = self.config.ui.colors
-        self.theme_loader = ThemeLoader()
+        self.current_theme = load_user_theme_preference()
+        self.theme_loader = ThemeLoader(theme_name=self.current_theme)
         self.stylesheet_path = self.theme_loader.stylesheet_path("main_window")
         self.stylesheet_watcher: Optional[QFileSystemWatcher] = None
         self.custom_font_family = "Arial"
@@ -146,6 +152,33 @@ class MainWindow(QMainWindow):
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         for label in self._time_labels:
             label.setText(current_time)
+
+    def on_theme_changed(self, theme: str) -> None:
+        """Handle theme switch requests from settings."""
+        self.set_theme(theme)
+
+    def set_theme(self, theme: str) -> None:
+        """Update the UI theme and reapply styles."""
+        if theme not in {"dark", "light"}:
+            logger.warning("Unsupported theme requested: %s", theme)
+            return
+        if theme == getattr(self, "current_theme", "dark"):
+            return
+        self.current_theme = theme
+        self.theme_loader.set_theme(theme)
+        try:
+            self.stylesheet_path = self.theme_loader.stylesheet_path("main_window")
+        except FileNotFoundError:
+            logger.error("Theme '%s' is missing the main_window.qss file", theme)
+            return
+        if self.stylesheet_watcher:
+            self.stylesheet_watcher.deleteLater()
+            self.stylesheet_watcher = None
+        self.reload_stylesheet()
+        try:
+            self.camera_page.apply_theme(theme)
+        except Exception:
+            logger.exception("Failed to apply theme on camera page")
 
     def init_ui(self):
         """Initialize the UI components."""
@@ -406,11 +439,15 @@ class MainWindow(QMainWindow):
         self.content_stack.setObjectName("contentStack")
 
         # Create pages using dynamic loading
-        self.camera_page = CameraPage(camera_service=self.camera_service)
-        self.system_page = SystemPage()
+        self.camera_page = CameraPage(camera_service=self.camera_service, initial_theme=self.current_theme)
+        self.system_page = SystemPage(initial_theme=self.current_theme)
         self.model_page = ModelPage()
         self.process_page = ProcessPage(camera_service=self.camera_service)  # 默认页面
         self.records_page = RecordsPage()
+        try:
+            self.system_page.themeChanged.connect(self.on_theme_changed)
+        except Exception:
+            logger.exception("Failed to connect theme change signal")
 
         # Add pages to stack
         self.content_stack.addWidget(self.camera_page)
@@ -536,11 +573,14 @@ class MainWindow(QMainWindow):
             watched_files = set(self.stylesheet_watcher.files())
             if str(self.stylesheet_path) not in watched_files:
                 self.stylesheet_watcher.addPath(str(self.stylesheet_path))
+        else:
+            self._register_stylesheet_watcher()
 
     def _build_stylesheet_variables(self) -> dict[str, str]:
         """Prepare placeholder replacements for theme files."""
         font_family = getattr(self, "custom_font_family", "Arial") or "Arial"
-        return build_theme_variables(self.colors, font_family)
+        theme_colors = resolve_theme_colors(getattr(self, "current_theme", "dark"), self.colors)
+        return build_theme_variables(theme_colors, font_family)
 
     def _register_stylesheet_watcher(self):
         """Watch the stylesheet for changes to enable live reload."""

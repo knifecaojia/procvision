@@ -10,20 +10,23 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QSpacerItem, QSizePolicy,
     QFileDialog, QCheckBox, QComboBox
 )
-from PySide6.QtCore import Qt
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 
-from ..styles import refresh_widget_styles
+from ..styles import refresh_widget_styles, save_user_theme_preference
 
 logger = logging.getLogger(__name__)
 
 
 class SystemPage(QFrame):
     """System settings page implementation."""
+
+    themeChanged = Signal(str)
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, initial_theme: str = "dark"):
         super().__init__(parent)
         self.setObjectName("systemPage")
+        self.current_theme = initial_theme if initial_theme in {"dark", "light"} else "dark"
+        self._loading_settings = False
         self.init_ui()
         self.load_settings()
         
@@ -64,8 +67,22 @@ class SystemPage(QFrame):
         auto_layout.addWidget(auto_label)
         auto_layout.addWidget(self.auto_start_next_checkbox)
 
+        theme_layout = QHBoxLayout()
+        theme_layout.setSpacing(10)
+        theme_label = QLabel("主题模式（Light）:")
+        theme_label.setObjectName("paramLabel")
+        self.theme_label = theme_label
+        self.theme_switch = QCheckBox()
+        self.theme_switch.setObjectName("themeSwitch")
+        self.theme_switch.setToolTip("切换浅色或深色主题")
+        self.theme_switch.toggled.connect(self.on_theme_switch)
+        theme_layout.addWidget(theme_label)
+        theme_layout.addWidget(self.theme_switch)
+        theme_layout.addStretch()
+
         general_layout.addWidget(general_title)
         general_layout.addLayout(auto_layout)
+        general_layout.addLayout(theme_layout)
 
         pos_layout = QHBoxLayout()
         pos_label = QLabel("检测结果提示位置:")
@@ -267,6 +284,7 @@ class SystemPage(QFrame):
         return Path.cwd() / "config.json"
 
     def load_settings(self):
+        self._loading_settings = True
         try:
             p = self.config_path()
             if p.exists():
@@ -299,8 +317,21 @@ class SystemPage(QFrame):
                 self.result_position_combo.setCurrentIndex(idx)
                 self.draw_ok_checkbox.setChecked(bool(general.get("draw_boxes_ok", True)))
                 self.draw_ng_checkbox.setChecked(bool(general.get("draw_boxes_ng", True)))
+                theme_value = str(general.get("theme", self.current_theme)).lower()
+                if theme_value not in {"dark", "light"}:
+                    theme_value = self.current_theme
+                self.current_theme = theme_value
+                self.theme_switch.blockSignals(True)
+                self.theme_switch.setChecked(self.current_theme == "light")
+                self.theme_switch.blockSignals(False)
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
+        finally:
+            self._loading_settings = False
+            self.theme_switch.blockSignals(True)
+            self.theme_switch.setChecked(self.current_theme == "light")
+            self.theme_switch.blockSignals(False)
+            self._update_theme_label()
 
     def save_settings(self):
         try:
@@ -338,6 +369,7 @@ class SystemPage(QFrame):
                 data["general"]["result_prompt_position"] = "center"
             data["general"]["draw_boxes_ok"] = bool(self.draw_ok_checkbox.isChecked())
             data["general"]["draw_boxes_ng"] = bool(self.draw_ng_checkbox.isChecked())
+            data["general"]["theme"] = "light" if self.theme_switch.isChecked() else "dark"
             p.parent.mkdir(parents=True, exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -368,3 +400,23 @@ class SystemPage(QFrame):
         if hasattr(self, "toast_label"):
             self.toast_label.setVisible(False)
             self.toast_container.setVisible(False)
+
+    def on_theme_switch(self, checked: bool):
+        if self._loading_settings:
+            return
+        theme = "light" if checked else "dark"
+        if theme == self.current_theme:
+            return
+        self.current_theme = theme
+        try:
+            save_user_theme_preference(theme, self.config_path())
+        except Exception:
+            logger.exception("Failed to persist theme preference")
+        self.show_toast(f"主题已切换为 {'浅色' if theme == 'light' else '深色'}", True)
+        self._update_theme_label()
+        self.themeChanged.emit(theme)
+
+    def _update_theme_label(self) -> None:
+        if hasattr(self, "theme_label"):
+            mode = "Light" if self.theme_switch.isChecked() else "Dark"
+            self.theme_label.setText(f"主题模式（{mode}）:")

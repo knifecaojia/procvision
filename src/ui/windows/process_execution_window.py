@@ -28,7 +28,13 @@ try:
 except Exception:  # pragma: no cover
     from src.core.config import get_config  # type: ignore
 
-from ..styles import ThemeLoader, refresh_widget_styles, build_theme_variables
+from ..styles import (
+    ThemeLoader,
+    refresh_widget_styles,
+    build_theme_variables,
+    load_user_theme_preference,
+    resolve_theme_colors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +179,8 @@ class ProcessExecutionWindow(QWidget):
         self._load_custom_font()
         self.config = get_config()
         self.colors = getattr(self.config.ui, "colors", {})
-        self.theme_loader = ThemeLoader()
+        self.current_theme = load_user_theme_preference()
+        self.theme_loader = ThemeLoader(theme_name=self.current_theme)
         # Initialize process steps
         self.steps: List[ProcessStep] = self._initialize_steps()
         self.current_instruction = self.steps[0].description if self.steps else "No steps available"
@@ -244,7 +251,10 @@ class ProcessExecutionWindow(QWidget):
     def _apply_theme(self) -> None:
         """Apply the process execution window stylesheet."""
         try:
-            variables = build_theme_variables(self.colors, self.custom_font_family)
+            variables = build_theme_variables(
+                resolve_theme_colors(getattr(self, "current_theme", "dark"), self.colors),
+                self.custom_font_family,
+            )
             self.theme_loader.apply(self, "process_execution_window", variables=variables)
         except FileNotFoundError:
             logger.error("Process execution stylesheet missing")

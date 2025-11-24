@@ -41,7 +41,13 @@ except ImportError:
     from src.auth.services import AuthService, SessionManager  # type: ignore
     from src.core.config import get_config  # type: ignore
 
-from .styles import ThemeLoader, build_theme_variables, refresh_widget_styles
+from .styles import (
+    ThemeLoader,
+    build_theme_variables,
+    refresh_widget_styles,
+    load_user_theme_preference,
+    resolve_theme_colors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +72,8 @@ class LoginWindow(QMainWindow):
 
         self.config = get_config()
         self.colors = self.config.ui.colors
-        self.theme_loader = ThemeLoader()
+        self.current_theme = load_user_theme_preference()
+        self.theme_loader = ThemeLoader(theme_name=self.current_theme)
 
         self.is_loading = False
         self.login_attempts = 0
@@ -287,7 +294,8 @@ class LoginWindow(QMainWindow):
 
     def _build_theme_variables(self) -> dict[str, str]:
         font_family = getattr(self, "custom_font_family", "Arial") or "Arial"
-        return build_theme_variables(self.colors, font_family)
+        theme_colors = resolve_theme_colors(getattr(self, "current_theme", "dark"), self.colors)
+        return build_theme_variables(theme_colors, font_family)
 
     # --- Connections -----------------------------------------------------
     def setup_connections(self) -> None:

@@ -8,7 +8,7 @@ session management, user information, and application functionality.
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QLineEdit,
     QGridLayout,
-    QSplitter,
     QApplication,
     QMessageBox,
     QToolButton,
@@ -106,7 +105,7 @@ class MainWindow(QMainWindow):
         self.center_window()
 
         # Set default page
-        self.show_process_page()
+        self.show_home_page()
 
         # Default to maximized window after login
         self.showMaximized()
@@ -197,29 +196,36 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # Custom title bar
+        # Header with app info/user info/time
+        header_bar = self.create_header_bar()
+        main_layout.addWidget(header_bar)
+
+        # Central stacked content area
+        content_area = self.create_content_area()
+        main_layout.addWidget(content_area, 1)
+
+        # Bottom status bar
+        self.status_bar = self.create_status_bar()
+        main_layout.addWidget(self.status_bar)
+        self._start_time_timer()
+
+    def create_header_bar(self):
+        """Create the top header with menu context, user info, and current time."""
         title_bar = QFrame()
         title_bar.setObjectName("titleBar")
-        title_bar.setFixedHeight(60)
+        title_bar.setFixedHeight(64)
 
         layout = QHBoxLayout(title_bar)
         layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(15)
+        layout.setSpacing(12)
 
-        # Left side - App info
-        title_label = QLabel(self.app_display_name)
-        title_label.setObjectName("titleBarLabel")
+        # Left side - navigation menu (no ProcVision/version text)
+        nav_container = self.create_navigation_bar()
+        layout.addWidget(nav_container)
+        layout.addStretch(1)
 
-        version_label = QLabel(f"v{self.config.app_version}")
-        version_label.setObjectName("titleVersion")
-
-        left_layout = QHBoxLayout()
-        left_layout.addWidget(title_label)
-        left_layout.addWidget(version_label)
-        left_layout.addStretch()
-
-        # Right-aligned user info（移除工位及ID提示）
-        self.user_info_label = QLabel("User: Demo User")
+        # Right-aligned user info and time (simplified)
+        self.user_info_label = QLabel("用户：演示账号")
         self.user_info_label.setObjectName("userInfo")
         self.user_info_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -234,71 +240,6 @@ class MainWindow(QMainWindow):
         info_layout.addWidget(self.user_info_label)
         info_layout.addWidget(self.time_label)
 
-        layout.addLayout(left_layout)
-        layout.addStretch()
-        layout.addLayout(info_layout)
-
-        # Enable window dragging
-        title_bar.mousePressEvent = self.title_bar_mouse_press
-        title_bar.mouseMoveEvent = self.title_bar_mouse_move
-        title_bar.mouseReleaseEvent = self.title_bar_mouse_release
-
-        main_layout.addWidget(title_bar)
-
-        # Main content area with splitter
-        self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.splitter.setHandleWidth(1)
-        self.splitter.setObjectName("mainSplitter")
-        
-        # Create left navigation panel
-        self.create_left_panel(self.splitter)
-        
-        # Create right content area
-        self.create_right_content_area(self.splitter)
-        
-        main_layout.addWidget(self.splitter)
-        self._start_time_timer()
-
-    def create_title_bar(self):
-        """Create custom title bar with user info."""
-        title_bar = QFrame()
-        title_bar.setObjectName("titleBar")
-        title_bar.setFixedHeight(60)
-
-        layout = QHBoxLayout(title_bar)
-        layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(15)
-
-        # Left side - App info
-        title_label = QLabel(self.app_display_name)
-        title_label.setObjectName("titleBarLabel")
-
-        version_label = QLabel(f"v{self.config.app_version}")
-        version_label.setObjectName("titleVersion")
-
-        left_layout = QHBoxLayout()
-        left_layout.addWidget(title_label)
-        left_layout.addWidget(version_label)
-        left_layout.addStretch()
-
-        # Right-aligned user info (简化用户信息显示)
-        user_info = QLabel("User: Demo User")
-        user_info.setObjectName("userInfo")
-        user_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-
-        time_label = QLabel()
-        time_label.setObjectName("timeInfo")
-        time_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._register_time_label(time_label)
-
-        info_layout = QVBoxLayout()
-        info_layout.setSpacing(2)
-        info_layout.setContentsMargins(0, 0, 0, 0)
-        info_layout.addWidget(user_info)
-        info_layout.addWidget(time_label)
-
-        layout.addLayout(left_layout)
-        layout.addStretch()
         layout.addLayout(info_layout)
 
         # Enable window dragging
@@ -308,131 +249,54 @@ class MainWindow(QMainWindow):
 
         return title_bar
 
-    def create_left_panel(self, parent):
-        """Create left navigation panel."""
-        left_frame = QFrame()
-        left_frame.setObjectName("leftPanel")
-        left_frame.setMinimumWidth(250)  # 使用最小宽度而不是固定宽度
-        left_frame.setMaximumWidth(350)   # 设置最大宽度
-
-        left_layout = QVBoxLayout(left_frame)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
-
-        # Navigation menu
+    def create_navigation_bar(self) -> QWidget:
+        """Create the horizontal navigation bar shown beneath the header."""
         nav_frame = QFrame()
-        nav_frame.setObjectName("navFrame")
-        nav_layout = QVBoxLayout(nav_frame)
-        nav_layout.setContentsMargins(0, 20, 0, 20)
-        nav_layout.setSpacing(5)
+        nav_frame.setObjectName("navBar")
+        nav_frame.setFixedWidth(640)
+        nav_layout = QHBoxLayout(nav_frame)
+        nav_layout.setContentsMargins(20, 10, 20, 10)
+        nav_layout.setSpacing(12)
 
-        # Navigation items
-        self.nav_buttons = {}
         nav_items = [
-            ("camera", "相机设置", "Camera Settings"),
-            ("system", "系统设置", "System Settings"),
-            ("model", "模型管理", "Model Management"),
-            ("process", "装配引导与检测", "Assembly Guidance & Inspection"),
-            ("records", "工作记录", "Work Records")
+            ("home", "主页"),
+            ("system", "系统设置"),
+            ("camera", "相机设置"),
+            ("model", "模型管理"),
+            ("process", "装配引导"),
         ]
 
-        for item_id, cn_name, en_name in nav_items:
-            button = self.create_nav_button(item_id, cn_name, en_name)
+        self.nav_buttons = {}
+        for item_id, label in nav_items:
+            button = self.create_nav_button(item_id, label)
             nav_layout.addWidget(button)
             self.nav_buttons[item_id] = button
 
-        nav_layout.addStretch()
+        self._debug_nav_button_state("init_top_nav")
+        return nav_frame
 
-        # Status info at bottom
-        status_frame = QFrame()
-        status_frame.setObjectName("statusFrame")
-        status_layout = QVBoxLayout(status_frame)
-        status_layout.setContentsMargins(20, 15, 20, 15)
+    def create_nav_button(self, item_id: str, label: str) -> QPushButton:
+        """Create a simplified navigation button for the top menu."""
+        button = QPushButton(label)
+        button.setObjectName("navButton")
+        button.setCheckable(True)
+        button.setFixedHeight(44)
+        button.setMinimumWidth(110)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Connection status
-        connection_layout = QHBoxLayout()
-        connection_layout.setContentsMargins(0, 0, 0, 0)
-        
-        wifi_icon = QLabel("●")
-        wifi_icon.setObjectName("wifiIcon")
-        wifi_label = QLabel("Connected")
-        wifi_label.setObjectName("wifiLabel")
-        
-        version_info = QLabel(f"v{self.config.app_version}")
-        version_info.setObjectName("versionInfo")
-        
-        connection_layout.addWidget(wifi_icon)
-        connection_layout.addWidget(wifi_label)
-        connection_layout.addStretch()
-        connection_layout.addWidget(version_info)
-        
-        status_layout.addLayout(connection_layout)
-        
-        # Last sync time
-        sync_label = QLabel("Last sync: --:--:--")
-        sync_label.setObjectName("syncLabel")
-        status_layout.addWidget(sync_label)
-        self.sync_label = sync_label
-
-        left_layout.addWidget(nav_frame)
-        left_layout.addWidget(status_frame)
-        self._debug_nav_button_state("init_left_panel")
-        parent.addWidget(left_frame)
-
-    def create_nav_button(self, item_id, cn_name, en_name):
-        """Create a navigation button."""
-        button = QPushButton()
-        button.setObjectName(f"navButton_{item_id}")
-        button.setFixedHeight(60)
-        
-        # Set default selected button to "process"
-        is_default = item_id == "process"
-        initial_state = "true" if is_default else "false"
-        button.setProperty("selected", initial_state)
-        
-        # Create layout for button content
-        layout = QHBoxLayout(button)
-        layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(15)
-        
-        # Icon placeholder (in a real app, you would use actual icons)
-        icon_label = QLabel("■")  # Placeholder icon
-        icon_label.setObjectName("navIcon")
-        icon_label.setProperty("selected", initial_state)
-        
-        # Text layout
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
-        text_layout.setContentsMargins(0, 0, 0, 0)
-        
-        name_label = QLabel(cn_name)
-        name_label.setObjectName("navName")
-        name_label.setProperty("selected", initial_state)
-        
-        desc_label = QLabel(en_name)
-        desc_label.setObjectName("navDesc")
-        desc_label.setProperty("selected", initial_state)
-        
-        text_layout.addWidget(name_label)
-        text_layout.addWidget(desc_label)
-        
-        layout.addWidget(icon_label)
-        layout.addLayout(text_layout)
-        layout.addStretch()
-        
-        # Connect button click
+        button.setChecked(False)
+        button.setProperty("selected", "false")
         button.clicked.connect(lambda checked, id=item_id: self.switch_page(id))
-        
         return button
 
-    def create_right_content_area(self, parent):
-        """Create right content area with stacked widgets for different pages."""
-        right_frame = QFrame()
-        right_frame.setObjectName("rightPanel")
+    def create_content_area(self) -> QWidget:
+        """Create the central stacked content area with all pages."""
+        content_frame = QFrame()
+        content_frame.setObjectName("contentArea")
 
-        layout = QVBoxLayout(right_frame)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout = QVBoxLayout(content_frame)
+        layout.setContentsMargins(20, 10, 20, 20)
+        layout.setSpacing(16)
 
         # Stacked widget for different pages
         self.content_stack = QStackedWidget()
@@ -442,25 +306,94 @@ class MainWindow(QMainWindow):
         self.camera_page = CameraPage(camera_service=self.camera_service, initial_theme=self.current_theme)
         self.system_page = SystemPage(initial_theme=self.current_theme)
         self.model_page = ModelPage()
-        self.process_page = ProcessPage(camera_service=self.camera_service)  # 默认页面
+        self.process_page = ProcessPage(camera_service=self.camera_service)
         self.records_page = RecordsPage()
         try:
             self.system_page.themeChanged.connect(self.on_theme_changed)
         except Exception:
             logger.exception("Failed to connect theme change signal")
 
-        # Add pages to stack
-        self.content_stack.addWidget(self.camera_page)
-        self.content_stack.addWidget(self.system_page)
-        self.content_stack.addWidget(self.model_page)
-        self.content_stack.addWidget(self.process_page)
-        self.content_stack.addWidget(self.records_page)
+        self.page_indices: dict[str, int] = {}
+        page_definitions = [
+            ("home", self.create_home_page()),
+            ("process", self.process_page),
+            ("camera", self.camera_page),
+            ("model", self.model_page),
+            ("records", self.records_page),
+            ("system", self.system_page),
+        ]
 
-        # Set default page to process page (index 3)
-        self.content_stack.setCurrentIndex(3)
+        for page_id, widget in page_definitions:
+            self.content_stack.addWidget(widget)
+            self.page_indices[page_id] = self.content_stack.count() - 1
+
+        # Default to the home quick-action page
+        if "home" in self.page_indices:
+            self.content_stack.setCurrentIndex(self.page_indices["home"])
 
         layout.addWidget(self.content_stack)
-        parent.addWidget(right_frame)
+        return content_frame
+
+    def create_home_page(self) -> QWidget:
+        """Create the default home page with two primary square actions."""
+        home_widget = QWidget()
+        home_widget.setObjectName("homePage")
+
+        layout = QHBoxLayout(home_widget)
+        layout.setContentsMargins(60, 40, 60, 40)
+        layout.setSpacing(40)
+
+        layout.addStretch(1)
+        assembly_button = self.create_home_action_button("装配", self.show_process_page)
+        layout.addWidget(assembly_button)
+
+        layout.addStretch(1)
+        photo_button = self.create_home_action_button("拍照", lambda: self.switch_page("camera"))
+        layout.addWidget(photo_button)
+        layout.addStretch(1)
+
+        return home_widget
+
+    def create_home_action_button(self, label: str, callback: Callable[[], None]) -> QPushButton:
+        """Create a square action button for the home page."""
+        button = QPushButton(label)
+        button.setObjectName("homeActionButton")
+        button.setFixedSize(440, 440)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setProperty("homeAction", "true")
+        button.clicked.connect(callback)
+        return button
+
+    def create_status_bar(self) -> QWidget:
+        """Create the bottom status bar to show server connectivity info."""
+        status_frame = QFrame()
+        status_frame.setObjectName("statusBar")
+
+        layout = QHBoxLayout(status_frame)
+        layout.setContentsMargins(20, 8, 20, 8)
+        layout.setSpacing(16)
+
+        self.connection_indicator = QLabel("●")
+        self.connection_indicator.setObjectName("connectionIndicator")
+        self.connection_indicator.setProperty("connectionState", "online")
+
+        self.connection_label = QLabel("服务器已连接")
+        self.connection_label.setObjectName("connectionLabel")
+
+        version_info = QLabel(f"版本 {self.config.app_version}")
+        version_info.setObjectName("versionInfo")
+
+        self.sync_label = QLabel("最后同步：--:--:--")
+        self.sync_label.setObjectName("syncLabel")
+
+        layout.addWidget(self.connection_indicator)
+        layout.addWidget(self.connection_label)
+        layout.addSpacing(12)
+        layout.addWidget(self.sync_label)
+        layout.addStretch(1)
+        layout.addWidget(version_info)
+
+        return status_frame
 
     def create_camera_page(self):
         """Create camera settings page."""
@@ -487,38 +420,33 @@ class MainWindow(QMainWindow):
         # This method is no longer needed as we're using dynamic page loading
         pass
 
+    def show_home_page(self):
+        """Show the default home quick-action page."""
+        if getattr(self, "content_stack", None):
+            self.switch_page("home")
+
     def show_process_page(self):
-        """Show the assembly guidance and inspection page by default during startup."""
+        """Show the assembly guidance and inspection page."""
         if getattr(self, "content_stack", None):
             self.switch_page("process")
 
     def switch_page(self, page_id: str):
         """Switch to the specified page."""
-        # Reset all buttons
-        for btn_id, button in self.nav_buttons.items():
-            selection_state = "true" if btn_id == page_id else "false"
-            button.setProperty("selected", selection_state)
-            button.style().unpolish(button)
-            button.style().polish(button)
+        if getattr(self, "nav_buttons", None):
+            for btn_id, button in self.nav_buttons.items():
+                selected = btn_id == page_id
+                button.setChecked(selected)
+                button.setProperty("selected", "true" if selected else "false")
+                button.style().unpolish(button)
+                button.style().polish(button)
 
-            for child_name in ("navIcon", "navName", "navDesc"):
-                label = button.findChild(QLabel, child_name)
-                if label is not None:
-                    label.setProperty("selected", selection_state)
-                    label.style().unpolish(label)
-                    label.style().polish(label)
-        
-        # Switch to the appropriate page
-        page_map = {
-            "camera": 0,
-            "system": 1,
-            "model": 2,
-            "process": 3,
-            "records": 4
-        }
-        
-        page_index = page_map.get(page_id, 3)  # Default to process page
-        self.content_stack.setCurrentIndex(page_index)
+        fallback_index = 0
+        if hasattr(self, "page_indices") and "home" in self.page_indices:
+            fallback_index = self.page_indices["home"]
+
+        page_index = self.page_indices.get(page_id, fallback_index) if hasattr(self, "page_indices") else fallback_index
+        if hasattr(self, "content_stack"):
+            self.content_stack.setCurrentIndex(page_index)
         self._debug_nav_button_state(f"switch_to_{page_id}")
 
     def _debug_nav_button_state(self, context: str):
@@ -596,7 +524,7 @@ class MainWindow(QMainWindow):
 
     def load_preferences(self) -> None:
         """Placeholder for loading persisted UI preferences."""
-        # Future implementation: restore splitter sizes, last open page, etc.
+        # Future implementation: restore last open page, theme, etc.
         pass
 
     def center_window(self):

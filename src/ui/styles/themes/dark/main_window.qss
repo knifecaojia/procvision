@@ -54,93 +54,51 @@ QMainWindow {
                 background-color: transparent;
             }
 
-            #leftPanel {
-                background-color: @steel_grey;
-                border-right: 1px solid @dark_border;
-                border-bottom-left-radius: 0px;
-                font-family: "@font_family";
+            #navBar {
+                background-color: rgba(255, 255, 255, 0.03);
+                border-radius: 0px;
             }
 
-            #navFrame {
-                background-color: @steel_grey;
-            }
-
-            #navButton_camera, #navButton_system, #navButton_model, 
-            #navButton_process, #navButton_records {
+            QPushButton#navButton {
                 background-color: transparent;
                 border: none;
-                text-align: left;
-                padding: 12px 20px;
-            }
-
-            #navButton_camera:hover, #navButton_system:hover, #navButton_model:hover, 
-            #navButton_process:hover, #navButton_records:hover {
-                background-color: #2a2a2a;
-            }
-
-            #navButton_camera[selected="true"], #navButton_system[selected="true"], 
-            #navButton_model[selected="true"], #navButton_process[selected="true"], 
-            #navButton_records[selected="true"] {
-                background-color: @hover_orange;
-            }
-
-            #navIcon {
-                color: @arctic_white;
-                font-size: 16px;
-            }
-
-            #navIcon[selected="true"] {
-                color: #0f0f0f;
-            }
-
-            #navName {
-                color: @arctic_white;
-                font-size: 21px;
-                font-weight: 400;
-                letter-spacing: 0.5px;
-            }
-
-            #navName[selected="true"] {
-                color: #0b0b0b;
-                font-weight: 700;
-            }
-
-            #navDesc {
-                color: @arctic_white;
+                border-bottom: 3px solid transparent;
+                color: @cool_grey;
                 font-size: 18px;
-                font-weight: 400;
-                text-transform: none;
+                font-weight: 500;
+                padding: 6px 16px;
             }
 
-            #navDesc[selected="true"] {
-                color: #131313;
+            QPushButton#navButton:hover {
+                color: @arctic_white;
+            }
+
+            QPushButton#navButton[selected="true"] {
+                border-bottom: 3px solid @hover_orange;
+                color: @arctic_white;
                 font-weight: 600;
             }
 
-            #statusFrame {
-                background-color: @deep_graphite;
+            #statusBar {
+                background-color: #1f1f1f;
                 border-top: 1px solid @dark_border;
             }
 
-            #wifiIcon {
-                color: @success_green;
-                font-size: 10px;
+            #statusBar QLabel {
+                color: #f9fafb;
+                font-size: 14px;
             }
 
-            #wifiLabel {
+            #connectionIndicator[connectionState="online"] {
                 color: @success_green;
-                font-size: 12px;
             }
 
-            #versionInfo {
-                color: @cool_grey;
-                font-size: 12px;
+            #connectionIndicator[connectionState="offline"] {
+                color: @error_red;
             }
 
             #syncLabel {
                 color: @cool_grey;
-                font-size: 10px;
-                margin-top: 5px;
             }
 
             #rightPanel {
@@ -150,6 +108,19 @@ QMainWindow {
 
             #contentStack {
                 background-color: @deep_graphite;
+            }
+
+            QPushButton#homeActionButton[homeAction="true"] {
+                background-color: @hover_orange;
+                border: none;
+                border-radius: 24px;
+                color: #ffffff;
+                font-size: 120px;
+                font-weight: 700;
+            }
+
+            QPushButton#homeActionButton[homeAction="true"]:hover {
+                background-color: #fb8a2c;
             }
 
             #cameraPage, #systemPage, #modelPage, #processPage, #recordsPage {

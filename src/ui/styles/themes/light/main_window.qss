@@ -54,93 +54,51 @@ QMainWindow {
                 background-color: transparent;
             }
 
-            #leftPanel {
-                background-color: @steel_grey;
-                border-right: 1px solid @dark_border;
-                border-bottom-left-radius: 0px;
-                font-family: "@font_family";
+            #navBar {
+                background-color: rgba(255, 255, 255, 0.6);
+                border-radius: 0px;
             }
 
-            #navFrame {
-                background-color: @steel_grey;
-            }
-
-            #navButton_camera, #navButton_system, #navButton_model, 
-            #navButton_process, #navButton_records {
+            QPushButton#navButton {
                 background-color: transparent;
                 border: none;
-                text-align: left;
-                padding: 12px 20px;
-            }
-
-            #navButton_camera:hover, #navButton_system:hover, #navButton_model:hover, 
-            #navButton_process:hover, #navButton_records:hover {
-                background-color: #E7ECF3;
-            }
-
-            #navButton_camera[selected="true"], #navButton_system[selected="true"], 
-            #navButton_model[selected="true"], #navButton_process[selected="true"], 
-            #navButton_records[selected="true"] {
-                background-color: @hover_orange;
-            }
-
-            #navIcon {
-                color: @arctic_white;
-                font-size: 16px;
-            }
-
-            #navIcon[selected="true"] {
-                color: #0f0f0f;
-            }
-
-            #navName {
-                color: @arctic_white;
-                font-size: 21px;
-                font-weight: 400;
-                letter-spacing: 0.5px;
-            }
-
-            #navName[selected="true"] {
-                color: #0b0b0b;
-                font-weight: 700;
-            }
-
-            #navDesc {
-                color: @arctic_white;
+                border-bottom: 3px solid transparent;
+                color: #4b5563;
                 font-size: 18px;
-                font-weight: 400;
-                text-transform: none;
+                font-weight: 500;
+                padding: 6px 16px;
             }
 
-            #navDesc[selected="true"] {
-                color: #131313;
+            QPushButton#navButton:hover {
+                color: #111827;
+            }
+
+            QPushButton#navButton[selected="true"] {
+                border-bottom: 3px solid @hover_orange;
+                color: #111827;
                 font-weight: 600;
             }
 
-            #statusFrame {
-                background-color: @deep_graphite;
-                border-top: 1px solid @dark_border;
+            #statusBar {
+                background-color: rgba(255, 255, 255, 0.65);
+                border-top: 1px solid #d1d5db;
             }
 
-            #wifiIcon {
+            #statusBar QLabel {
+                color: #1f2937;
+                font-size: 14px;
+            }
+
+            #connectionIndicator[connectionState="online"] {
                 color: @success_green;
-                font-size: 10px;
             }
 
-            #wifiLabel {
-                color: @success_green;
-                font-size: 12px;
-            }
-
-            #versionInfo {
-                color: @cool_grey;
-                font-size: 12px;
+            #connectionIndicator[connectionState="offline"] {
+                color: @error_red;
             }
 
             #syncLabel {
-                color: @cool_grey;
-                font-size: 10px;
-                margin-top: 5px;
+                color: #6b7280;
             }
 
             #rightPanel {
@@ -150,6 +108,19 @@ QMainWindow {
 
             #contentStack {
                 background-color: @deep_graphite;
+            }
+
+            QPushButton#homeActionButton[homeAction="true"] {
+                background-color: @hover_orange;
+                border: none;
+                border-radius: 24px;
+                color: #ffffff;
+                font-size: 120px;
+                font-weight: 700;
+            }
+
+            QPushButton#homeActionButton[homeAction="true"]:hover {
+                background-color: #fb8a2c;
             }
 
             #cameraPage, #systemPage, #modelPage, #processPage, #recordsPage {

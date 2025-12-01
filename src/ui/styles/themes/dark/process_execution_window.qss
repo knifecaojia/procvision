@@ -148,6 +148,22 @@ QPushButton#cameraToggleButton:checked:hover {
     font-size: 14px;
 }
 
+#clockWidget {
+    background-color: transparent;
+}
+
+#dateLabel {
+    color: #d1d5db;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+}
+
+#timeLabel {
+    color: #4ade80;
+    font-size: 18px;
+    font-weight: 600;
+}
+
 #networkStatusIcon[networkState="online"],
 #networkStatusText[networkState="online"] {
     color: #22c55e;

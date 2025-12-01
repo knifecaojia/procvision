@@ -218,8 +218,8 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(version_label)
         left_layout.addStretch()
 
-        # Right-aligned user info (简化用户信息显示)
-        self.user_info_label = QLabel("User: Demo User | Workstation: WS-001 | ID: 001")
+        # Right-aligned user info（移除工位及ID提示）
+        self.user_info_label = QLabel("User: Demo User")
         self.user_info_label.setObjectName("userInfo")
         self.user_info_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -282,7 +282,7 @@ class MainWindow(QMainWindow):
         left_layout.addStretch()
 
         # Right-aligned user info (简化用户信息显示)
-        user_info = QLabel("User: Demo User | Workstation: WS-001")
+        user_info = QLabel("User: Demo User")
         user_info.setObjectName("userInfo")
         user_info.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 

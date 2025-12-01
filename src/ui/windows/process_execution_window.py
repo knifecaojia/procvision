@@ -157,7 +157,6 @@ class ProcessExecutionWindow(QWidget):
         self.product_sn = "SN-2025-VM-00123"
         self.order_number = process_data.get('pid', process_data.get('name', 'ME-ASM-2024-001'))
         self.operator_name = "张三"
-        self.operator_station = "A01"
         self.network_status: Literal['online', 'offline'] = "online"
         self.total_steps = len(process_data.get('steps_detail', [])) or process_data.get('steps', 12)
         self.current_step_index = 0
@@ -432,10 +431,6 @@ class ProcessExecutionWindow(QWidget):
         username_widget = self.create_info_item("👤", "用户名", self.operator_name)
         layout.addWidget(username_widget)
 
-        # Workstation
-        station_widget = self.create_info_item("🛠", "工作站", self.operator_station)
-        layout.addWidget(station_widget)
-
         # Product SN
         sn_widget = self.create_info_item("📦", "产品 SN", self.product_sn)
         layout.addWidget(sn_widget)
@@ -526,12 +521,6 @@ class ProcessExecutionWindow(QWidget):
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
-        # Product image button（靠右组最前）
-        self.product_img_btn = QPushButton("🖼 产品实物图")
-        self.product_img_btn.setObjectName("productImageButton")
-        self.product_img_btn.setFixedHeight(36)
-        layout.addWidget(self.product_img_btn)
-
         # 相机控件内联：列表、刷新、启动
         camera_section = self.create_camera_controls_section()
         layout.addWidget(camera_section)

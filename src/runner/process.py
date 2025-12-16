@@ -16,10 +16,11 @@ from .exceptions import RunnerError, TimeoutError
 logger = logging.getLogger(__name__)
 
 class AlgorithmProcess:
-    def __init__(self, install_path: str, entry_point: str, config: RunnerConfig):
+    def __init__(self, install_path: str, entry_point: str, config: RunnerConfig, python_rel_path: str = ""):
         self.install_path = install_path
         self.entry_point = entry_point
         self.config = config
+        self.python_rel_path = python_rel_path
         
         self.process: Optional[subprocess.Popen] = None
         self.state = ProcessState.STOPPED
@@ -39,33 +40,60 @@ class AlgorithmProcess:
             self.state = ProcessState.STARTING
             self._stop_event.clear()
             
-            # Resolve python executable in venv
-            if os.name == 'nt':
-                python_exe = os.path.join(self.install_path, "venv", "Scripts", "python.exe")
+            # Resolve python executable
+            # Prefer python_rel_path from registry if available (supports conda structure)
+            if hasattr(self, 'python_rel_path') and self.python_rel_path:
+                python_exe = os.path.join(self.install_path, self.python_rel_path)
             else:
-                python_exe = os.path.join(self.install_path, "venv", "bin", "python")
+                # Fallback to standard venv structure
+                if os.name == 'nt':
+                    python_exe = os.path.join(self.install_path, "venv", "Scripts", "python.exe")
+                else:
+                    python_exe = os.path.join(self.install_path, "venv", "bin", "python")
 
             if not os.path.exists(python_exe):
-                raise RunnerError(f"Python interpreter not found at {python_exe}", "2003")
+                # Try fallback for Windows Conda (if python_rel_path wasn't set but it is conda)
+                # Conda on Windows puts python.exe in root of env
+                python_exe_conda = os.path.join(self.install_path, "venv", "python.exe")
+                if os.path.exists(python_exe_conda):
+                     python_exe = python_exe_conda
+                else:
+                     raise RunnerError(f"Python interpreter not found at {python_exe}", "2003")
 
             env = os.environ.copy()
             env["PROC_ENV"] = "prod"
-            env["PROC_ALGO_ROOT"] = self.install_path
-            # Pass SHM dir if configured, otherwise default logic in shared_memory.py applies
-
+            
+            # Determine Working Directory (CWD)
+            # The logic in manager.py sets install_path to the root of deployment
+            # But the algorithm code (manifest.json) might be in a subdir.
+            # We should probably scan for manifest.json again or rely on a convention?
+            # Or better, Manager should pass working_dir.
+            # Since we didn't change AlgorithmProcess constructor signature, let's try to detect it here.
+            
+            cwd = self.install_path
+            # Look for manifest.json in subdirectories if not in root
+            if not os.path.exists(os.path.join(cwd, "manifest.json")):
+                for item in os.listdir(cwd):
+                    subpath = os.path.join(cwd, item)
+                    if os.path.isdir(subpath) and os.path.exists(os.path.join(subpath, "manifest.json")):
+                        cwd = subpath
+                        break
+            
+            env["PROC_ALGO_ROOT"] = cwd
+            
             cmd = [
                 python_exe,
                 "-m", "procvision_algorithm_sdk.adapter",
                 "--entry", self.entry_point
             ]
 
-            logger.info(f"Starting process: {' '.join(cmd)}")
+            logger.info(f"Starting process: {' '.join(cmd)} in {cwd}")
             self.process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                cwd=self.install_path,
+                cwd=cwd, # Use the detected CWD
                 env=env,
                 bufsize=0 # Unbuffered
             )

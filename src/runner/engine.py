@@ -40,15 +40,27 @@ class RunnerEngine:
             # Actually PackageManager validates manifest, but we need entry_point.
             # We should probably read manifest again or store entry_point in RegistryEntry.
             # For now, let's read manifest quickly.
+            # Note: entry['install_path'] points to root, but manifest might be in working_dir (subfolder)
+            # Use working_dir to find manifest
+            working_dir = entry.get('working_dir', entry['install_path'])
+            manifest_path = os.path.join(working_dir, "manifest.json")
+            
             import json
             try:
-                with open(f"{entry['install_path']}/manifest.json") as f:
+                with open(manifest_path) as f:
                     manifest = json.load(f)
                     entry_point = manifest["entry_point"]
             except Exception as e:
-                raise RunnerError(f"Failed to read manifest for {key}: {e}", "2002")
+                # Fallback to install_path
+                try:
+                    with open(os.path.join(entry['install_path'], "manifest.json")) as f:
+                        manifest = json.load(f)
+                        entry_point = manifest["entry_point"]
+                except:
+                    raise RunnerError(f"Failed to read manifest for {key}: {e}", "2002")
 
-            proc = AlgorithmProcess(entry['install_path'], entry_point, self.config)
+            python_rel_path = entry.get("python_rel_path", "")
+            proc = AlgorithmProcess(entry['install_path'], entry_point, self.config, python_rel_path)
             proc.start()
             self.processes[key] = proc
             return proc

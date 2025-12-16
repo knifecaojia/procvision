@@ -253,7 +253,7 @@ class MainWindow(QMainWindow):
         """Create the horizontal navigation bar shown beneath the header."""
         nav_frame = QFrame()
         nav_frame.setObjectName("navBar")
-        nav_frame.setFixedWidth(640)
+        nav_frame.setFixedWidth(780)
         nav_layout = QHBoxLayout(nav_frame)
         nav_layout.setContentsMargins(20, 10, 20, 10)
         nav_layout.setSpacing(12)
@@ -264,6 +264,7 @@ class MainWindow(QMainWindow):
             ("camera", "相机设置"),
             ("model", "模型管理"),
             ("process", "装配引导"),
+            ("records", "工作记录"),
         ]
 
         self.nav_buttons = {}

@@ -32,7 +32,7 @@ class ModelPage(QFrame):
         header_layout = QHBoxLayout(header_frame)
         header_layout.setContentsMargins(0, 0, 0, 0)
         
-        title_label = QLabel("模型管理")
+        title_label = QLabel("算法管理")
         title_label.setObjectName("modelTitle")
         
         header_layout.addWidget(title_label)

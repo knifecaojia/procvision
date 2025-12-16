@@ -1,0 +1,24 @@
+{
+  "name": "pv_sample",
+  "version": "1.0.0",
+  "entry_point": "pv_sample.main:PvSampleAlgorithm",
+  "description": "pv_sample 算法包",
+  "supported_pids": [
+    "PID_TO_FILL"
+  ],
+  "steps": [
+    {
+      "index": 0,
+      "name": "示例步骤",
+      "params": [
+        {
+          "key": "threshold",
+          "type": "float",
+          "default": 0.5,
+          "min": 0.0,
+          "max": 1.0
+        }
+      ]
+    }
+  ]
+}

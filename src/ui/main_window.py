@@ -262,7 +262,7 @@ class MainWindow(QMainWindow):
             ("home", "主页"),
             ("system", "系统设置"),
             ("camera", "相机设置"),
-            ("model", "模型管理"),
+            ("model", "算法管理"),
             ("process", "装配引导"),
             ("records", "工作记录"),
         ]

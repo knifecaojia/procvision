@@ -169,6 +169,49 @@ class PackageManager:
                 if not wheels_path_corrected:
                      raise WheelsMissingError("wheels/ directory missing")
 
+                # 3. Check for bundled python interpreter
+                # Look for directory containing python.exe (Win) or bin/python (Linux)
+                internal_python_path = None
+                
+                # Heuristic 1: Explicit 'python_runtime' directory (Preferred)
+                # This matches the new spec: . / python_runtime / [Scripts/python.exe | bin/python]
+                
+                # Check if 'python_runtime/' exists in zip
+                has_python_runtime = False
+                for name in namelist:
+                    if name.startswith("python_runtime/") or "python_runtime/" in name:
+                        # Simple check for existence
+                        has_python_runtime = True
+                        break
+                
+                if has_python_runtime:
+                    # Verify it has python executable
+                    # We need to find where python.exe is inside python_runtime
+                    # It might be python_runtime/python.exe or python_runtime/Scripts/python.exe
+                    for name in namelist:
+                        if "python_runtime" in name:
+                            if name.lower().endswith("/python.exe") or name.lower() == "python.exe":
+                                 # Found it
+                                 internal_python_path = os.path.dirname(name)
+                                 break
+                            if name.endswith("/bin/python"):
+                                 internal_python_path = os.path.dirname(os.path.dirname(name))
+                                 break
+                
+                # Heuristic 2: Scan for any python executable if not found in python_runtime
+                if not internal_python_path:
+                    for name in namelist:
+                        # Windows check
+                        if name.lower().endswith("/python.exe") or name.lower() == "python.exe":
+                             # Found python executable
+                             internal_python_path = os.path.dirname(name)
+                             # Prefer shorter paths (root level)
+                             break
+                        # Linux check
+                        if name.endswith("/bin/python"):
+                             internal_python_path = os.path.dirname(os.path.dirname(name)) # Parent of bin
+                             break
+                
                 # Read manifest content (using original info)
                 with z.open(manifest_info) as f:
                     manifest: Manifest = json.load(f)
@@ -176,6 +219,7 @@ class PackageManager:
                     # Inject internal path info for installation
                     manifest["_internal_root"] = algo_root_corrected
                     manifest["_internal_wheels_path"] = wheels_path_corrected
+                    manifest["_internal_python_path"] = internal_python_path
                     manifest["_needs_encoding_fix"] = True # Signal to install_package
                     return manifest
         except RunnerError:
@@ -190,6 +234,7 @@ class PackageManager:
         version = manifest["version"]
         algo_root = manifest.get("_internal_root", "")
         wheels_internal_path = manifest.get("_internal_wheels_path", "wheels")
+        internal_python_path = manifest.get("_internal_python_path")
         needs_fix = manifest.get("_needs_encoding_fix", False)
         
         key = f"{name}:{version}"
@@ -237,68 +282,113 @@ class PackageManager:
 
             # 2. Create venv or conda env
             venv_dir = os.path.join(install_dir, "venv")
-            
-            # Determine target python version
-            # First check manifest, then check wheels
-            target_py_version = manifest.get("python_version")
-            wheels_dir_abs = os.path.join(install_dir, wheels_internal_path)
-            
-            if not target_py_version:
-                target_py_version = self._detect_python_version(wheels_dir_abs)
-                if target_py_version:
-                    logger.info(f"Detected Python version from wheels: {target_py_version}")
-            
-            # Check if we need Conda
-            use_conda = False
-            current_py = f"{sys.version_info.major}.{sys.version_info.minor}"
-            
-            if target_py_version and target_py_version != current_py:
-                # Try to use Conda
-                try:
-                    subprocess.check_call(["conda", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    use_conda = True
-                    logger.info(f"Target Python {target_py_version} != Current {current_py}. Using Conda.")
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    logger.warning(f"Target Python {target_py_version} requested but Conda not found. Trying venv (might fail).")
-
             python_rel_path = ""
             
-            if use_conda:
-                logger.info(f"Creating Conda env at {venv_dir} with python={target_py_version}...")
-                # Create conda env in prefix mode
-                cmd = ["conda", "create", "-p", venv_dir, f"python={target_py_version}", "-y"]
-                # We might need to handle offline mode for conda too if no internet?
-                # Assuming conda can fetch python or has it cached. 
-                # If offline, this will fail unless user has local channel.
-                try:
-                    subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-                except subprocess.CalledProcessError as e:
-                    logger.error("Conda create failed. Check internet connection or conda config.")
-                    raise InstallFailedError(f"Conda create failed: {e}")
+            # Priority 1: Use Bundled Python Interpreter if available
+            if internal_python_path:
+                logger.info(f"Found bundled python interpreter at {internal_python_path}")
+                # Resolve absolute path to the bundled python executable
+                # Note: internal_python_path is relative to install_dir
                 
-                # Resolve paths for Conda (Windows)
-                # In prefix env: python.exe is at root, pip is in Scripts
+                # We need to find the executable path inside
+                bundled_python_dir = os.path.join(install_dir, internal_python_path)
+                
                 if os.name == 'nt':
-                    python_cmd = os.path.join(venv_dir, "python.exe")
-                    pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
-                    python_rel_path = "venv/python.exe"
+                    bundled_python_exe = os.path.join(bundled_python_dir, "python.exe")
                 else:
-                    python_cmd = os.path.join(venv_dir, "bin", "python")
-                    pip_cmd = os.path.join(venv_dir, "bin", "pip")
-                    python_rel_path = "venv/bin/python"
+                    bundled_python_exe = os.path.join(bundled_python_dir, "bin", "python")
+                
+                if os.path.exists(bundled_python_exe):
+                    logger.info(f"Using bundled python: {bundled_python_exe}")
+                    
+                    # Verify it runs
+                    try:
+                         subprocess.check_call([bundled_python_exe, "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception as e:
+                         logger.warning(f"Bundled python check failed: {e}. Fallback to auto-detection.")
+                         internal_python_path = None # Disable bundled logic
+                    else:
+                         # Create venv using this python
+                         logger.info(f"Creating venv using bundled python...")
+                         subprocess.check_call([bundled_python_exe, "-m", "venv", venv_dir])
+                         
+                         # Set paths for venv
+                         if os.name == 'nt':
+                             python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
+                             pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
+                             python_rel_path = "venv/Scripts/python.exe"
+                         else:
+                             python_cmd = os.path.join(venv_dir, "bin", "python")
+                             pip_cmd = os.path.join(venv_dir, "bin", "pip")
+                             python_rel_path = "venv/bin/python"
+                         
+                         # Skip Conda logic
+                         target_py_version = None 
+                else:
+                     logger.warning(f"Bundled python executable not found at expected path. Fallback.")
+                     internal_python_path = None
 
-            else:
-                logger.info(f"Creating venv at {venv_dir}...")
-                subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
+            # Fallback Logic (Conda / System)
+            if not internal_python_path:
+                # Determine target python version
+                # First check manifest, then check wheels
+                target_py_version = manifest.get("python_version")
+                wheels_dir_abs = os.path.join(install_dir, wheels_internal_path)
                 
-                if os.name == 'nt':
-                    python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
-                    pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
-                    python_rel_path = "venv/Scripts/python.exe"
+                if not target_py_version:
+                    target_py_version = self._detect_python_version(wheels_dir_abs)
+                    if target_py_version:
+                        logger.info(f"Detected Python version from wheels: {target_py_version}")
+                
+                # Check if we need Conda
+                use_conda = False
+                current_py = f"{sys.version_info.major}.{sys.version_info.minor}"
+                
+                if target_py_version and target_py_version != current_py:
+                    # Try to use Conda
+                    try:
+                        subprocess.check_call(["conda", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        use_conda = True
+                        logger.info(f"Target Python {target_py_version} != Current {current_py}. Using Conda.")
+                    except (subprocess.CalledProcessError, FileNotFoundError):
+                        logger.warning(f"Target Python {target_py_version} requested but Conda not found. Trying venv (might fail).")
+
+                if use_conda:
+                    logger.info(f"Creating Conda env at {venv_dir} with python={target_py_version}...")
+                    # Create conda env in prefix mode
+                    cmd = ["conda", "create", "-p", venv_dir, f"python={target_py_version}", "-y"]
+                    # We might need to handle offline mode for conda too if no internet?
+                    # Assuming conda can fetch python or has it cached. 
+                    # If offline, this will fail unless user has local channel.
+                    try:
+                        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                    except subprocess.CalledProcessError as e:
+                        logger.error("Conda create failed. Check internet connection or conda config.")
+                        raise InstallFailedError(f"Conda create failed: {e}")
+                    
+                    # Resolve paths for Conda (Windows)
+                    # In prefix env: python.exe is at root, pip is in Scripts
+                    if os.name == 'nt':
+                        python_cmd = os.path.join(venv_dir, "python.exe")
+                        pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
+                        python_rel_path = "venv/python.exe"
+                    else:
+                        python_cmd = os.path.join(venv_dir, "bin", "python")
+                        pip_cmd = os.path.join(venv_dir, "bin", "pip")
+                        python_rel_path = "venv/bin/python"
+
                 else:
-                    python_cmd = os.path.join(venv_dir, "bin", "python")
-                    pip_cmd = os.path.join(venv_dir, "bin", "pip")
-                    python_rel_path = "venv/bin/python"
+                    logger.info(f"Creating venv at {venv_dir}...")
+                    subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
+                    
+                    if os.name == 'nt':
+                        python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
+                        pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
+                        python_rel_path = "venv/Scripts/python.exe"
+                    else:
+                        python_cmd = os.path.join(venv_dir, "bin", "python")
+                        pip_cmd = os.path.join(venv_dir, "bin", "pip")
+                        python_rel_path = "venv/bin/python"
 
             # 3. Install dependencies
             # Determine pip path in venv

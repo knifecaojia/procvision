@@ -9,6 +9,7 @@ from PySide6.QtCore import QObject, Signal, QThread
 
 from src.runner.manager import PackageManager
 from src.runner.config import default_config, RunnerConfig
+from src.services.data_service import DataService
 
 logger = logging.getLogger(__name__)
 
@@ -40,43 +41,31 @@ class AlgorithmManager:
     def __init__(self, runner_config: RunnerConfig = default_config):
         self.package_manager = PackageManager(runner_config)
         self.runner_config = runner_config
-        
-        # MOCK SERVER DATA
-        self.mock_server_data = [
-            {
-                "id": 1,
-                "name": "Edge Detection Standard",
-                "version": "2.1.0",
-                "description": "Canny边缘检测算法，用于零件边缘识别",
-                "size": "1.2 MB",
-                "last_updated": "2024-11-05",
-                "type": "opencv",
-                "type_label": "OpenCV",
-                "type_icon": "🖥️",
-                "minio_url": "mock://edge-detection-v2.1.0.zip",
-                "steps": 2
-            },
-            {
-                "id": 2,
-                "name": "PCB Defect Detection",
-                "version": "5.0.2",
-                "description": "YOLOv8缺陷检测模型，识别PCB焊接缺陷",
-                "size": "45.6 MB",
-                "last_updated": "2024-11-03",
-                "type": "yolo",
-                "type_label": "YOLO",
-                "type_icon": "🧠",
-                "minio_url": "mock://pcb-defect-v5.0.2.zip",
-                "steps": 1
-            }
-        ]
+        self.data_service = DataService()
 
     def get_all_algorithms(self) -> List[Dict[str, Any]]:
         """
         Returns a unified list of algorithms with status (REMOTE_ONLY, DOWNLOADED, DEPLOYED).
         """
-        # 1. Get Server List
-        server_map = {f"{item['name']}:{item['version']}": item for item in self.mock_server_data}
+        # 1. Get Server List via DataService
+        server_algorithms = self.data_service.get_algorithms()
+        server_map = {}
+        for item in server_algorithms:
+            key = f"{item['name']}:{item['version']}"
+            # Map API fields to UI expected fields
+            server_map[key] = {
+                "id": item.get("code"),
+                "name": item.get("name"),
+                "version": item.get("version"),
+                "description": item.get("name", "Unknown Algorithm"), # Fallback
+                "size": item.get("size", "Unknown"),
+                "last_updated": item.get("create_time", "Unknown"),
+                "minio_url": item.get("url"),
+                "type": "unknown", # Default
+                "type_label": "Algorithm",
+                "type_icon": "📦",
+                "steps": 0 # Default
+            }
         
         # 2. Scan Downloaded Zips
         downloaded_zips = self.package_manager.scan_zips()

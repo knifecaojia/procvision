@@ -5,12 +5,14 @@ Assembly guidance and inspection page for the industrial vision system.
 import logging
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QWidget, QGridLayout
+    QScrollArea, QWidget, QGridLayout, QComboBox
 )
 from PySide6.QtCore import Qt
 import json
 from pathlib import Path
+from src.services.data_service import DataService
 from ..components.process_card import ProcessCard
+from ..components.pagination_widget import PaginationWidget
 from ..windows.process_execution_window import ProcessExecutionWindow
 
 logger = logging.getLogger(__name__)
@@ -23,7 +25,16 @@ class ProcessPage(QFrame):
         super().__init__(parent)
         self.setObjectName("processPage")
         self.camera_service = camera_service
+        self.data_service = DataService()
+        
+        # Pagination state
+        self.current_page = 1
+        self.page_size = 5 # Show 5 per page
+        self.total_pages = 1
+        self.current_status_filter = None # None means "All"
+        
         self.init_ui()
+        self.load_data()
         
     def init_ui(self):
         """Initialize the process page UI."""
@@ -43,6 +54,17 @@ class ProcessPage(QFrame):
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         
+        # Filter ComboBox
+        self.status_filter = QComboBox()
+        self.status_filter.setObjectName("processFilterCombo")
+        self.status_filter.addItem("全部", None)
+        self.status_filter.addItem("待执行", "1")
+        self.status_filter.addItem("执行中", "2")
+        self.status_filter.addItem("已完成", "3")
+        self.status_filter.setFixedWidth(120)
+        self.status_filter.currentIndexChanged.connect(self._on_filter_changed)
+        header_layout.addWidget(self.status_filter)
+        
         layout.addWidget(header_frame)
         
         # Process cards in scroll area
@@ -52,195 +74,67 @@ class ProcessPage(QFrame):
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         # Container for cards
-        cards_container = QWidget()
-        cards_container.setObjectName("cardsContainer")
-        # cards_layout will be created later as QGridLayout
+        self.cards_container = QWidget()
+        self.cards_container.setObjectName("cardsContainer")
+        self.cards_layout = QGridLayout()
+        self.cards_layout.setSpacing(15)
+        self.cards_layout.setContentsMargins(20, 20, 20, 20)
         
-        processes_data_simulated = [
-            {
-                "algorithm_name": "视觉装配引导与质检算法（模拟）",
-                "algorithm_version": "v1.0.1",
-                "summary": "本算法用于10287产品的装配引导与关键步骤的缺陷检测。",
-                "pid": "SIM-10287",
-                "steps": [
-                    {
-                        "step_number": 1,
-                        "step_name": "安装连接器",
-                        "operation_guide": "开始第 1 步：请装配『连接器』，方向为：下",
-                        "quality_standard": "方向为：下",
-                        "object": "连接器",
-                        "direction": "下"
-                    },
-                    {
-                        "step_number": 2,
-                        "step_name": "安装航向铭牌",
-                        "operation_guide": "开始第 2 步：请装配『航向铭牌』，方向为：左",
-                        "quality_standard": "方向为：左",
-                        "object": "航向铭牌",
-                        "direction": "左"
-                    },
-                    {
-                        "step_number": 3,
-                        "step_name": "安装铭牌",
-                        "operation_guide": "开始第 3 步：请装配『铭牌』，方向为：正",
-                        "quality_standard": "方向为：正",
-                        "object": "铭牌",
-                        "direction": "正"
-                    },
-                    {
-                        "step_number": 4,
-                        "step_name": "安装X1铭牌",
-                        "operation_guide": "开始第 4 步：请装配『X1铭牌』，方向为：正",
-                        "quality_standard": "方向为：正",
-                        "object": "X1铭牌",
-                        "direction": "正"
-                    }
-                ]
-            },
-            {
-                "algorithm_name": "PCB 装配引导算法（模拟）",
-                "algorithm_version": "v1.2.0",
-                "summary": "用于 PCB 装配过程中的元件放置引导与方向确认。",
-                "pid": "SIM-PCB-001",
-                "steps": [
-                    {
-                        "step_number": 1,
-                        "step_name": "安装电容 C101",
-                        "operation_guide": "开始第 1 步：请装配『电容 C101』，方向为：正",
-                        "quality_standard": "方向为：正",
-                        "object": "电容 C101",
-                        "direction": "正"
-                    },
-                    {
-                        "step_number": 2,
-                        "step_name": "安装连接器 J101",
-                        "operation_guide": "开始第 2 步：请装配『连接器 J101』，方向为：下",
-                        "quality_standard": "方向为：下",
-                        "object": "连接器 J101",
-                        "direction": "下"
-                    }
-                ]
-            },
-            {
-                "algorithm_name": "机械总成装配算法（模拟）",
-                "algorithm_version": "v0.9.4",
-                "summary": "用于机械总成的装配引导，含方向与紧固标准。",
-                "pid": "SIM-MECH-001",
-                "steps": [
-                    {
-                        "step_number": 1,
-                        "step_name": "安装支架",
-                        "operation_guide": "开始第 1 步：请装配『支架』，方向为：正",
-                        "quality_standard": "方向为：正",
-                        "object": "支架",
-                        "direction": "正"
-                    },
-                    {
-                        "step_number": 2,
-                        "step_name": "压入轴承",
-                        "operation_guide": "开始第 2 步：请装配『轴承』，方向为：下",
-                        "quality_standard": "方向为：下",
-                        "object": "轴承",
-                        "direction": "下"
-                    },
-                    {
-                        "step_number": 3,
-                        "step_name": "紧固螺钉",
-                        "operation_guide": "开始第 3 步：请装配『螺钉』，方向为：正",
-                        "quality_standard": "方向为：正",
-                        "object": "螺钉",
-                        "direction": "正"
-                    }
-                ]
-            },
-            {
-                "algorithm_name": "包装与打码检测算法（模拟）",
-                "algorithm_version": "v1.3.2",
-                "summary": "用于包装流程的标签、打码与扫码校验。",
-                "pid": "SIM-PKG-001",
-                "steps": [
-                    {
-                        "step_number": 1,
-                        "step_name": "贴标签",
-                        "operation_guide": "开始第 1 步：请装配『标签』，方向为：左",
-                        "quality_standard": "方向为：左",
-                        "object": "标签",
-                        "direction": "左"
-                    },
-                    {
-                        "step_number": 2,
-                        "step_name": "打码",
-                        "operation_guide": "开始第 2 步：请进行『打码』，方向为：正",
-                        "quality_standard": "字符清晰完整",
-                        "object": "打码",
-                        "direction": "正"
-                    },
-                    {
-                        "step_number": 3,
-                        "step_name": "扫描校验",
-                        "operation_guide": "开始第 3 步：请执行『扫码校验』",
-                        "quality_standard": "扫码通过",
-                        "object": "二维码",
-                        "direction": "正"
-                    }
-                ]
-            },
-            {
-                "algorithm_name": "航电组件装配引导算法（模拟）",
-                "algorithm_version": "v2.0.0",
-                "summary": "用于航电组件的装配与线缆连接引导。",
-                "pid": "SIM-AVN-001",
-                "steps": [
-                    {
-                        "step_number": 1,
-                        "step_name": "安装航电板",
-                        "operation_guide": "开始第 1 步：请装配『航电板』，方向为：正",
-                        "quality_standard": "方向为：正",
-                        "object": "航电板",
-                        "direction": "正"
-                    },
-                    {
-                        "step_number": 2,
-                        "step_name": "连接排线",
-                        "operation_guide": "开始第 2 步：请装配『排线』，方向为：右",
-                        "quality_standard": "方向为：右",
-                        "object": "排线",
-                        "direction": "右"
-                    },
-                    {
-                        "step_number": 3,
-                        "step_name": "紧固螺钉",
-                        "operation_guide": "开始第 3 步：请装配『螺钉』，方向为：正",
-                        "quality_standard": "方向为：正",
-                        "object": "螺钉",
-                        "direction": "正"
-                    }
-                ]
-            }
-        ]
-        processes_data = processes_data_simulated
-        
-        # Create and add cards in single column
-        cards_layout = QGridLayout()
-        cards_layout.setSpacing(15)
-        cards_layout.setContentsMargins(20, 20, 20, 20)
+        self.cards_container.setLayout(self.cards_layout)
 
-        for index, process_data in enumerate(processes_data):
+        scroll_area.setWidget(self.cards_container)
+        layout.addWidget(scroll_area)
+        
+        # Pagination Widget
+        self.pagination = PaginationWidget()
+        self.pagination.page_changed.connect(self._on_page_changed)
+        layout.addWidget(self.pagination, 0, Qt.AlignmentFlag.AlignCenter)
+
+    def load_data(self):
+        """Load work orders from data service."""
+        # Clear existing
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+                
+        # Fetch data
+        result = self.data_service.get_work_orders(
+            self.current_page, 
+            self.page_size,
+            status=self.current_status_filter
+        )
+        items = result.get("items", [])
+        self.total_pages = result.get("total_pages", 1)
+        
+        # Update cards
+        for index, process_data in enumerate(items):
             card = ProcessCard(process_data)
             card.start_process_clicked.connect(self.on_start_process)
-            cards_layout.addWidget(card, index, 0)
+            self.cards_layout.addWidget(card, index, 0)
+            
+        # Add stretch
+        if items:
+            self.cards_layout.setRowStretch(len(items), 1)
+            
+        # Update pagination widget
+        self.pagination.set_total_pages(self.total_pages)
+        self.pagination.set_current_page(self.current_page)
 
-        # Add stretch to push cards up
-        cards_layout.setRowStretch(len(processes_data), 1)
+    def _on_filter_changed(self, index):
+        """Handle filter change."""
+        self.current_status_filter = self.status_filter.currentData()
+        self.current_page = 1 # Reset to first page
+        self.load_data()
 
-        cards_container.setLayout(cards_layout)
-
-        scroll_area.setWidget(cards_container)
-        layout.addWidget(scroll_area)
+    def _on_page_changed(self, page):
+        """Handle page change from pagination widget."""
+        self.current_page = page
+        self.load_data()
 
     def on_start_process(self, process_data: dict):
         """Handle start process signal from process card."""
-        logger.info(f"Launching process execution window for: {process_data['name']}")
+        logger.info(f"Launching process execution window for: {process_data.get('process_name', 'Unknown')}")
 
         # Create and show process execution window with camera service
         self.execution_window = ProcessExecutionWindow(

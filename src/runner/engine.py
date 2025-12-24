@@ -16,11 +16,25 @@ from .exceptions import InvalidPidError, RunnerError
 logger = logging.getLogger(__name__)
 
 class RunnerEngine:
+    _instance = None
+    _lock = threading.Lock()
+
+    def __new__(cls, *args, **kwargs):
+        if not cls._instance:
+            with cls._lock:
+                if not cls._instance:
+                    cls._instance = super(RunnerEngine, cls).__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+
     def __init__(self, config: RunnerConfig = default_config):
+        if getattr(self, "_initialized", False):
+             return
         self.config = config
         self.package_manager = PackageManager(self.config)
         self.processes: Dict[str, AlgorithmProcess] = {} # key="name:version"
         self._proc_lock = threading.Lock()
+        self._initialized = True
 
     def _get_process_key(self, entry: RegistryEntry) -> str:
         return f"{entry['name']}:{entry['version']}"
@@ -67,6 +81,45 @@ class RunnerEngine:
             proc.start()
             self.processes[key] = proc
             return proc
+
+    def get_algorithm_info(self, pid: str) -> Dict[str, Any]:
+        """
+        Calls the 'info' phase of the algorithm to get process details (steps, etc.).
+        """
+        # 1. Resolve Package (Reuse logic or refactor)
+        pkg_entry = self.package_manager.get_active_package(pid)
+        if not pkg_entry:
+            # Fallback
+            candidates = []
+            for key, entry in self.package_manager.registry.items():
+                if pid in entry.get("supported_pids", []):
+                    candidates.append(entry)
+            if len(candidates) >= 1:
+                 pkg_entry = candidates[0]
+            else:
+                 raise InvalidPidError(f"PID {pid} not mapped to any package")
+
+        # 2. Get Process
+        proc = self._get_or_create_process(pkg_entry)
+
+        # 3. Call 'info'
+        req = {
+            "type": "call",
+            "phase": "info",
+            "pid": pid,
+            "session": {"id": "info-req", "context": {}},
+            "user_params": {},
+            "shared_mem_id": "", # Not needed for info
+            "image_meta": {}
+        }
+        
+        # Use a short timeout for info
+        res = proc.call(req, 5000) 
+        if res.get("status") == "OK":
+            return res.get("data", {})
+        else:
+             logger.warning(f"Failed to get info for PID {pid}: {res.get('message')}")
+             return {}
 
     def execute_flow(self, pid: str, image: Union[bytes, np.ndarray], context: Dict[str, Any] = {}) -> Dict[str, Any]:
         """

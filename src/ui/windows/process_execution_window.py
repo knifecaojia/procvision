@@ -180,8 +180,20 @@ class ProcessExecutionWindow(QWidget):
         self.colors = getattr(self.config.ui, "colors", {})
         self.current_theme = load_user_theme_preference()
         self.theme_loader = ThemeLoader(theme_name=self.current_theme)
-        # Initialize process steps
-        self.steps: List[ProcessStep] = self._initialize_steps()
+        
+        # Initialize process steps via Algorithm Info
+        self.steps: List[ProcessStep] = []
+        try:
+             self.steps = self._initialize_steps_from_algorithm()
+        except Exception as e:
+             logger.warning(f"Failed to load steps from algorithm: {e}")
+             # Fallback to local
+             self.steps = self._initialize_steps()
+        
+        if not self.steps:
+             self.steps = self._initialize_steps() # Ultimate fallback
+             
+        self.total_steps = len(self.steps)
         self.current_instruction = self.steps[0].description if self.steps else "No steps available"
         self._debug_input_enabled = False
         self._debug_image_path: Optional[str] = None
@@ -257,6 +269,44 @@ class ProcessExecutionWindow(QWidget):
             self.theme_loader.apply(self, "process_execution_window", variables=variables)
         except FileNotFoundError:
             logger.error("Process execution stylesheet missing")
+
+    def _initialize_steps_from_algorithm(self) -> List[ProcessStep]:
+        """Fetch process steps directly from the algorithm package."""
+        from src.runner.engine import RunnerEngine
+        
+        # Determine PID
+        pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+        if not pid:
+             return []
+             
+        # Use RunnerEngine to get info
+        # NOTE: This might block UI if algorithm process needs to start up.
+        # But since we optimized RunnerEngine to be singleton and process reusable, it should be fine.
+        # Ideally show a loading spinner.
+        runner = RunnerEngine()
+        info = runner.get_algorithm_info(pid)
+        
+        algo_steps = info.get("steps", [])
+        if not algo_steps:
+             return []
+             
+        steps: List[ProcessStep] = []
+        for i, item in enumerate(algo_steps):
+            step_number = item.get('step_number', i + 1)
+            step_name = item.get('step_name', f"步骤 {step_number}")
+            operation_guide = item.get('operation_guide', step_name)
+            status: StepStatus = 'current' if i == 0 else 'pending'
+            steps.append(ProcessStep(
+                id=i,
+                name=(step_name if step_name else f"步骤 {step_number}"),
+                description=operation_guide,
+                status=status
+            ))
+        
+        # Update process_data with steps_detail so execute logic works too
+        self.process_data['steps_detail'] = algo_steps
+        
+        return steps
 
     def _initialize_steps(self) -> List[ProcessStep]:
         """Initialize process steps from provided JSON (steps_detail) or fallback."""
@@ -609,19 +659,12 @@ class ProcessExecutionWindow(QWidget):
         self.camera_combo.setFixedHeight(36)
         self.camera_combo.setMinimumWidth(180)
 
-        # Populate camera list
-        self.refresh_camera_list()
-
-        layout.addWidget(self.camera_combo)
-
         # Refresh button（与父容器同色背景）
-        refresh_btn = QPushButton("🔄")
-        refresh_btn.setObjectName("cameraRefreshButton")
-        refresh_btn.setFixedSize(36, 36)
-        refresh_btn.setToolTip("刷新相机列表")
-        refresh_btn.clicked.connect(self.refresh_camera_list)
-
-        layout.addWidget(refresh_btn)
+        self.refresh_btn = QPushButton("🔄")
+        self.refresh_btn.setObjectName("cameraRefreshButton")
+        self.refresh_btn.setFixedSize(36, 36)
+        self.refresh_btn.setToolTip("刷新相机列表")
+        self.refresh_btn.clicked.connect(self.refresh_camera_list)
 
         # Camera power toggle button（统一高度与字体）
         self.camera_toggle_btn = QPushButton("📷 启动相机")
@@ -630,7 +673,12 @@ class ProcessExecutionWindow(QWidget):
         self.camera_toggle_btn.setCheckable(True)
         self.camera_toggle_btn.clicked.connect(self.toggle_camera)
 
+        layout.addWidget(self.camera_combo)
+        layout.addWidget(self.refresh_btn)
         layout.addWidget(self.camera_toggle_btn)
+
+        # Populate camera list and handle auto-start logic
+        self.refresh_camera_list(auto_start=True)
 
         return section
 
@@ -642,31 +690,89 @@ class ProcessExecutionWindow(QWidget):
         if hasattr(self, "date_label") and self.date_label:
             self.date_label.setText(now.strftime("%Y-%m-%d"))
 
-    def refresh_camera_list(self):
-        """Refresh the list of available cameras."""
+    def refresh_camera_list(self, auto_start: bool = False):
+        """Refresh the list of available cameras.
+        
+        Args:
+            auto_start: If True, automatically start camera if exactly one is found.
+                       If True and 0 or 1 cameras found, hide selection controls.
+        """
         self.camera_combo.clear()
         self.available_cameras = []
 
         if not self.camera_service:
             self.camera_combo.addItem("无相机服务")
+            # Hide controls if no service
+            self.camera_combo.setVisible(False)
+            self.refresh_btn.setVisible(False)
+            self.camera_toggle_btn.setVisible(False)
             return
 
         try:
             cameras = self.camera_service.discover_cameras()
             self.available_cameras = cameras
 
+            # Feature: Hide/Auto-start logic
+            count = len(cameras)
+            
+            # Populate combo
             if cameras:
                 for camera in cameras:
                     serial = camera.serial_number or "N/A"
                     self.camera_combo.addItem(f"{camera.name} ({serial})")
-                logger.info(f"Found {len(cameras)} cameras")
+                logger.info(f"Found {count} cameras")
             else:
                 self.camera_combo.addItem("未发现相机")
                 logger.warning("No cameras found")
+            
+            # Logic implementation
+            if auto_start:
+                if count <= 1:
+                    # 0 or 1 camera: Hide combo and refresh button
+                    self.camera_combo.setVisible(False)
+                    self.refresh_btn.setVisible(False)
+                    
+                    if count == 1:
+                        # 1 camera: Auto start
+                        # Hide toggle button too since it's auto-started
+                        # Wait, user might want to stop it? 
+                        # Requirement says "Hide start camera button", implying it's just on.
+                        # But let's keep it controllable or hidden? 
+                        # "如果有一个或者0个摄像头，则隐藏摄像头列表，隐藏启动相机按钮"
+                        # "如果有1个摄像头，则自动打开摄像头"
+                        self.camera_toggle_btn.setVisible(False)
+                        
+                        # Auto start logic
+                        # Need to defer this slightly to ensure UI is ready?
+                        # Or just call it directly.
+                        # Also need to set combo index to 0 (already default)
+                        logger.info("Auto-starting single available camera")
+                        self.camera_toggle_btn.setChecked(True)
+                        self.start_camera_preview()
+                    else:
+                        # 0 cameras: Hide toggle button
+                        self.camera_toggle_btn.setVisible(False)
+                else:
+                    # > 1 cameras: Show all controls
+                    self.camera_combo.setVisible(True)
+                    self.refresh_btn.setVisible(True)
+                    self.camera_toggle_btn.setVisible(True)
+            else:
+                # Manual refresh always shows controls unless 0? 
+                # Let's keep consistent with initial state logic if we want strict adherence
+                # But manual refresh usually implies user wants to see what's there.
+                # For now, let's just make sure they are visible if they were hidden
+                if count > 1:
+                    self.camera_combo.setVisible(True)
+                    self.refresh_btn.setVisible(True)
+                    self.camera_toggle_btn.setVisible(True)
 
         except Exception as e:
             logger.error(f"Failed to discover cameras: {e}")
             self.camera_combo.addItem("相机发现失败")
+            self.camera_combo.setVisible(True)
+            self.refresh_btn.setVisible(True)
+            self.camera_toggle_btn.setVisible(True)
 
     def toggle_camera(self, checked: bool):
         """Toggle camera preview on/off."""
@@ -1427,6 +1533,7 @@ class ProcessExecutionWindow(QWidget):
         self.rebuild_status_section()
 
         try:
+            start_time = datetime.now()
             img = self._qimage_to_numpy(self._last_qimage)
             idx = self.current_step_index
             sd = self.process_data.get('steps_detail', [])
@@ -1452,6 +1559,10 @@ class ProcessExecutionWindow(QWidget):
             # For a UI, we should probably run this in a worker thread to avoid freezing.
             # But for now, we follow the pattern requested (using runner).
             result = runner.execute_flow(pid=pid, image=img, context=context)
+            
+            end_time = datetime.now()
+            duration_ms = (end_time - start_time).total_seconds() * 1000
+            logger.info(f"Detection executed in {duration_ms:.2f}ms")
             
             status = str(result.get('status', '')).upper()
             if status == 'OK':

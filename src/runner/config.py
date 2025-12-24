@@ -15,10 +15,10 @@ class RunnerConfig:
     logs_dir: str = field(init=False)
     
     # Timeouts (ms)
-    pre_execute_timeout_ms: int = 3000
-    execute_timeout_ms: int = 5000
-    heartbeat_interval_ms: int = 5000
-    heartbeat_grace_ms: int = 2000
+    pre_execute_timeout_ms: int = 30000
+    execute_timeout_ms: int = 50000
+    heartbeat_interval_ms: int = 50000
+    heartbeat_grace_ms: int = 20000
     
     # Retries
     max_retries: int = 2

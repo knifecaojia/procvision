@@ -282,3 +282,36 @@ class AlgorithmManager:
 
     def delete_package(self, name: str, version: str):
         self.package_manager.delete_zip(name, version)
+
+    def check_deployment_status(self, name: str, version: str, pid: str) -> Dict[str, Any]:
+        """
+        Check if an algorithm is deployed and supports the given PID.
+        """
+        key = f"{name}:{version}"
+        registry = self.package_manager.registry
+        
+        logger.info(f"Checking deployment status for {key} with PID {pid}")
+        
+        if key not in registry:
+            logger.info(f"Algorithm {key} not found in registry")
+            # Not installed
+            # Check if downloaded
+            zips = self.package_manager.scan_zips()
+            for z in zips:
+                if f"{name}-{version}" in z: # Simple check
+                    logger.info(f"Found downloaded zip for {key}: {z}")
+                    return {"status": "downloaded", "label": "待部署", "deployed": False}
+            logger.info(f"No zip found for {key}")
+            return {"status": "remote_only", "label": "未下载", "deployed": False}
+            
+        # Installed, check PID support
+        entry = registry[key]
+        supported_pids = entry.get("supported_pids", [])
+        logger.info(f"Algorithm {key} installed. Supported PIDs: {supported_pids}")
+        
+        if pid in supported_pids:
+             logger.info(f"PID {pid} is supported.")
+             return {"status": "deployed", "label": "已部署", "deployed": True}
+        
+        logger.warning(f"PID {pid} NOT supported by {key}")
+        return {"status": "installed_mismatch", "label": "PID不匹配", "deployed": False}

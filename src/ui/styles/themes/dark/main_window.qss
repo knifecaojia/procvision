@@ -1185,3 +1185,23 @@ QComboBox#processFilterCombo QAbstractItemView {
     color: #4ade80; /* Green */
     border: 1px solid rgba(34, 197, 94, 0.3);
 }
+
+/* Algorithm Status Badge */
+#algoStatusBadge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: bold;
+}
+
+#algoStatusBadge[deployed="true"] {
+    background-color: rgba(34, 197, 94, 0.1);
+    color: #4ade80; /* Green */
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+#algoStatusBadge[deployed="false"] {
+    background-color: rgba(239, 68, 68, 0.1);
+    color: #f87171; /* Red */
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}

@@ -16,15 +16,16 @@ from .exceptions import RunnerError, TimeoutError
 logger = logging.getLogger(__name__)
 
 class AlgorithmProcess:
-    def __init__(self, install_path: str, entry_point: str, config: RunnerConfig, python_rel_path: str = ""):
+    def __init__(self, install_path: str, entry_point: str, config: RunnerConfig, python_rel_path: str = "", working_dir: str = ""):
         self.install_path = install_path
         self.entry_point = entry_point
         self.config = config
         self.python_rel_path = python_rel_path
+        self.working_dir = working_dir
         
         self.process: Optional[subprocess.Popen] = None
         self.state = ProcessState.STOPPED
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         
         self.msg_queue = queue.Queue() # For results/errors
         self._stop_event = threading.Event()
@@ -62,17 +63,13 @@ class AlgorithmProcess:
 
             env = os.environ.copy()
             env["PROC_ENV"] = "prod"
+            env["PYTHONUNBUFFERED"] = "1"
             
             # Determine Working Directory (CWD)
-            # The logic in manager.py sets install_path to the root of deployment
-            # But the algorithm code (manifest.json) might be in a subdir.
-            # We should probably scan for manifest.json again or rely on a convention?
-            # Or better, Manager should pass working_dir.
-            # Since we didn't change AlgorithmProcess constructor signature, let's try to detect it here.
+            cwd = self.working_dir if self.working_dir else self.install_path
             
-            cwd = self.install_path
-            # Look for manifest.json in subdirectories if not in root
-            if not os.path.exists(os.path.join(cwd, "manifest.json")):
+            # Look for manifest.json in subdirectories if not in root (only if working_dir not explicitly set)
+            if not self.working_dir and not os.path.exists(os.path.join(cwd, "manifest.json")):
                 for item in os.listdir(cwd):
                     subpath = os.path.join(cwd, item)
                     if os.path.isdir(subpath) and os.path.exists(os.path.join(subpath, "manifest.json")):
@@ -207,11 +204,16 @@ class AlgorithmProcess:
 
     def _stdout_loop(self):
         """Reads length-prefixed JSON frames from stdout."""
-        while not self._stop_event.is_set() and self.is_alive():
+        while not self._stop_event.is_set():
+            if not self.process:
+                 break
             try:
                 # Read 4 bytes length
                 raw_len = self.process.stdout.read(4)
-                if not raw_len or len(raw_len) < 4:
+                if not raw_len:
+                    break
+                if len(raw_len) < 4:
+                    logger.warning(f"Incomplete length prefix: {raw_len}")
                     break
                 
                 length = struct.unpack(">I", raw_len)[0]
@@ -225,6 +227,7 @@ class AlgorithmProcess:
                     payload += chunk
                 
                 if len(payload) != length:
+                    logger.warning(f"Incomplete payload: got {len(payload)} expected {length}")
                     break
                 
                 # Parse JSON
@@ -235,6 +238,8 @@ class AlgorithmProcess:
                     if msg_type == "pong":
                         self.last_pong_time = time.time()
                     elif msg_type in ["hello", "result", "error"]:
+                        if msg_type == "result":
+                             logger.info(f"Received RESULT from algo: {json.dumps(data, ensure_ascii=False)}")
                         self.msg_queue.put(data)
                     else:
                         logger.warning(f"Unknown message type: {msg_type}")
@@ -242,6 +247,8 @@ class AlgorithmProcess:
                 except json.JSONDecodeError:
                     logger.error("Failed to decode JSON frame")
                     
+            except ValueError: # file might be closed
+                break
             except Exception as e:
                 logger.error(f"Stdout loop error: {e}")
                 break
@@ -251,7 +258,9 @@ class AlgorithmProcess:
 
     def _stderr_loop(self):
         """Reads stderr for logs."""
-        while not self._stop_event.is_set() and self.is_alive():
+        while not self._stop_event.is_set():
+            if not self.process:
+                 break
             try:
                 line = self.process.stderr.readline()
                 if not line:
@@ -259,6 +268,8 @@ class AlgorithmProcess:
                 
                 # Try parsing structured log
                 line_str = line.decode("utf-8", errors="replace").strip()
+                if not line_str:
+                    continue
                 try:
                     log_entry = json.loads(line_str)
                     # TODO: Forward to structured logging system
@@ -267,6 +278,8 @@ class AlgorithmProcess:
                 except json.JSONDecodeError:
                     logger.info(f"[ALGO-RAW] {line_str}")
                     
+            except ValueError: # file might be closed
+                break
             except Exception:
                 break
 

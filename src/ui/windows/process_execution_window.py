@@ -1431,47 +1431,97 @@ class ProcessExecutionWindow(QWidget):
             idx = self.current_step_index
             sd = self.process_data.get('steps_detail', [])
             step_number = sd[idx].get('step_number', idx + 1) if isinstance(sd, list) and idx < len(sd) else (idx + 1)
-            pid = self.process_data.get('pid', None)
-            base_dir = Path(__file__).resolve().parents[3] / "3rd" / "assembly_direction_checker"
-            sys.path.insert(0, str(base_dir))
-            inner_dir = base_dir / "assembly_direction_checker"
-            if inner_dir.exists():
-                sys.path.insert(0, str(inner_dir))
-            original_src = sys.modules.get("src")
-            try:
-                if original_src is not None:
-                    del sys.modules["src"]
-                spec = importlib.util.spec_from_file_location("main_findal", str(base_dir / "main_findal.py"))
-                module = importlib.util.module_from_spec(spec)
-                assert spec is not None and spec.loader is not None
-                spec.loader.exec_module(module)
-                result = module.execute_step(img, step_number, pid=pid)
-            finally:
-                if original_src is not None:
-                    sys.modules["src"] = original_src
+            # Use algorithm_code as PID for Runner lookup
+            # The work_order uses 'algorithm_code' to map to manifest supported_pids
+            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+            
+            # Use RunnerEngine to execute flow
+            from src.runner.engine import RunnerEngine
+            runner = RunnerEngine()
+            
+            # Context can include user params like step_number
+            context = {
+                "user_params": {
+                    "step_number": step_number
+                },
+                "camera_id": self.camera_service.current_camera.info.id if self.camera_service and self.camera_service.current_camera else "unknown"
+            }
+            
+            # Execute
+            # Note: execute_flow is synchronous/blocking in this implementation.
+            # For a UI, we should probably run this in a worker thread to avoid freezing.
+            # But for now, we follow the pattern requested (using runner).
+            result = runner.execute_flow(pid=pid, image=img, context=context)
+            
             status = str(result.get('status', '')).upper()
             if status == 'OK':
-                matched = result.get('matched_objects', [])
-                self.detection_boxes = self._ng_regions_to_rects(matched) if isinstance(matched, list) else []
-                self.detection_status = 'pass'
-                self.update_overlay_visibility()
-                self.rebuild_status_section()
-                self.advance_timer = QTimer()
-                self.advance_timer.setSingleShot(True)
-                self.advance_timer.timeout.connect(self.advance_to_next_step)
-                self.advance_timer.start(2000)
-            elif status == 'NG':
-                ng_regions = result.get('ng_regions', [])
-                self.detection_boxes = self._ng_regions_to_rects(ng_regions)
-                self.detection_status = 'fail'
-                self.update_overlay_visibility()
-                self.rebuild_status_section()
+                data = result.get("data", {})
+                result_status = data.get("result_status", "NG")
+                
+                if result_status == "OK":
+                    defect_rects = data.get('defect_rects', [])
+                    # Convert defect rects (dict) to QRects if any (though usually OK means no defects?)
+                    # If OK means "Pass", defects might be empty.
+                    # If algorithm returns "executed_steps" with details, we might want to visualize that?
+                    # But spec says "defect_rects" in data.
+                    self.detection_boxes = [] # Pass usually means no boxes to draw red? Or maybe green boxes?
+                    # The OverlayWidget logic:
+                    # if status=='pass', draw_ok controls visibility.
+                    # We need rects to draw green boxes if any.
+                    # Algorithm usually returns executed_steps with bbox for each component.
+                    # Let's try to extract bboxes from executed_steps if defect_rects is empty but we want to show "OK" locations.
+                    
+                    executed_steps = data.get("executed_steps", [])
+                    valid_rects = []
+                    for s in executed_steps:
+                         if s.get("is_correct") and s.get("bbox"):
+                             x1, y1, x2, y2 = s["bbox"]
+                             # Map to UI format
+                             # Algorithm returns [x1, y1, x2, y2]
+                             valid_rects.append({
+                                 "box_coords": [x1, y1, x2, y2]
+                             })
+                    
+                    self.detection_boxes = self._ng_regions_to_rects(valid_rects)
+                    self.detection_status = 'pass'
+                    self.update_overlay_visibility()
+                    self.rebuild_status_section()
+                    
+                    self.advance_timer = QTimer()
+                    self.advance_timer.setSingleShot(True)
+                    self.advance_timer.timeout.connect(self.advance_to_next_step)
+                    self.advance_timer.start(2000)
+                else:
+                    # Logic NG (Algorithm ran successfully but result is NG)
+                    defect_rects = data.get('defect_rects', [])
+                    # Adapter/Main.py returns defect_rects as list of dicts {x,y,width,height...}
+                    # We need to convert them to _ng_regions_to_rects format or just handle them.
+                    # _ng_regions_to_rects expects list of dicts with 'box_coords' [x1, y1, x2, y2]
+                    
+                    ng_regions = []
+                    for d in defect_rects:
+                        x = d.get("x")
+                        y = d.get("y")
+                        w = d.get("width")
+                        h = d.get("height")
+                        ng_regions.append({
+                            "box_coords": [x, y, x + w, y + h]
+                        })
+                    
+                    self.detection_boxes = self._ng_regions_to_rects(ng_regions)
+                    self.detection_status = 'fail'
+                    self.update_overlay_visibility()
+                    self.rebuild_status_section()
+                    
             else:
-                ng_regions = result.get('ng_regions', [])
-                self.detection_boxes = self._ng_regions_to_rects(ng_regions)
+                # System Error
+                logger.error(f"Runner execution failed: {result.get('message')}")
                 self.detection_status = 'fail'
+                self.detection_boxes = []
                 self.update_overlay_visibility()
                 self.rebuild_status_section()
+                self.show_toast(f"执行出错: {result.get('message')}", False)
+
         except Exception as e:
             logger.error(f"External detection failed: {e}")
             self.detection_status = 'fail'

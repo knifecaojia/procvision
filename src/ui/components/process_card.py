@@ -63,6 +63,16 @@ class ProcessCard(QFrame):
         status_badge.setProperty("status", status_code) 
         header_layout.addWidget(status_badge)
 
+        # Algorithm Deployment Status Badge
+        deploy_info = self.process_data.get("deployment_status", {})
+        is_deployed = deploy_info.get("deployed", False)
+        deploy_label = deploy_info.get("label", "Unknown")
+        
+        algo_status_badge = QLabel(deploy_label)
+        algo_status_badge.setObjectName("algoStatusBadge")
+        algo_status_badge.setProperty("deployed", str(is_deployed).lower())
+        header_layout.addWidget(algo_status_badge)
+
         layout.addLayout(header_layout)
 
         # Info grid
@@ -122,6 +132,13 @@ class ProcessCard(QFrame):
         start_btn = QPushButton("启动工艺")
         start_btn.setObjectName("startButton")
         start_btn.setFixedHeight(32)
+        
+        # Disable start if algorithm is not deployed
+        if not is_deployed:
+            start_btn.setEnabled(False)
+            start_btn.setToolTip(f"无法启动: 算法{deploy_label}")
+            start_btn.setText(f"启动工艺 ({deploy_label})")
+            
         start_btn.clicked.connect(self.on_start_process_clicked)
 
         actions_layout.addWidget(start_btn)
@@ -144,6 +161,7 @@ class ProcessCard(QFrame):
             "summary": f"Work Order: {self.process_data.get('work_order_code')}",
             "steps_detail": self.process_data.get("step_infos", []),
             "pid": self.process_data.get("work_order_code", None),
+            "algorithm_code": self.process_data.get("algorithm_code", ""),
             # Pass original data too just in case
             "raw_work_order": self.process_data
         }

@@ -2,6 +2,7 @@ import threading
 import uuid
 import time
 import logging
+import os
 from typing import Dict, Any, Optional, Union
 import numpy as np
 
@@ -60,7 +61,9 @@ class RunnerEngine:
                     raise RunnerError(f"Failed to read manifest for {key}: {e}", "2002")
 
             python_rel_path = entry.get("python_rel_path", "")
-            proc = AlgorithmProcess(entry['install_path'], entry_point, self.config, python_rel_path)
+            # Pass working_dir if available, else default to install_path
+            working_dir = entry.get('working_dir', entry['install_path'])
+            proc = AlgorithmProcess(entry['install_path'], entry_point, self.config, python_rel_path, working_dir)
             proc.start()
             self.processes[key] = proc
             return proc
@@ -72,7 +75,23 @@ class RunnerEngine:
         # 1. Resolve Package
         pkg_entry = self.package_manager.get_active_package(pid)
         if not pkg_entry:
-            raise InvalidPidError(f"PID {pid} not mapped to any active package")
+            # Fallback: Try to find a package that supports this PID from registry
+            logger.info(f"PID {pid} not mapped to active package. Searching registry for fallback...")
+            candidates = []
+            for key, entry in self.package_manager.registry.items():
+                if pid in entry.get("supported_pids", []):
+                    candidates.append(entry)
+            
+            if len(candidates) == 1:
+                pkg_entry = candidates[0]
+                logger.info(f"Fallback found: Using {pkg_entry['name']}:{pkg_entry['version']} for PID {pid}")
+            elif len(candidates) > 1:
+                # If multiple, maybe pick the latest version?
+                # For now, just pick the first one but warn
+                pkg_entry = candidates[0]
+                logger.warning(f"Multiple packages support PID {pid}. Using first found: {pkg_entry['name']}:{pkg_entry['version']}")
+            else:
+                raise InvalidPidError(f"PID {pid} not mapped to any active package and no installed package supports it")
 
         # 2. Prepare Resources
         session_id = f"sid-{uuid.uuid4()}"

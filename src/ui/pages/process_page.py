@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt
 import json
 from pathlib import Path
 from src.services.data_service import DataService
+from src.services.algorithm_manager import AlgorithmManager
 from ..components.process_card import ProcessCard
 from ..components.pagination_widget import PaginationWidget
 from ..windows.process_execution_window import ProcessExecutionWindow
@@ -26,6 +27,7 @@ class ProcessPage(QFrame):
         self.setObjectName("processPage")
         self.camera_service = camera_service
         self.data_service = DataService()
+        self.algorithm_manager = AlgorithmManager()
         
         # Pagination state
         self.current_page = 1
@@ -109,6 +111,16 @@ class ProcessPage(QFrame):
         
         # Update cards
         for index, process_data in enumerate(items):
+            # Check algorithm deployment status
+            algo_code = process_data.get("algorithm_code", "")
+            algo_name = process_data.get("algorithm_name", "")
+            algo_version = process_data.get("algorithm_version", "")
+            
+            deploy_status = self.algorithm_manager.check_deployment_status(
+                algo_name, algo_version, algo_code
+            )
+            process_data["deployment_status"] = deploy_status
+            
             card = ProcessCard(process_data)
             card.start_process_clicked.connect(self.on_start_process)
             self.cards_layout.addWidget(card, index, 0)

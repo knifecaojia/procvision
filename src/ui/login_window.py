@@ -219,6 +219,7 @@ class LoginWindow(QMainWindow):
         self.username_input.setObjectName("inputField")
         self.username_input.setClearButtonEnabled(True)
         self.username_input.setPlaceholderText("请输入用户名")
+        self.username_input.setText("admin")  # Default per spec
         self.username_input.setFixedHeight(48)
 
         password_label = QLabel("密码")
@@ -227,6 +228,7 @@ class LoginWindow(QMainWindow):
         self.password_input.setObjectName("inputField")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("请输入密码")
+        self.password_input.setText("admin123")  # Default per spec
         self.password_input.setFixedHeight(48)
         self.password_input.setProperty("inputState", "default")
 
@@ -344,15 +346,11 @@ class LoginWindow(QMainWindow):
 
         self.set_loading_state(True)
         try:
-            # 修改为允许任意用户登录，无需数据库验证
-            # success, error = self.session_manager.login(username=username, password=password)
-            # 模拟登录成功
-            success = True
-            error = None
+            success, error = self.session_manager.login(username=username, password=password)
             
             if success:
                 # 直接设置会话状态
-                self.session_manager.auth_service.auth_state.is_authenticated = True
+                # self.session_manager.auth_service.auth_state.is_authenticated = True (Done inside login)
                 # 保存用户偏好
                 if remember_me:
                     self.save_user_preferences(username)

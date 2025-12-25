@@ -73,6 +73,8 @@ class MainWindow(QMainWindow):
 
     # Signal emitted when user requests logout
     logout_requested = Signal()
+    # Signal for cross-thread health state updates
+    health_update_signal = Signal(bool, str)
 
     def __init__(self, session_manager: SessionManager, app=None, config: Optional[AppConfig] = None):
         """Initialize the main window."""
@@ -110,6 +112,12 @@ class MainWindow(QMainWindow):
         # Default to maximized window after login
         self.showMaximized()
         self.setProperty("maximized", "true")
+
+        try:
+            self.health_update_signal.connect(self._apply_health_update)
+            self.session_manager.start_health_monitor(30, lambda online, ts: self.health_update_signal.emit(online, ts or ""))
+        except Exception:
+            logger.exception("Failed to start health monitor")
 
     def _load_custom_font(self):
         """Load Source Han Sans font for the main window and its widgets."""
@@ -225,7 +233,18 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
         # Right-aligned user info and time (simplified)
-        self.user_info_label = QLabel("用户：演示账号")
+        username = "演示账号"
+        if self.session_manager and self.session_manager.is_authenticated():
+            name = None
+            try:
+                name = self.session_manager.get_username()
+            except AttributeError:
+                user = getattr(getattr(self.session_manager, "auth_state", None), "current_user", None)
+                name = getattr(user, "username", None)
+            if name:
+                username = name
+
+        self.user_info_label = QLabel(f"用户：{username}")
         self.user_info_label.setObjectName("userInfo")
         self.user_info_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -539,8 +558,15 @@ class MainWindow(QMainWindow):
         
     def update_user_info(self):
         """Update user information display."""
-        # Placeholder for user info update
-        pass
+        if self.session_manager and self.session_manager.is_authenticated() and self.user_info_label:
+            name = None
+            try:
+                name = self.session_manager.get_username()
+            except AttributeError:
+                user = getattr(getattr(self.session_manager, "auth_state", None), "current_user", None)
+                name = getattr(user, "username", None)
+            if name:
+                self.user_info_label.setText(f"用户：{name}")
 
     def check_session_status(self):
         """Check and update session status."""
@@ -573,6 +599,10 @@ class MainWindow(QMainWindow):
             # Stop session monitoring timer
             if hasattr(self, 'session_timer'):
                 self.session_timer.stop()
+            try:
+                self.session_manager.stop_health_monitor()
+            except Exception:
+                pass
             
             # Perform any necessary cleanup
             logger.info("Shutting down main window")
@@ -597,3 +627,15 @@ class MainWindow(QMainWindow):
             self.style().unpolish(self)
             self.style().polish(self)
         super().changeEvent(event)
+
+    def _apply_health_update(self, online: bool, ts_str: str):
+        """Slot to apply health updates on the UI thread."""
+        state = "online" if online else "offline"
+        if hasattr(self, "connection_indicator") and self.connection_indicator:
+            self.connection_indicator.setProperty("connectionState", state)
+            self.connection_indicator.style().unpolish(self.connection_indicator)
+            self.connection_indicator.style().polish(self.connection_indicator)
+        if hasattr(self, "connection_label") and self.connection_label:
+            self.connection_label.setText("服务器已连接" if online else "服务器未连接")
+        if hasattr(self, "sync_label") and self.sync_label:
+            self.sync_label.setText(f"最后同步：{ts_str or '--:--:--'}")

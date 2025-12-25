@@ -6,8 +6,10 @@ status tracking throughout the application lifecycle.
 """
 
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Callable
 import logging
+import threading
+import time
 
 try:
     from ..auth.models import User, AuthState
@@ -30,6 +32,12 @@ class SessionManager:
         self.auth_state = AuthState()
         self._session_timeout_hours = 8
         self.auth_service = auth_service
+        self._health_thread: Optional[threading.Thread] = None
+        self._health_running: bool = False
+        self._health_interval_sec: int = 30
+        self._health_callback: Optional[Callable[[bool, Optional[str]], None]] = None
+        self._last_health_online: bool = False
+        self._last_health_time: Optional[datetime] = None
 
     def set_authenticated_session(self, user_info, session_token: str, expires_at: Optional[datetime] = None) -> None:
         """
@@ -65,6 +73,65 @@ class SessionManager:
             bool: True if user is authenticated and session is valid
         """
         return self.auth_state.is_authenticated and self.auth_state.is_session_valid()
+
+    def start_health_monitor(self, interval_seconds: int = 30, callback: Optional[Callable[[bool, Optional[str]], None]] = None) -> None:
+        """
+        Start background health monitoring that pings the server every interval.
+        """
+        if not self.auth_service or not getattr(self.auth_service, "network_service", None) or not self.auth_service.network_service.token:
+            logger.warning("Health monitor not started: missing auth token")
+            return
+        self._health_interval_sec = max(5, int(interval_seconds))
+        self._health_callback = callback
+        if self._health_running:
+            return
+        self._health_running = True
+
+        def _monitor():
+            while self._health_running:
+                online = False
+                ts_str: Optional[str] = None
+                try:
+                    if self.auth_service and getattr(self.auth_service, "network_service", None) and self.auth_service.network_service.token:
+                        data = self.auth_service.network_service.health_check()
+                        try:
+                            logger.info(f"Health data: {data}")
+                        except Exception:
+                            pass
+                        code = data.get("code")
+                        online = (code == 200)
+                        if online:
+                            self._last_health_time = datetime.now()
+                            ts_str = self._last_health_time.strftime("%H:%M:%S")
+                    else:
+                        logger.warning("Network service not available for health check")
+                except Exception as e:
+                    logger.warning(f"Health monitor ping failed: {e}")
+                    online = False
+
+                self._last_health_online = online
+                if self._health_callback:
+                    try:
+                        self._health_callback(online, ts_str)
+                    except Exception as cb_err:
+                        logger.error(f"Health callback error: {cb_err}")
+
+                time.sleep(self._health_interval_sec)
+
+        self._health_thread = threading.Thread(target=_monitor, daemon=True)
+        self._health_thread.start()
+
+    def stop_health_monitor(self) -> None:
+        """
+        Stop background health monitoring.
+        """
+        self._health_running = False
+        if self._health_thread and self._health_thread.is_alive():
+            try:
+                self._health_thread.join(timeout=2.0)
+            except Exception:
+                pass
+        self._health_thread = None
 
     def get_username(self) -> Optional[str]:
         """

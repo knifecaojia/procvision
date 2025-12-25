@@ -6,6 +6,7 @@ import time
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from .network_service import NetworkService
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class DataService:
         self._initialized = True
         self.upload_queue = queue.Queue()
         self.running = True
+        self.network_service = NetworkService()
         
         # Determine data paths
         # Assuming run from project root or src parent
@@ -86,7 +88,16 @@ class DataService:
         logger.info(f"Upload task completed: {task_type}")
 
     def get_algorithms(self) -> List[Dict[str, Any]]:
-        """Fetch algorithms from mock data."""
+        """Fetch algorithms from server or mock data."""
+        # Try network first
+        try:
+            response = self.network_service.get_algorithms(page_num=1, page_size=100)
+            if response.get("code") == 200:
+                return response.get("rows", [])
+        except Exception as e:
+            logger.warning(f"Network fetch failed for algorithms, falling back to mock: {e}")
+
+        # Fallback to local file
         try:
             file_path = self.data_dir / "algorithms.json"
             if not file_path.exists():
@@ -107,6 +118,22 @@ class DataService:
             page_size: Number of items per page
             status: Filter by status code (e.g. "1", "2", "3")
         """
+        # Try network first
+        try:
+            status_int = int(status) if status else None
+            response = self.network_service.get_work_orders(page_num=page, page_size=page_size, status=status_int)
+            if response.get("code") == 200:
+                return {
+                    "items": response.get("rows", []),
+                    "total": response.get("total", 0),
+                    "page": page,
+                    "page_size": page_size,
+                    "total_pages": (response.get("total", 0) + page_size - 1) // page_size
+                }
+        except Exception as e:
+            logger.warning(f"Network fetch failed for work orders, falling back to mock: {e}")
+
+        # Fallback to local file
         try:
             file_path = self.data_dir / "work_orders.json"
             if not file_path.exists():

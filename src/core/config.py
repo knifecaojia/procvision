@@ -107,6 +107,16 @@ class LoggingConfig:
 
 
 @dataclass
+class NetworkConfig:
+    """Network service configuration settings."""
+    
+    base_url: str = "http://127.0.0.1:80"
+    timeout: int = 10
+    retry_count: int = 3
+    verify_ssl: bool = False
+
+
+@dataclass
 class CameraConfig:
     """Camera system configuration settings."""
 
@@ -134,6 +144,7 @@ class AppConfig:
     ui: UIConfig = field(default_factory=UIConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
+    network: NetworkConfig = field(default_factory=NetworkConfig)
 
     # Application metadata
     app_name: str = "SMART-VISION"
@@ -240,6 +251,9 @@ class ConfigManager:
         if 'camera' in config_data:
             self._update_dataclass(self.config.camera, config_data['camera'])
 
+        if 'network' in config_data:
+            self._update_dataclass(self.config.network, config_data['network'])
+
         # Update root level properties
         for key in ['app_name', 'app_version', 'app_title', 'debug_mode', 'dev_mode']:
             if key in config_data:
@@ -284,6 +298,7 @@ class ConfigManager:
                 'ui': self._dataclass_to_dict(self.config.ui),
                 'logging': self._dataclass_to_dict(self.config.logging),
                 'camera': self._dataclass_to_dict(self.config.camera),
+                'network': self._dataclass_to_dict(self.config.network),
                 'app_name': self.config.app_name,
                 'app_version': self.config.app_version,
                 'app_title': self.config.app_title,

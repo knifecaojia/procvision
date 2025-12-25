@@ -27,17 +27,26 @@ class CameraService:
         self.manager = CameraManager(sdk_path=sdk_path, logger=LOG)
         self.preset_manager = PresetManager(base_dir=presets_dir)
         self.current_camera: Optional[CameraDevice] = None
+        self._cached_cameras: List[CameraInfo] = []
         LOG.info("CameraService initialized")
 
     # Camera lifecycle ---------------------------------------------------------
-    def discover_cameras(self) -> List[CameraInfo]:
+    def discover_cameras(self, force_refresh: bool = False) -> List[CameraInfo]:
         """Discover all available cameras.
+        
+        Args:
+            force_refresh: If True, ignore cache and force a new scan.
 
         Returns:
             List of discovered camera information objects
         """
+        if not force_refresh and self._cached_cameras:
+            LOG.info("Returning cached camera list (%d cameras)", len(self._cached_cameras))
+            return self._cached_cameras
+
         try:
             cameras = self.manager.discover()
+            self._cached_cameras = cameras
             LOG.info("Discovered %d cameras", len(cameras))
             return cameras
         except Exception as exc:

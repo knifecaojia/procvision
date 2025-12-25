@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QProgressBar,
     QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy, QFileDialog
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent, QThread
 from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtSvgWidgets import QSvgWidget
@@ -41,6 +41,45 @@ logger = logging.getLogger(__name__)
 # Type definitions
 StepStatus = Literal['completed', 'current', 'pending']
 DetectionStatus = Literal['idle', 'detecting', 'pass', 'fail']
+
+
+class CameraConnectWorker(QThread):
+    """Background worker for connecting to camera to avoid UI freeze."""
+    finished = Signal(bool, str) # success, message/device_id
+
+    def __init__(self, service, camera_info):
+        super().__init__()
+        self.service = service
+        self.info = camera_info
+
+    def run(self):
+        try:
+            # 1. Connect
+            if not self.service.connect_camera(self.info):
+                self.finished.emit(False, "Failed to connect to camera")
+                return
+
+            # 2. Get Device
+            device = self.service.get_connected_camera()
+            if not device:
+                self.finished.emit(False, "No camera device retrieved after connection")
+                return
+
+            # 3. Start Stream
+            try:
+                device.start_stream()
+            except Exception as e:
+                # Rollback connection if stream fails
+                try:
+                    self.service.disconnect_camera()
+                except:
+                    pass
+                self.finished.emit(False, f"Failed to start stream: {e}")
+                return
+
+            self.finished.emit(True, "Connected")
+        except Exception as e:
+            self.finished.emit(False, f"Connection error: {e}")
 
 
 @dataclass
@@ -283,8 +322,15 @@ class ProcessExecutionWindow(QWidget):
         # NOTE: This might block UI if algorithm process needs to start up.
         # But since we optimized RunnerEngine to be singleton and process reusable, it should be fine.
         # Ideally show a loading spinner.
+        start_time = datetime.now()
         runner = RunnerEngine()
+        init_time = (datetime.now() - start_time).total_seconds() * 1000
+        logger.info(f"RunnerEngine init took {init_time:.2f}ms")
+        
+        info_start = datetime.now()
         info = runner.get_algorithm_info(pid)
+        info_time = (datetime.now() - info_start).total_seconds() * 1000
+        logger.info(f"get_algorithm_info took {info_time:.2f}ms")
         
         algo_steps = info.get("steps", [])
         if not algo_steps:
@@ -697,6 +743,7 @@ class ProcessExecutionWindow(QWidget):
             auto_start: If True, automatically start camera if exactly one is found.
                        If True and 0 or 1 cameras found, hide selection controls.
         """
+        start_time = datetime.now()
         self.camera_combo.clear()
         self.available_cameras = []
 
@@ -706,10 +753,16 @@ class ProcessExecutionWindow(QWidget):
             self.camera_combo.setVisible(False)
             self.refresh_btn.setVisible(False)
             self.camera_toggle_btn.setVisible(False)
+            logger.info(f"Camera refresh took {(datetime.now() - start_time).total_seconds() * 1000:.2f}ms (no service)")
             return
 
         try:
-            cameras = self.camera_service.discover_cameras()
+            discover_start = datetime.now()
+            # Pass force_refresh=False to use cache if available
+            cameras = self.camera_service.discover_cameras(force_refresh=False)
+            discover_time = (datetime.now() - discover_start).total_seconds() * 1000
+            logger.info(f"Camera discovery took {discover_time:.2f}ms")
+            
             self.available_cameras = cameras
 
             # Feature: Hide/Auto-start logic
@@ -724,8 +777,57 @@ class ProcessExecutionWindow(QWidget):
             else:
                 self.camera_combo.addItem("未发现相机")
                 logger.warning("No cameras found")
+
+            # Check if we have an active connection
+            connected_device = self.camera_service.get_connected_camera()
+            is_streaming = self.camera_service.is_streaming()
             
-            # Logic implementation
+            if connected_device and is_streaming:
+                logger.info(f"Camera already connected: {connected_device.info.name}, resuming preview")
+                
+                # Select in combo
+                index = -1
+                for i, cam in enumerate(cameras):
+                    if cam.id == connected_device.info.id:
+                        index = i
+                        break
+                if index >= 0:
+                    self.camera_combo.setCurrentIndex(index)
+                
+                # Make sure controls are visible if they were supposed to be hidden?
+                # Actually, if we are connected, we definitely want to see that we are connected.
+                # But if count <= 1, maybe we still hide combo/refresh but show toggle?
+                # Let's respect the "hide if <= 1" rule for combo/refresh, but ensure Toggle is visible and Checked.
+                
+                if auto_start and count <= 1:
+                    self.camera_combo.setVisible(False)
+                    self.refresh_btn.setVisible(False)
+                else:
+                    self.camera_combo.setVisible(True)
+                    self.refresh_btn.setVisible(True)
+                
+                # Toggle button must be visible to allow stopping
+                self.camera_toggle_btn.setVisible(True) # Wait, user said "hide start camera button" if 1 camera?
+                # If it's already running, user might want to stop it. 
+                # If we hide it, they can't stop it.
+                # User requirement: "如果有一个或者0个摄像头，则隐藏摄像头列表，隐藏启动相机按钮"
+                # If it's running, maybe we show "Stop"?
+                # Let's assume if it's running, we should show the button so they can stop.
+                # Or if the requirement is strict "Auto start and hide button", then they can't stop it.
+                # I'll stick to showing it if running, or if count > 1.
+                # Actually, if count == 1, user said hide it.
+                # Let's follow requirement: Hide it if count <= 1.
+                
+                if auto_start and count <= 1:
+                     self.camera_toggle_btn.setVisible(False)
+                else:
+                     self.camera_toggle_btn.setVisible(True)
+
+                # Resume preview
+                self.start_camera_preview()
+                return
+
+            # Logic implementation for clean start
             if auto_start:
                 if count <= 1:
                     # 0 or 1 camera: Hide combo and refresh button
@@ -734,21 +836,14 @@ class ProcessExecutionWindow(QWidget):
                     
                     if count == 1:
                         # 1 camera: Auto start
-                        # Hide toggle button too since it's auto-started
-                        # Wait, user might want to stop it? 
-                        # Requirement says "Hide start camera button", implying it's just on.
-                        # But let's keep it controllable or hidden? 
-                        # "如果有一个或者0个摄像头，则隐藏摄像头列表，隐藏启动相机按钮"
-                        # "如果有1个摄像头，则自动打开摄像头"
                         self.camera_toggle_btn.setVisible(False)
                         
-                        # Auto start logic
-                        # Need to defer this slightly to ensure UI is ready?
-                        # Or just call it directly.
-                        # Also need to set combo index to 0 (already default)
                         logger.info("Auto-starting single available camera")
                         self.camera_toggle_btn.setChecked(True)
+                        preview_start = datetime.now()
                         self.start_camera_preview()
+                        preview_time = (datetime.now() - preview_start).total_seconds() * 1000
+                        logger.info(f"Auto-start camera preview took {preview_time:.2f}ms")
                     else:
                         # 0 cameras: Hide toggle button
                         self.camera_toggle_btn.setVisible(False)
@@ -758,10 +853,6 @@ class ProcessExecutionWindow(QWidget):
                     self.refresh_btn.setVisible(True)
                     self.camera_toggle_btn.setVisible(True)
             else:
-                # Manual refresh always shows controls unless 0? 
-                # Let's keep consistent with initial state logic if we want strict adherence
-                # But manual refresh usually implies user wants to see what's there.
-                # For now, let's just make sure they are visible if they were hidden
                 if count > 1:
                     self.camera_combo.setVisible(True)
                     self.refresh_btn.setVisible(True)
@@ -773,6 +864,9 @@ class ProcessExecutionWindow(QWidget):
             self.camera_combo.setVisible(True)
             self.refresh_btn.setVisible(True)
             self.camera_toggle_btn.setVisible(True)
+            
+        total_time = (datetime.now() - start_time).total_seconds() * 1000
+        logger.info(f"Camera refresh total took {total_time:.2f}ms")
 
     def toggle_camera(self, checked: bool):
         """Toggle camera preview on/off."""
@@ -782,7 +876,7 @@ class ProcessExecutionWindow(QWidget):
             self.stop_camera_preview()
 
     def start_camera_preview(self):
-        """Start camera preview."""
+        """Start camera preview (asynchronous)."""
         if not self.camera_service:
             logger.warning("No camera service available")
             self.camera_toggle_btn.setChecked(False)
@@ -801,24 +895,33 @@ class ProcessExecutionWindow(QWidget):
             return
 
         camera_info = self.available_cameras[camera_index]
+        
+        # Check if already connected to this camera
+        current_device = self.camera_service.get_connected_camera()
+        if current_device and current_device.info.id == camera_info.id:
+            logger.info(f"Camera {camera_info.name} already connected, attaching preview")
+            
+            # Ensure streaming is active
+            if not self.camera_service.is_streaming():
+                self.camera_service.start_preview()
+                
+            self._start_preview_worker(current_device)
+            return
+        
+        # Disable controls while connecting
+        self.camera_toggle_btn.setEnabled(False)
+        self.camera_combo.setEnabled(False)
+        self.refresh_btn.setEnabled(False)
+        self.camera_toggle_btn.setText("连接中...")
+        
+        # Start background worker
+        self._connect_worker = CameraConnectWorker(self.camera_service, camera_info)
+        self._connect_worker.finished.connect(lambda success, msg: self._on_camera_connected(success, msg, camera_info))
+        self._connect_worker.start()
 
+    def _start_preview_worker(self, camera_device):
+        """Start the preview worker for a connected device."""
         try:
-            # Connect to camera
-            if not self.camera_service.connect_camera(camera_info):
-                logger.error("Failed to connect to camera")
-                self.camera_toggle_btn.setChecked(False)
-                return
-
-            # Get camera device
-            camera_device = self.camera_service.get_connected_camera()
-            if not camera_device:
-                logger.error("No camera device after connection")
-                self.camera_toggle_btn.setChecked(False)
-                return
-
-            # Start streaming
-            camera_device.start_stream()
-
             # Create and start preview worker
             from ..components.preview_worker import PreviewWorker
             self.preview_worker = PreviewWorker(camera_device)
@@ -828,22 +931,59 @@ class ProcessExecutionWindow(QWidget):
 
             self.camera_active = True
             self.camera_toggle_btn.setText("📷 停止相机")
+            self.camera_toggle_btn.setChecked(True)
+            self.camera_toggle_btn.setEnabled(True)
+            self.camera_combo.setEnabled(True)
+            self.refresh_btn.setEnabled(True)
 
-            logger.info(f"Camera preview started: {camera_info.name}")
+            logger.info(f"Camera preview started for: {camera_device.info.name}")
             try:
                 self.rebuild_status_section()
             except Exception:
                 pass
 
         except Exception as e:
-            logger.error(f"Failed to start camera preview: {e}")
+            logger.error(f"Failed to initialize preview worker: {e}")
             self.camera_toggle_btn.setChecked(False)
+            self.camera_toggle_btn.setText("📷 启动相机")
+            self.show_toast(f"预览启动失败: {e}", False)
+            # Only stop preview, don't disconnect if we failed to start worker
+            if self.preview_worker:
+                self.preview_worker.stop()
+                self.preview_worker = None
+
+    def _on_camera_connected(self, success: bool, message: str, camera_info):
+        """Handle camera connection result."""
+        self._connect_worker = None # Cleanup ref
+        
+        if not success:
+            # Re-enable controls on failure
+            self.camera_toggle_btn.setEnabled(True)
+            self.camera_combo.setEnabled(True)
+            self.refresh_btn.setEnabled(True)
+            
+            logger.error(f"Failed to start camera: {message}")
+            self.camera_toggle_btn.setChecked(False)
+            self.camera_toggle_btn.setText("📷 启动相机")
+            self.show_toast(f"相机启动失败: {message}", False)
+            
+            # Ensure cleanup
             if self.camera_service.current_camera:
-                self.camera_service.disconnect_camera()
-            try:
-                self.rebuild_status_section()
-            except Exception:
-                pass
+                try:
+                    self.camera_service.disconnect_camera()
+                except:
+                    pass
+            return
+
+        try:
+            # Get device (already connected by worker)
+            camera_device = self.camera_service.get_connected_camera()
+            self._start_preview_worker(camera_device)
+
+        except Exception as e:
+            # Should be covered by _start_preview_worker but just in case
+            logger.error(f"Error in _on_camera_connected: {e}")
+            self.camera_toggle_btn.setEnabled(True)
 
     def stop_camera_preview(self):
         """Stop camera preview."""
@@ -1901,9 +2041,16 @@ class ProcessExecutionWindow(QWidget):
 
     def closeEvent(self, event):
         """Handle window close event."""
-        # Stop camera if active
-        if self.camera_active:
-            self.stop_camera_preview()
+        # Stop preview worker only, keep camera connection alive
+        if self.preview_worker:
+            self.preview_worker.stop()
+            self.preview_worker.wait(1000)
+            self.preview_worker = None
+        
+        # Note: We do NOT call self.stop_camera_preview() here anymore.
+        # This allows the camera connection and stream to persist across window sessions,
+        # avoiding the overhead of re-discovery and re-connection.
+        # The CameraService (singleton/global) maintains the active device.
 
         # Clean up timers
         if self.detection_timer:
@@ -1911,7 +2058,7 @@ class ProcessExecutionWindow(QWidget):
         if self.advance_timer:
             self.advance_timer.stop()
 
-        logger.info("ProcessExecutionWindow closing")
+        logger.info("ProcessExecutionWindow closing (camera connection preserved if active)")
         self.closed.emit()
         super().closeEvent(event)
 

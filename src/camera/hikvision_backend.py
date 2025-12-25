@@ -164,6 +164,8 @@ class HikvisionBackend(CameraBackend):  # pragma: no cover - requires vendor SDK
     def discover(self) -> List[CameraInfo]:
         device_list = self._MV_CC_DEVICE_INFO_LIST()
         tlayer_types = self._MV_GIGE_DEVICE | self._MV_USB_DEVICE
+        
+        # MV_CC_EnumDevices can be slow (network scan), consider caching or async
         ret = self._MvCamera.MV_CC_EnumDevices(tlayer_types, device_list)
         if ret != self._MV_OK:
             raise CameraError(f"MV_CC_EnumDevices failed with code 0x{ret:08x}")

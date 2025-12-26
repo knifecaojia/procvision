@@ -313,7 +313,7 @@ class ProcessExecutionWindow(QWidget):
         """Fetch process steps directly from the algorithm package."""
         from src.runner.engine import RunnerEngine
         
-        # Determine PID
+        # Determine PID (prefer algorithm_code, not work order id)
         pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
         if not pid:
              return []
@@ -328,11 +328,40 @@ class ProcessExecutionWindow(QWidget):
         logger.info(f"RunnerEngine init took {init_time:.2f}ms")
         
         info_start = datetime.now()
-        info = runner.get_algorithm_info(pid)
+        info = {}
+        try:
+            info = runner.get_algorithm_info(pid)
+        except Exception as e:
+            logger.warning(f"Primary info fetch failed for pid={pid}: {e}")
+            # Fallback: resolve by algorithm name/version from process_data -> registry entry -> use first supported PID
+            try:
+                algo_name = str(self.process_data.get("algorithm_name", "")).strip()
+                algo_ver = str(self.process_data.get("algorithm_version", "")).strip()
+                if algo_name and algo_ver:
+                    for key, entry in runner.package_manager.registry.items():
+                        if entry.get("name") == algo_name and entry.get("version") == algo_ver:
+                            spids = entry.get("supported_pids", [])
+                            if spids:
+                                alt_pid = spids[0]
+                                logger.info(f"Fallback using supported PID {alt_pid} for {algo_name}:{algo_ver}")
+                                info = runner.get_algorithm_info(alt_pid)
+                            break
+            except Exception as e2:
+                logger.warning(f"Fallback info fetch failed: {e2}")
         info_time = (datetime.now() - info_start).total_seconds() * 1000
         logger.info(f"get_algorithm_info took {info_time:.2f}ms")
         
-        algo_steps = info.get("steps", [])
+        # Some algorithms return a wrapper with "info" inside data
+        info_block = info.get("info", info)
+        # Persist algorithm name/version in process_data if provided
+        try:
+            if "algorithm_name" in info_block:
+                self.process_data["algorithm_name"] = info_block.get("algorithm_name")
+            if "algorithm_version" in info_block:
+                self.process_data["algorithm_version"] = info_block.get("algorithm_version")
+        except Exception:
+            pass
+        algo_steps = info_block.get("steps", [])
         if not algo_steps:
              return []
              

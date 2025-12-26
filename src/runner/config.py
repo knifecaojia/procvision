@@ -16,7 +16,7 @@ class RunnerConfig:
     
     # Timeouts (ms)
     pre_execute_timeout_ms: int = 30000
-    execute_timeout_ms: int = 50000
+    execute_timeout_ms: int = 100000
     heartbeat_interval_ms: int = 50000
     heartbeat_grace_ms: int = 20000
     

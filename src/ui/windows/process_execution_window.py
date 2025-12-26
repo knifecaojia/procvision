@@ -273,6 +273,13 @@ class ProcessExecutionWindow(QWidget):
 
         # Align overlay geometry with base video label once widget tree is ready
         QTimer.singleShot(0, self._align_overlay_geometry)
+        try:
+            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+            if pid:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().setup_algorithm(str(pid))
+        except Exception:
+            pass
 
     def _load_custom_font(self) -> None:
         """Load custom font from assets and apply to this window (same as MainWindow)."""
@@ -1702,6 +1709,11 @@ class ProcessExecutionWindow(QWidget):
         self.rebuild_status_section()
 
         try:
+            try:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().on_step_start(pid=str(self.process_data.get('algorithm_code', self.process_data.get('pid'))), step_index=step_number, context={"user_params": {"step_number": step_number}})
+            except Exception:
+                pass
             start_time = datetime.now()
             img = self._qimage_to_numpy(self._last_qimage)
             idx = self.current_step_index
@@ -1766,11 +1778,16 @@ class ProcessExecutionWindow(QWidget):
                     self.detection_status = 'pass'
                     self.update_overlay_visibility()
                     self.rebuild_status_section()
-                    
+
                     self.advance_timer = QTimer()
                     self.advance_timer.setSingleShot(True)
                     self.advance_timer.timeout.connect(self.advance_to_next_step)
                     self.advance_timer.start(2000)
+                    try:
+                        from src.runner.engine import RunnerEngine
+                        RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
+                    except Exception:
+                        pass
                 else:
                     # Logic NG (Algorithm ran successfully but result is NG)
                     defect_rects = data.get('defect_rects', [])
@@ -1792,6 +1809,11 @@ class ProcessExecutionWindow(QWidget):
                     self.detection_status = 'fail'
                     self.update_overlay_visibility()
                     self.rebuild_status_section()
+                    try:
+                        from src.runner.engine import RunnerEngine
+                        RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
+                    except Exception:
+                        pass
                     
             else:
                 # System Error
@@ -1801,6 +1823,11 @@ class ProcessExecutionWindow(QWidget):
                 self.update_overlay_visibility()
                 self.rebuild_status_section()
                 self.show_toast(f"执行出错: {result.get('message')}", False)
+                try:
+                    from src.runner.engine import RunnerEngine
+                    RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.error(f"External detection failed: {e}")
@@ -1808,6 +1835,11 @@ class ProcessExecutionWindow(QWidget):
             self.detection_boxes = []
             self.update_overlay_visibility()
             self.rebuild_status_section()
+            try:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
+            except Exception:
+                pass
 
     def on_detection_complete(self):
         """Handle detection completion with simulated result."""
@@ -2067,6 +2099,13 @@ class ProcessExecutionWindow(QWidget):
         self.rebuild_status_section()
 
         logger.info("Reset for next product")
+        try:
+            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+            if pid:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().reset_algorithm(str(pid))
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         """Handle window close event."""
@@ -2090,6 +2129,13 @@ class ProcessExecutionWindow(QWidget):
         logger.info("ProcessExecutionWindow closing (camera connection preserved if active)")
         self.closed.emit()
         super().closeEvent(event)
+        try:
+            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+            if pid:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().teardown_algorithm(str(pid))
+        except Exception:
+            pass
 
     def show_centered(self):
         """Show the window maximized by default, centering as fallback."""

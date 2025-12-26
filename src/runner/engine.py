@@ -220,3 +220,125 @@ class RunnerEngine:
             for key, proc in self.processes.items():
                 proc.stop()
             self.processes.clear()
+
+    def setup_algorithm(self, pid: str) -> Dict[str, Any]:
+        pkg_entry = self.package_manager.get_active_package(pid)
+        if not pkg_entry:
+            candidates = []
+            for key, entry in self.package_manager.registry.items():
+                if pid in entry.get("supported_pids", []):
+                    candidates.append(entry)
+            if candidates:
+                pkg_entry = candidates[0]
+            else:
+                raise InvalidPidError(f"PID {pid} not mapped to any package")
+        proc = self._get_or_create_process(pkg_entry)
+        req = {
+            "type": "call",
+            "phase": "setup",
+            "pid": pid,
+            "session": {"id": "setup", "context": {}},
+            "user_params": {},
+            "shared_mem_id": "",
+            "image_meta": {}
+        }
+        res = proc.call(req, self.config.pre_execute_timeout_ms)
+        return res
+
+    def teardown_algorithm(self, pid: str) -> Dict[str, Any]:
+        pkg_entry = self.package_manager.get_active_package(pid)
+        if not pkg_entry:
+            candidates = []
+            for key, entry in self.package_manager.registry.items():
+                if pid in entry.get("supported_pids", []):
+                    candidates.append(entry)
+            if candidates:
+                pkg_entry = candidates[0]
+            else:
+                raise InvalidPidError(f"PID {pid} not mapped to any package")
+        proc = self._get_or_create_process(pkg_entry)
+        req = {
+            "type": "call",
+            "phase": "teardown",
+            "pid": pid,
+            "session": {"id": "teardown", "context": {}},
+            "user_params": {},
+            "shared_mem_id": "",
+            "image_meta": {}
+        }
+        res = proc.call(req, self.config.pre_execute_timeout_ms)
+        return res
+
+    def reset_algorithm(self, pid: str) -> Dict[str, Any]:
+        pkg_entry = self.package_manager.get_active_package(pid)
+        if not pkg_entry:
+            candidates = []
+            for key, entry in self.package_manager.registry.items():
+                if pid in entry.get("supported_pids", []):
+                    candidates.append(entry)
+            if candidates:
+                pkg_entry = candidates[0]
+            else:
+                raise InvalidPidError(f"PID {pid} not mapped to any package")
+        proc = self._get_or_create_process(pkg_entry)
+        req = {
+            "type": "call",
+            "phase": "reset",
+            "pid": pid,
+            "session": {"id": "reset", "context": {}},
+            "user_params": {},
+            "shared_mem_id": "",
+            "image_meta": {}
+        }
+        res = proc.call(req, self.config.pre_execute_timeout_ms)
+        return res
+
+    def on_step_start(self, pid: str, step_index: int, context: Dict[str, Any]) -> Dict[str, Any]:
+        pkg_entry = self.package_manager.get_active_package(pid)
+        if not pkg_entry:
+            candidates = []
+            for key, entry in self.package_manager.registry.items():
+                if pid in entry.get("supported_pids", []):
+                    candidates.append(entry)
+            if candidates:
+                pkg_entry = candidates[0]
+            else:
+                raise InvalidPidError(f"PID {pid} not mapped to any package")
+        proc = self._get_or_create_process(pkg_entry)
+        req = {
+            "type": "call",
+            "phase": "on_step_start",
+            "pid": pid,
+            "step_index": step_index,
+            "session": {"id": f"step-start-{step_index}", "context": context},
+            "user_params": context.get("user_params", {}),
+            "shared_mem_id": "",
+            "image_meta": {}
+        }
+        res = proc.call(req, self.config.execute_timeout_ms)
+        return res
+
+    def on_step_finish(self, pid: str, step_index: int, context: Dict[str, Any]) -> Dict[str, Any]:
+        pkg_entry = self.package_manager.get_active_package(pid)
+        if not pkg_entry:
+            candidates = []
+            for key, entry in self.package_manager.registry.items():
+                if pid in entry.get("supported_pids", []):
+                    candidates.append(entry)
+            if candidates:
+                pkg_entry = candidates[0]
+            else:
+                raise InvalidPidError(f"PID {pid} not mapped to any package")
+        proc = self._get_or_create_process(pkg_entry)
+        req = {
+            "type": "call",
+            "phase": "on_step_finish",
+            "pid": pid,
+            "step_index": step_index,
+            "session": {"id": f"step-finish-{step_index}", "context": context},
+            "user_params": context.get("user_params", {}),
+            "shared_mem_id": "",
+            "image_meta": {}
+        }
+        res = proc.call(req, self.config.execute_timeout_ms)
+        return res

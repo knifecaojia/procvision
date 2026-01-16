@@ -1,7 +1,7 @@
 {
   "server": {
-    "address": "127.0.0.1",
-    "port": 80
+    "address": "39.104.202.123",
+    "port": 18880
   },
   "storage": {
     "image": {

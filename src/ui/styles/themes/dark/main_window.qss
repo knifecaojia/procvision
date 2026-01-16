@@ -225,6 +225,8 @@ QMainWindow {
             #paramInput:focus {
                 border: 1px solid @hover_orange;
             }
+
+            
             
             #cameraParamControl {
                 background-color: @steel_grey;

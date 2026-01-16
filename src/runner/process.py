@@ -7,6 +7,7 @@ import subprocess
 import threading
 import queue
 import logging
+import uuid
 from typing import Optional, Dict, Any, List
 
 from .config import RunnerConfig
@@ -164,11 +165,14 @@ class AlgorithmProcess:
             self.state = ProcessState.EXECUTING
 
         try:
+            # Generate request_id if not present (though engine might set it)
+            if "request_id" not in req:
+                req["request_id"] = str(uuid.uuid4())
+            
+            rid = req["request_id"]
             self.send_frame(req)
             
             # Wait for result
-            # We need to filter for the specific result type if we had concurrent requests,
-            # but protocol implies single active call per process.
             timeout_sec = timeout_ms / 1000.0
             start_t = time.time()
             
@@ -182,10 +186,17 @@ class AlgorithmProcess:
                         raise RunnerError("Process died during execution")
 
                     msg = self.msg_queue.get(timeout=0.1)
+                    
+                    # Match request_id
+                    msg_rid = msg.get("request_id")
+                    if msg_rid and msg_rid != rid:
+                        logger.warning(f"Ignoring stale message with rid={msg_rid}, expected {rid}")
+                        continue
+                        
                     if msg.get("type") == "result":
                         return msg
                     elif msg.get("type") == "error":
-                         raise RunnerError(f"Algorithm error: {msg.get('message')}", msg.get("code", "9999"))
+                         raise RunnerError(f"Algorithm error: {msg.get('message')}", msg.get("error_code", "9999"))
                     # Ignore pings/logs here (handled in loop)
                 except queue.Empty:
                     continue

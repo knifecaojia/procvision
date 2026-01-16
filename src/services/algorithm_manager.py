@@ -72,23 +72,25 @@ class AlgorithmManager:
         downloaded_map = {}
         for zip_path in downloaded_zips:
             try:
-                # Need to read manifest to identify name/version
-                with zipfile.ZipFile(zip_path, 'r') as z:
-                    namelist = z.namelist()
-                    manifest_path = None
-                    # Search for manifest.json in any directory
-                    for name in namelist:
-                        if name.endswith("manifest.json"):
-                            manifest_path = name
-                            break
+                # Optimized check: Just verify filename pattern match
+                # Pattern: <name>-<version>.zip
+                # This avoids expensive zip reads for every file on every refresh
+                
+                filename = os.path.basename(zip_path)
+                if not filename.endswith(".zip"):
+                    continue
                     
-                    if not manifest_path:
-                        continue
+                base_name = filename[:-4] # Remove .zip
+                
+                # Split by last hyphen to separate version?
+                # Or try to match against known server keys?
+                # A robust way is to iterate server_map keys and see if filename matches f"{name}-{version}.zip"
+                
+                # We can do this reverse mapping later in step 4.
+                # Here we just store available zip filenames
+                
+                downloaded_map[filename] = {"path": zip_path}
 
-                    with z.open(manifest_path) as f:
-                        m = json.load(f)
-                        key = f"{m['name']}:{m['version']}"
-                        downloaded_map[key] = {"path": zip_path, "manifest": m}
             except Exception:
                 continue
 
@@ -97,7 +99,12 @@ class AlgorithmManager:
         
         # 4. Merge
         unified_list = []
-        all_keys = set(server_map.keys()) | set(downloaded_map.keys()) | set(registry.keys())
+        # all_keys = set(server_map.keys()) | set(downloaded_map.keys()) | set(registry.keys())
+        # Strict mode: Only show algorithms from server response
+        # If downloaded/deployed algorithms are not in server response, ignore them (or show as separate/unknown?)
+        # User instruction: "算法列表要严格显示接口获取的算法数据"
+        
+        all_keys = list(server_map.keys())
         
         for key in all_keys:
             # Base info
@@ -122,8 +129,11 @@ class AlgorithmManager:
                 info["source"] = "server"
                 
             # Fill from Local Zip (Overrides description if local-only)
-            if key in downloaded_map:
-                d_item = downloaded_map[key]
+            # Check if corresponding zip exists
+            expected_zip_name = f"{info['name']}-{info['version']}.zip"
+            
+            if expected_zip_name in downloaded_map:
+                d_item = downloaded_map[expected_zip_name]
                 info["local_path"] = d_item["path"]
                 info["status"] = "downloaded"
                 
@@ -131,28 +141,19 @@ class AlgorithmManager:
                 try:
                     size_bytes = os.path.getsize(d_item["path"])
                     info["size"] = f"{size_bytes / 1024 / 1024:.1f} MB"
+                    
+                    # Update last_updated using zip modification time
+                    mtime = os.path.getmtime(d_item["path"])
+                    import datetime
+                    info["last_updated"] = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
                 except:
                     pass
-
-                if key not in server_map:
-                    info["source"] = "local"
-                    info["description"] = d_item["manifest"].get("description", "Local Package")
-                    info["name"] = d_item["manifest"].get("name") # Ensure correct casing
-                    # Use file modification time as imported time for local packages
-                    try:
-                        mtime = os.path.getmtime(d_item["path"])
-                        # Format as YYYY-MM-DD
-                        import datetime
-                        info["last_updated"] = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-                    except:
-                        pass
             
-            # Check Registry (Overrides status)
-            if key in registry:
+            deployed_dir_new = os.path.join(self.runner_config.deployed_dir, f"{info['name']}-{info['version']}")
+            deployed_dir_old = os.path.join(self.runner_config.deployed_dir, info["name"], info["version"])
+
+            if os.path.isdir(deployed_dir_new) or os.path.isdir(deployed_dir_old):
                 info["status"] = "deployed"
-                # If deployed but local source (and not in downloaded_map for some reason, though it should be),
-                # we might miss size/time if zip is gone.
-                # But typically zip stays.
                 
             # Status Label Mapping
             status_labels = {
@@ -167,78 +168,122 @@ class AlgorithmManager:
         return sorted(unified_list, key=lambda x: x["name"])
 
     def download_algorithm(self, progress_callback, name: str, version: str):
-        """Mock download task."""
-        # Find URL (mock)
-        # In real world, use self.server_map to get URL
+        """
+        Download algorithm from remote server using URL from data_service.
+        """
+        # 1. Get algorithm info to find the URL
+        server_algorithms = self.data_service.get_algorithms()
+        target_algo = None
+        for item in server_algorithms:
+            if item.get("name") == name and item.get("version") == version:
+                target_algo = item
+                break
         
-        # Simulate Progress
-        for i in range(0, 101, 10):
-            time.sleep(0.2) # 2 seconds total
-            progress_callback.emit(i)
-            
-        # Copy template zip to zips_dir
-        # Assuming we have a template in tests/assets/template_algo.zip
-        # And we need to patch the manifest inside to match requested name/version
-        # For simplicity, we just copy the template and don't patch, 
-        # BUT the Runner Manager validates manifest. 
-        # So we MUST patch manifest or the subsequent deploy will fail validation if names mismatch.
-        # Or we rely on the template having "mock-algo" and we only request "mock-algo".
-        # But UI requests "Edge Detection Standard".
-        # So we must create a valid zip dynamically.
+        if not target_algo:
+             # Fallback: Maybe it's not in the list but we know name/version?
+             # Or we can't download if we don't have URL.
+             # Check if we have a local mock fallback (repo)
+             # This preserves local testing capability if server list is missing the item
+             logger.warning(f"Algorithm {name}:{version} not found in server list. Checking local assets...")
+        else:
+             download_url = target_algo.get("url")
+             logger.info(f"Downloading {name}:{version} from {download_url}")
+             
+             # If URL is a local file path (mock data might use file:// or just path)
+             # Or if it's http/https, we need a real download.
+             # Since we don't have requests/httpx in imports yet, let's assume we might need to add it 
+             # OR if this is a POC, we might still rely on local file copy if the URL is local.
+             
+             # The user instruction says: "使用算法数据中给出的url 下载算法"
+             # If the URL is "http://...", we need to implement HTTP download.
+             # If it is "/path/to/...", we copy.
+             
+             # Let's try to implement a robust downloader using urllib (standard lib) or just handling local copy if it is a file path.
+             
+             import urllib.request
+             import urllib.error
+             
+             target_path = os.path.join(self.runner_config.zips_dir, f"{name}-{version}.zip")
+             
+             if download_url and (download_url.startswith("http://") or download_url.startswith("https://")):
+                 try:
+                     def report_reporthook(block_num, block_size, total_size):
+                        if total_size > 0:
+                            percent = int((block_num * block_size * 100) / total_size)
+                            # Emit progress occasionally to avoid flooding
+                            if percent % 5 == 0: 
+                                progress_callback.emit(percent)
+
+                     urllib.request.urlretrieve(download_url, target_path, report_reporthook)
+                     progress_callback.emit(100)
+                     logger.info(f"Download completed: {target_path}")
+                     return
+                 except Exception as e:
+                     logger.error(f"HTTP download failed: {e}")
+                     raise Exception(f"Download failed: {e}")
+             
+             elif download_url and os.path.exists(download_url):
+                 # Local file copy (Mock scenario but driven by data)
+                 source_zip = download_url
+                 logger.info(f"Copying from local URL: {source_zip}")
+                 total_size = os.path.getsize(source_zip)
+                 copied = 0
+                 chunk_size = 1024 * 1024 # 1MB
+                 
+                 # Temp file to ensure atomicity or just simple copy
+                 # But to track progress we copy manually
+                 try:
+                     with open(source_zip, 'rb') as src, open(target_path, 'wb') as dst:
+                        while True:
+                            chunk = src.read(chunk_size)
+                            if not chunk:
+                                break
+                            dst.write(chunk)
+                            copied += len(chunk)
+                            percent = int((copied / total_size) * 100)
+                            progress_callback.emit(percent)
+                            time.sleep(0.05)
+                     
+                     # No size verification required for local copy as per user request
+                         
+                 except Exception as e:
+                     # Cleanup partial
+                     if os.path.exists(target_path):
+                         os.remove(target_path)
+                     raise e
+                     
+                 return
+
+        # Fallback to local 'assets/repo' if URL download failed or URL missing
+        # This keeps the previous logic as a safety net for development
+        repo_dir = os.path.join(os.getcwd(), "assets", "repo")
+        source_zip = os.path.join(repo_dir, f"{name}-{version}.zip")
         
         target_path = os.path.join(self.runner_config.zips_dir, f"{name}-{version}.zip")
         
-        # Create Zip dynamically
-        manifest = {
-            "name": name,
-            "version": version,
-            "entry_point": "procvision_algorithm_sdk.adapter",
-            "supported_pids": ["A01", "A02"],
-            "description": f"Downloaded {name}",
-            "python_version": "3.10"
-        }
-        
-        # We need wheels. We can borrow from tests/assets/wheels if exists, or create empty dummy wheels?
-        # Runner manager checks for 'wheels/' dir existence.
-        
-        try:
-            with zipfile.ZipFile(target_path, 'w') as z:
-                z.writestr("manifest.json", json.dumps(manifest))
-                z.writestr("requirements.txt", "numpy")
-                # Create dummy wheel file to satisfy structure
-                z.writestr("wheels/dummy.whl", "") 
-        except Exception as e:
-            raise Exception(f"Failed to create mock zip: {e}")
+        if os.path.exists(source_zip):
+            logger.info(f"Simulating download by copying from {source_zip}")
+            total_size = os.path.getsize(source_zip)
+            copied = 0
+            chunk_size = 1024 * 1024 # 1MB
+            
+            with open(source_zip, 'rb') as src, open(target_path, 'wb') as dst:
+                while True:
+                    chunk = src.read(chunk_size)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+                    copied += len(chunk)
+                    percent = int((copied / total_size) * 100)
+                    progress_callback.emit(percent)
+                    time.sleep(0.05)
+            return
+
+        raise Exception(f"Algorithm source not found for {name}:{version}. Please check server data or local assets.")
 
     def deploy_algorithm(self, progress_callback, name: str, version: str):
         """Deploy task."""
-        # Find zip
-        zip_path = None
-        candidates = self.package_manager.scan_zips()
-        for p in candidates:
-            # More robust matching: Check manifest inside zip
-            try:
-                with zipfile.ZipFile(p, 'r') as z:
-                    namelist = z.namelist()
-                    manifest_path = None
-                    for n in namelist:
-                        if n.endswith("manifest.json"):
-                            manifest_path = n
-                            break
-                    
-                    if manifest_path:
-                        with z.open(manifest_path) as f:
-                            m = json.load(f)
-                            if m.get("name") == name and m.get("version") == version:
-                                zip_path = p
-                                break
-            except:
-                continue
-        
-        if not zip_path:
-            # Fallback for exact match if constructed above (legacy behavior)
-            zip_path = os.path.join(self.runner_config.zips_dir, f"{name}-{version}.zip")
-        
+        zip_path = os.path.join(self.runner_config.zips_dir, f"{name}-{version}.zip")
         if not os.path.exists(zip_path):
             raise Exception(f"Zip file not found for {name} {version}")
 
@@ -288,30 +333,15 @@ class AlgorithmManager:
         Check if an algorithm is deployed and supports the given PID.
         """
         key = f"{name}:{version}"
-        registry = self.package_manager.registry
-        
         logger.info(f"Checking deployment status for {key} with PID {pid}")
-        
-        if key not in registry:
-            logger.info(f"Algorithm {key} not found in registry")
-            # Not installed
-            # Check if downloaded
-            zips = self.package_manager.scan_zips()
-            for z in zips:
-                if f"{name}-{version}" in z: # Simple check
-                    logger.info(f"Found downloaded zip for {key}: {z}")
-                    return {"status": "downloaded", "label": "待部署", "deployed": False}
-            logger.info(f"No zip found for {key}")
-            return {"status": "remote_only", "label": "未下载", "deployed": False}
-            
-        # Installed, check PID support
-        entry = registry[key]
-        supported_pids = entry.get("supported_pids", [])
-        logger.info(f"Algorithm {key} installed. Supported PIDs: {supported_pids}")
-        
-        if pid in supported_pids:
-             logger.info(f"PID {pid} is supported.")
-             return {"status": "deployed", "label": "已部署", "deployed": True}
-        
-        logger.warning(f"PID {pid} NOT supported by {key}")
-        return {"status": "installed_mismatch", "label": "PID不匹配", "deployed": False}
+
+        deployed_dir_new = os.path.join(self.runner_config.deployed_dir, f"{name}-{version}")
+        deployed_dir_old = os.path.join(self.runner_config.deployed_dir, name, version)
+        if os.path.isdir(deployed_dir_new) or os.path.isdir(deployed_dir_old):
+            return {"status": "deployed", "label": "已部署", "deployed": True}
+
+        zip_path = os.path.join(self.runner_config.zips_dir, f"{name}-{version}.zip")
+        if os.path.exists(zip_path):
+            return {"status": "downloaded", "label": "待部署", "deployed": False}
+
+        return {"status": "remote_only", "label": "未下载", "deployed": False}

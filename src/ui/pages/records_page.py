@@ -2,15 +2,14 @@
 Work records page for the industrial vision system.
 """
 
+import html
 import logging
 import math
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QLineEdit
+    QComboBox, QLineEdit, QTextBrowser, QApplication
 )
-from PySide6.QtCore import Qt
-
-from ..components.records_table import RecordsTableWidget
+from PySide6.QtCore import Qt, QUrl
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +17,11 @@ logger = logging.getLogger(__name__)
 class RecordsPage(QFrame):
     """Work records page implementation aligned with the design spec."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, initial_theme: str = "dark"):
         super().__init__(parent)
         self.setObjectName("recordsPage")
+
+        self.current_theme = initial_theme if initial_theme in {"dark", "light"} else "dark"
 
         # State for filtering and pagination
         self.search_term = ""
@@ -36,8 +37,9 @@ class RecordsPage(QFrame):
         self.pagination_label = None
         self.prev_page_btn = None
         self.next_page_btn = None
+        self.html_viewer = None
 
-        self.setup_colors()
+        self.setup_colors(self.current_theme)
         self.init_ui()
         self.load_sample_data()
 
@@ -142,9 +144,21 @@ class RecordsPage(QFrame):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
 
-        self.table_widget = RecordsTableWidget()
-        self.table_widget.get_table().view_detail.connect(self.on_view_detail)
-        layout.addWidget(self.table_widget, stretch=1)
+        self.html_viewer = QTextBrowser()
+        self.html_viewer.setObjectName("recordsHtmlViewer")
+        self.html_viewer.setOpenExternalLinks(False)
+        self.html_viewer.setOpenLinks(False)
+        self.html_viewer.setFrameStyle(QFrame.NoFrame)
+        try:
+            self.html_viewer.setViewportMargins(0, 0, 0, 0)
+        except Exception:
+            pass
+        try:
+            self.html_viewer.document().setDocumentMargin(0)
+        except Exception:
+            pass
+        self.html_viewer.anchorClicked.connect(self.on_html_anchor_clicked)
+        layout.addWidget(self.html_viewer, stretch=1)
 
         # Pagination bar
         pagination_frame = QFrame()
@@ -177,12 +191,15 @@ class RecordsPage(QFrame):
         return frame
 
     # ----------------------------------------------------- Data & State ----
-    def setup_colors(self):
-        """Setup dark mode color palette from config."""
+    def setup_colors(self, theme_name: str = "dark"):
+        """Setup theme color palette from config."""
+        theme_name = theme_name if theme_name in {"dark", "light"} else "dark"
         try:
             from ...core.config import get_config
+            from ..styles.theme_loader import resolve_theme_colors
             config = get_config()
-            colors = config.ui.colors
+            base_colors = dict(getattr(getattr(config, "ui", None), "colors", {}) or {})
+            colors = resolve_theme_colors(theme_name, base_colors)
 
             self.color_deep_graphite = colors.get('deep_graphite', '#1A1D23')
             self.color_steel_grey = colors.get('steel_grey', '#1F232B')
@@ -200,21 +217,47 @@ class RecordsPage(QFrame):
             self.color_text_primary = colors.get('text_primary', '#FFFFFF')
             self.color_text_muted = colors.get('text_muted', '#9CA3AF')
         except Exception:
-            self.color_deep_graphite = "#1A1D23"
-            self.color_steel_grey = "#1F232B"
-            self.color_dark_border = "#242831"
-            self.color_arctic_white = "#F2F4F8"
-            self.color_cool_grey = "#8C92A0"
-            self.color_hover_orange = "#FF8C32"
-            self.color_success_green = "#3CC37A"
-            self.color_error_red = "#E85454"
-            self.color_warning_yellow = "#FFB347"
-            self.color_surface = "#252525"
-            self.color_surface_dark = "#1F1F1F"
-            self.color_surface_darker = "#1A1A1A"
-            self.color_border_subtle = "#3A3A3A"
-            self.color_text_primary = "#FFFFFF"
-            self.color_text_muted = "#9CA3AF"
+            if theme_name == "light":
+                self.color_deep_graphite = "#F3F4F7"
+                self.color_steel_grey = "#FFFFFF"
+                self.color_dark_border = "#CED3E5"
+                self.color_arctic_white = "#111827"
+                self.color_cool_grey = "#4B5563"
+                self.color_hover_orange = "#2563EB"
+                self.color_success_green = "#22C55E"
+                self.color_error_red = "#DC2626"
+                self.color_warning_yellow = "#FACC15"
+                self.color_surface = "#F9FAFE"
+                self.color_surface_dark = "#EEF1F8"
+                self.color_surface_darker = "#E0E6F3"
+                self.color_border_subtle = "#D1D7E6"
+                self.color_text_primary = "#111827"
+                self.color_text_muted = "#4B5563"
+            else:
+                self.color_deep_graphite = "#1A1D23"
+                self.color_steel_grey = "#1F232B"
+                self.color_dark_border = "#242831"
+                self.color_arctic_white = "#F2F4F8"
+                self.color_cool_grey = "#8C92A0"
+                self.color_hover_orange = "#FF8C32"
+                self.color_success_green = "#3CC37A"
+                self.color_error_red = "#E85454"
+                self.color_warning_yellow = "#FFB347"
+                self.color_surface = "#252525"
+                self.color_surface_dark = "#1F1F1F"
+                self.color_surface_darker = "#1A1A1A"
+                self.color_border_subtle = "#3A3A3A"
+                self.color_text_primary = "#FFFFFF"
+                self.color_text_muted = "#9CA3AF"
+
+    def apply_theme(self, theme: str) -> None:
+        if theme not in {"dark", "light"}:
+            return
+        if theme == getattr(self, "current_theme", "dark"):
+            return
+        self.current_theme = theme
+        self.setup_colors(theme)
+        self._refresh_table_view()
 
     def load_sample_data(self):
         """Generate mock data with 20 records."""
@@ -257,29 +300,52 @@ class RecordsPage(QFrame):
         self.current_page = 1
         self.apply_filters()
 
-    def on_status_changed(self):
+    def on_status_changed(self, _index=None):
         self.filter_status = self.status_filter_combo.currentData()
         self.current_page = 1
         self.apply_filters()
 
-    def on_prev_page(self):
+    def on_prev_page(self, _checked=False):
         if self.current_page > 1:
             self.current_page -= 1
             self._refresh_table_view()
 
-    def on_next_page(self):
+    def on_next_page(self, _checked=False):
         if self.current_page < self.total_pages:
             self.current_page += 1
             self._refresh_table_view()
 
-    def on_select_date(self):
+    def on_select_date(self, _checked=False):
         logger.info("Date selection triggered - pending implementation")
 
-    def on_export(self):
-        logger.info("Exporting %d filtered records", len(self.filtered_records))
+    def on_export(self, _checked=False):
+        html_text = ""
+        if self.html_viewer:
+            try:
+                html_text = self.html_viewer.toHtml()
+            except Exception:
+                logger.exception("Failed to extract HTML content from viewer")
+        if html_text:
+            try:
+                QApplication.clipboard().setText(html_text)
+            except Exception:
+                logger.exception("Failed to copy HTML to clipboard")
+        logger.info("Export triggered (records=%d, html_size=%d)", len(self.filtered_records), len(html_text))
 
     def on_view_detail(self, record_id):
         logger.info("Viewing detail for record %s", record_id)
+
+    def on_html_anchor_clicked(self, url: QUrl):
+        text = url.toString()
+        if text.startswith("detail:"):
+            raw = text.split("detail:", 1)[1].strip()
+            try:
+                record_id = int(raw)
+            except ValueError:
+                record_id = raw
+            self.on_view_detail(record_id)
+            return
+        logger.info("Unhandled link clicked: %s", text)
 
     # ----------------------------------------------------------- Helpers ----
     def apply_filters(self):
@@ -316,7 +382,8 @@ class RecordsPage(QFrame):
         start = (self.current_page - 1) * self.page_size
         end = start + self.page_size
         page_records = self.filtered_records[start:end]
-        self.table_widget.set_records(page_records)
+        if self.html_viewer:
+            self.html_viewer.setHtml(self._render_records_table_html(page_records))
         self._update_pagination_controls()
 
     def _update_pagination_controls(self):
@@ -334,3 +401,114 @@ class RecordsPage(QFrame):
         """Update the subtitle with the current record count."""
         if self.subtitle_label:
             self.subtitle_label.setText(f"Work Records - {record_count} 条记录")
+
+    def _render_records_table_html(self, records):
+        def escape(value):
+            return html.escape("" if value is None else str(value), quote=True)
+
+        def badge(text, role):
+            return f"<span class='badge badge-{escape(role)}'>{escape(text)}</span>"
+
+        rows = []
+        for record in records or []:
+            status = record.get("status", "ok")
+            status_label = record.get("status_label") or {"ok": "OK", "ng": "NG", "conditional": "条件通过"}.get(status, "OK")
+            process_title = record.get("process_title", "")
+            process_code = record.get("process_name", "")
+            record_id_text = record.get("record_id", "")
+            product_sn = record.get("product_sn", "")
+            operator = record.get("operator", "")
+            workstation = record.get("workstation", "")
+            duration = record.get("duration", "")
+            row_id = record.get("id", "")
+
+            rows.append(
+                "<tr>"
+                f"<td><code>{escape(record_id_text)}</code></td>"
+                f"<td><code>{escape(product_sn)}</code></td>"
+                "<td>"
+                f"<div class='process-title'>{escape(process_title)}</div>"
+                f"<div class='process-code'>{escape(process_code)}</div>"
+                "</td>"
+                f"<td>{escape(operator)}</td>"
+                f"<td>{badge(workstation or '-', 'workstation')}</td>"
+                f"<td>{escape(duration)}</td>"
+                f"<td>{badge(status_label, status)}</td>"
+                f"<td><a class='action' href='detail:{escape(row_id)}'>查看详情</a></td>"
+                "</tr>"
+            )
+
+        if not rows:
+            table_body = (
+                "<div class='empty'>暂无记录</div>"
+            )
+        else:
+            table_body = (
+                "<div class='table-wrap'>"
+                "<table class='records-table' width='100%' cellspacing='0' cellpadding='0'>"
+                "<colgroup>"
+                "<col style='width:16%;' />"
+                "<col style='width:14%;' />"
+                "<col style='width:28%;' />"
+                "<col style='width:10%;' />"
+                "<col style='width:8%;' />"
+                "<col style='width:10%;' />"
+                "<col style='width:8%;' />"
+                "<col style='width:6%;' />"
+                "</colgroup>"
+                "<thead>"
+                "<tr>"
+                "<th>记录编号</th>"
+                "<th>产品SN</th>"
+                "<th>工艺名称</th>"
+                "<th>操作员</th>"
+                "<th>工位</th>"
+                "<th>耗时</th>"
+                "<th>状态</th>"
+                "<th>操作</th>"
+                "</tr>"
+                "</thead>"
+                f"<tbody>{''.join(rows)}</tbody>"
+                "</table>"
+                "</div>"
+            )
+
+        deep_graphite = escape(getattr(self, "color_deep_graphite", "#1A1D23"))
+        steel_grey = escape(getattr(self, "color_steel_grey", "#1F232B"))
+        border = escape(getattr(self, "color_dark_border", "#242831"))
+        text_primary = escape(getattr(self, "color_arctic_white", "#F2F4F8"))
+        text_muted = escape(getattr(self, "color_cool_grey", "#8C92A0"))
+        hover_orange = escape(getattr(self, "color_hover_orange", "#FF8C32"))
+        success_green = escape(getattr(self, "color_success_green", "#3CC37A"))
+        error_red = escape(getattr(self, "color_error_red", "#E85454"))
+        warning_yellow = escape(getattr(self, "color_warning_yellow", "#FFB347"))
+        border_subtle = escape(getattr(self, "color_border_subtle", border))
+
+        return (
+            "<html>"
+            "<head>"
+            "<meta charset='utf-8' />"
+            "<style>"
+            f"body{{margin:0;padding:0;width:100%;background:{steel_grey};color:{text_primary};font-family:'Source Han Sans SC','Microsoft YaHei',sans-serif;}}"
+            ".table-wrap{width:100%;}"
+            ".records-table{width:100%;border-collapse:collapse;background:transparent;}"
+            f"th{{text-align:left;font-size:12px;color:{text_muted};font-weight:600;padding:12px 14px;border-bottom:1px solid {border};}}"
+            f"td{{font-size:13px;color:{text_primary};padding:14px;border-bottom:1px solid {border};vertical-align:top;}}"
+            f"code{{font-family:Consolas,'Courier New',monospace;color:{text_primary};background:{deep_graphite};padding:2px 8px;border:1px solid {border};border-radius:8px;}}"
+            f".process-title{{font-size:14px;font-weight:700;color:{text_primary};margin-bottom:4px;}}"
+            f".process-code{{font-size:12px;color:{text_muted};}}"
+            ".badge{display:inline-block;font-size:12px;font-weight:600;border-radius:999px;padding:4px 10px;}"
+            f".badge-workstation{{border:1px solid {border};background:{deep_graphite};color:{text_muted};}}"
+            f".badge-ok{{border:1px solid {success_green};background:rgba(60,195,122,0.18);color:{success_green};}}"
+            f".badge-ng{{border:1px solid {error_red};background:rgba(232,84,84,0.14);color:{error_red};}}"
+            f".badge-conditional{{border:1px solid {warning_yellow};background:rgba(255,179,71,0.16);color:{warning_yellow};}}"
+            f"a.action{{display:inline-block;text-decoration:none;color:{text_muted};border:1px solid {border_subtle};border-radius:6px;padding:6px 12px;font-weight:600;}}"
+            f"a.action:hover{{background:{steel_grey};color:{text_primary};border-color:{hover_orange};}}"
+            f".empty{{padding:40px 10px;color:{text_muted};text-align:center;font-size:14px;}}"
+            "</style>"
+            "</head>"
+            "<body>"
+            f"{table_body}"
+            "</body>"
+            "</html>"
+        )

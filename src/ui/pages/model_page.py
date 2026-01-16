@@ -47,7 +47,9 @@ class ModelPage(QFrame):
         import_btn.setObjectName("uploadButton") # Use uploadButton style
         import_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         import_btn.clicked.connect(self._on_import_clicked)
-        header_layout.addWidget(import_btn)
+        # header_layout.addWidget(import_btn) # Hidden as requested
+        import_btn.hide() # Explicitly hide or just don't add
+        # We can just not add it to layout
         
         layout.addWidget(header_frame)
         

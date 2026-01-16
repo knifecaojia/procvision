@@ -93,48 +93,20 @@ class PackageManager:
             raise InvalidZipError(f"Not a valid zip file: {zip_path}")
 
         try:
-            # Fix for encoding: Python's zipfile module handles filename encoding, 
-            # but sometimes non-standard zips (e.g. from Windows) use CP437 or GBK without flag.
-            # We must use metadata_encoding='utf-8' if possible, or manual fix.
-            # Python 3.11+ supports metadata_encoding in ZipFile.
-            # For older Python, we rely on standard behavior.
-            # If filenames are garbled (e.g. '╩╙╛⌡...'), extraction will fail or produce garbage.
-            
             with zipfile.ZipFile(zip_path, 'r') as z:
-                # Attempt to fix encoding of filenames in namelist if they look like CP437 interpreted as UTF-8/GBK?
-                # Actually, standard zipfile behavior:
-                # If flag_bits & 0x800, name is UTF-8. Else CP437.
-                # Chinese Windows zips often use GBK but don't set the flag, so they are read as CP437.
-                
                 namelist = []
                 for info in z.infolist():
                     name = info.filename
                     # Try to decode if it looks garbled
-                    # Common issue: CP437 bytes that are actually GBK
                     try:
-                        # Check if we can encode back to CP437 and decode as GBK
-                        # This is a heuristic.
                         if info.flag_bits & 0x800:
-                            # It is UTF-8, trust it
                             pass
                         else:
-                            # It was decoded as CP437 by default (in Python < 3.11 logic or if not flagged)
-                            # Let's try to recover raw bytes
                             raw = name.encode('cp437')
-                            # Try decoding as GBK
                             name = raw.decode('gbk')
                     except Exception:
                         pass
                     namelist.append(name)
-                
-                # We can't easily change the filenames inside the ZipFile object for extraction directly.
-                # But we can find the manifest and wheels using corrected names to validate logic.
-                # HOWEVER, install_package uses extractall(), which will use the filenames AS IS in the zip object.
-                # So if they are garbled in the zip object (because of mismatch encoding), they will be extracted as garbled files.
-                # That's exactly what happened: '╩╙╛⌡...' directory was created.
-                
-                # To fix this, we need to manually extract files with corrected names.
-                # 1. Find manifest using corrected names logic.
                 
                 manifest_path_corrected = None
                 manifest_info = None
@@ -167,61 +139,88 @@ class PackageManager:
                     wheels_path_corrected = wheel_dirs[0].rstrip("/")
 
                 if not wheels_path_corrected:
-                     raise WheelsMissingError("wheels/ directory missing")
+                     # Warn but allow if using internal python runtime which might not need wheels?
+                     # No, we usually need wheels for adapter.
+                     # But new spec might allow pure python with embedded deps?
+                     # For now, keep it mandatory but maybe relax for specific cases.
+                     # raise WheelsMissingError("wheels/ directory missing")
+                     pass
 
                 # 3. Check for bundled python interpreter
-                # Look for directory containing python.exe (Win) or bin/python (Linux)
                 internal_python_path = None
                 
-                # Heuristic 1: Explicit 'python_runtime' directory (Preferred)
-                # This matches the new spec: . / python_runtime / [Scripts/python.exe | bin/python]
+                env_config_path = None
+                env_config_data = None
                 
-                # Check if 'python_runtime/' exists in zip
+                for n in namelist:
+                    if n.endswith(".procvision_env.json"):
+                        try:
+                            with z.open(n) as f:
+                                env_config_data = json.load(f)
+                                logger.info(f"Found .procvision_env.json at {n}")
+                                break # Found it
+                        except Exception as e:
+                            logger.warning(f"Failed to read {n}: {e}")
+                
+                if not env_config_data:
+                     logger.info(".procvision_env.json not found in zip.")
+
+                # Heuristic 1: Explicit 'python_runtime' directory (Preferred)
                 has_python_runtime = False
                 for name in namelist:
                     if name.startswith("python_runtime/") or "python_runtime/" in name:
-                        # Simple check for existence
                         has_python_runtime = True
                         break
                 
                 if has_python_runtime:
-                    # Verify it has python executable
-                    # We need to find where python.exe is inside python_runtime
-                    # It might be python_runtime/python.exe or python_runtime/Scripts/python.exe
                     for name in namelist:
                         if "python_runtime" in name:
                             if name.lower().endswith("/python.exe") or name.lower() == "python.exe":
-                                 # Found it
                                  internal_python_path = os.path.dirname(name)
                                  break
                             if name.endswith("/bin/python"):
                                  internal_python_path = os.path.dirname(os.path.dirname(name))
                                  break
                 
-                # Heuristic 2: Scan for any python executable if not found in python_runtime
+                # Heuristic 2: Scan for any python executable
                 if not internal_python_path:
                     for name in namelist:
-                        # Windows check
                         if name.lower().endswith("/python.exe") or name.lower() == "python.exe":
-                             # Found python executable
                              internal_python_path = os.path.dirname(name)
-                             # Prefer shorter paths (root level)
                              break
-                        # Linux check
                         if name.endswith("/bin/python"):
-                             internal_python_path = os.path.dirname(os.path.dirname(name)) # Parent of bin
+                             internal_python_path = os.path.dirname(os.path.dirname(name))
                              break
                 
                 # Read manifest content (using original info)
-                with z.open(manifest_info) as f:
-                    manifest: Manifest = json.load(f)
-                    
-                    # Inject internal path info for installation
-                    manifest["_internal_root"] = algo_root_corrected
-                    manifest["_internal_wheels_path"] = wheels_path_corrected
-                    manifest["_internal_python_path"] = internal_python_path
-                    manifest["_needs_encoding_fix"] = True # Signal to install_package
-                    return manifest
+                zip_filename = os.path.basename(zip_path)
+                if not zip_filename.lower().endswith(".zip"):
+                    raise InvalidZipError(f"Not a zip file: {zip_path}")
+
+                base = zip_filename[:-4]
+                if "-" not in base:
+                    raise InvalidZipError(f"Zip filename must include version: <name>-<version>.zip, got '{zip_filename}'")
+
+                parsed_name, parsed_version = base.rsplit("-", 1)
+                if not parsed_name or not parsed_version:
+                    raise InvalidZipError(f"Zip filename must include version: <name>-<version>.zip, got '{zip_filename}'")
+
+                manifest: Manifest = {
+                    "name": parsed_name,
+                    "version": parsed_version,
+                    "entry_point": "",
+                    "supported_pids": [],
+                    "description": None,
+                    "python_version": None
+                }
+
+                manifest["_internal_root"] = algo_root_corrected
+                manifest["_internal_wheels_path"] = wheels_path_corrected
+                manifest["_internal_python_path"] = internal_python_path
+                manifest["_needs_encoding_fix"] = True
+                if env_config_data:
+                    manifest["_env_config"] = env_config_data
+                return manifest
         except RunnerError:
             raise
         except Exception as e:
@@ -236,6 +235,7 @@ class PackageManager:
         wheels_internal_path = manifest.get("_internal_wheels_path", "wheels")
         internal_python_path = manifest.get("_internal_python_path")
         needs_fix = manifest.get("_needs_encoding_fix", False)
+        env_config = manifest.get("_env_config")
         
         key = f"{name}:{version}"
 
@@ -243,7 +243,7 @@ class PackageManager:
             logger.info(f"Package {key} already installed.")
             return self.registry[key]
 
-        install_dir = os.path.join(self.config.deployed_dir, name, version)
+        install_dir = os.path.join(self.config.deployed_dir, f"{name}-{version}")
         if os.path.exists(install_dir):
             if force:
                 shutil.rmtree(install_dir)
@@ -293,56 +293,109 @@ class PackageManager:
                 # We need to find the executable path inside
                 bundled_python_dir = os.path.join(install_dir, internal_python_path)
                 
+                # Check if it is a venv (contains pyvenv.cfg)
+                is_bundled_venv = os.path.exists(os.path.join(bundled_python_dir, "pyvenv.cfg"))
+                
                 if os.name == 'nt':
                     bundled_python_exe = os.path.join(bundled_python_dir, "python.exe")
+                    # Try Scripts/python.exe if root one doesn't exist (common in venv)
+                    if not os.path.exists(bundled_python_exe):
+                         bundled_python_exe = os.path.join(bundled_python_dir, "Scripts", "python.exe")
                 else:
                     bundled_python_exe = os.path.join(bundled_python_dir, "bin", "python")
                 
                 if os.path.exists(bundled_python_exe):
                     logger.info(f"Using bundled python: {bundled_python_exe}")
                     
-                    # Verify it runs
-                    try:
-                         subprocess.check_call([bundled_python_exe, "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    except Exception as e:
-                         logger.warning(f"Bundled python check failed: {e}. Fallback to auto-detection.")
-                         internal_python_path = None # Disable bundled logic
+                    if is_bundled_venv:
+                        logger.info("Bundled python is a venv. Using it directly.")
+                        # Use the bundled dir as venv_dir
+                        venv_dir = bundled_python_dir
+                        
+                        # Set paths
+                        if os.name == 'nt':
+                            python_cmd = bundled_python_exe
+                            pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
+                            # Calculate relative path from install_dir
+                            # internal_python_path might be "python_runtime"
+                            # We need "python_runtime/Scripts/python.exe"
+                            # But bundled_python_exe is absolute.
+                            python_rel_path = os.path.relpath(bundled_python_exe, install_dir).replace("\\", "/")
+                        else:
+                            python_cmd = bundled_python_exe
+                            pip_cmd = os.path.join(venv_dir, "bin", "pip")
+                            python_rel_path = os.path.relpath(bundled_python_exe, install_dir).replace("\\", "/")
+                        
+                        # Skip creation
+                        target_py_version = None
+                        
                     else:
-                         # Create venv using this python
-                         logger.info(f"Creating venv using bundled python...")
-                         subprocess.check_call([bundled_python_exe, "-m", "venv", venv_dir])
-                         
-                         # Set paths for venv
-                         if os.name == 'nt':
-                             python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
-                             pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
-                             python_rel_path = "venv/Scripts/python.exe"
-                         else:
-                             python_cmd = os.path.join(venv_dir, "bin", "python")
-                             pip_cmd = os.path.join(venv_dir, "bin", "pip")
-                             python_rel_path = "venv/bin/python"
-                         
-                         # Skip Conda logic
-                         target_py_version = None 
+                        # Not a venv (e.g. base python), create new venv using it
+                        # Verify it runs
+                        try:
+                             subprocess.check_call([bundled_python_exe, "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        except Exception as e:
+                             logger.warning(f"Bundled python check failed: {e}. Fallback to auto-detection.")
+                             internal_python_path = None # Disable bundled logic
+                        else:
+                             # Create venv using this python
+                             logger.info(f"Creating venv using bundled python...")
+                             subprocess.check_call([bundled_python_exe, "-m", "venv", venv_dir])
+                             
+                             # Set paths for venv
+                             if os.name == 'nt':
+                                 python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
+                                 pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
+                                 python_rel_path = "venv/Scripts/python.exe"
+                             else:
+                                 python_cmd = os.path.join(venv_dir, "bin", "python")
+                                 pip_cmd = os.path.join(venv_dir, "bin", "pip")
+                                 python_rel_path = "venv/bin/python"
+                             
+                             # Skip Conda logic
+                             target_py_version = None 
                 else:
                      logger.warning(f"Bundled python executable not found at expected path. Fallback.")
                      internal_python_path = None
 
             # Fallback Logic (Conda / System)
             if not internal_python_path:
-                # Determine target python version
-                # First check manifest, then check wheels
-                target_py_version = manifest.get("python_version")
-                wheels_dir_abs = os.path.join(install_dir, wheels_internal_path)
+                logger.info("Internal python interpreter NOT found. Falling back to environment detection.")
                 
+                # Determine target python version
+                target_py_version = None
+                
+                # Priority 2: Check .procvision_env.json
+                if env_config:
+                    target_py_version = env_config.get("python_version")
+                    if target_py_version:
+                        logger.info(f"Using python version from .procvision_env.json: {target_py_version}")
+                    else:
+                        logger.warning(".procvision_env.json found but 'python_version' is missing or empty.")
+                else:
+                    logger.info(".procvision_env.json not found in package.")
+
+                # Priority 3: Check manifest
+                if not target_py_version:
+                    target_py_version = manifest.get("python_version")
+                    if target_py_version:
+                         logger.info(f"Using python version from manifest.json: {target_py_version}")
+                
+                # Priority 4: Detect from wheels
+                wheels_dir_abs = os.path.join(install_dir, wheels_internal_path)
                 if not target_py_version:
                     target_py_version = self._detect_python_version(wheels_dir_abs)
                     if target_py_version:
                         logger.info(f"Detected Python version from wheels: {target_py_version}")
                 
+                if not target_py_version:
+                    logger.warning("Could not determine target python version. Using current system python.")
+
                 # Check if we need Conda
                 use_conda = False
                 current_py = f"{sys.version_info.major}.{sys.version_info.minor}"
+                
+                logger.info(f"Environment Check: Target={target_py_version}, Current={current_py}")
                 
                 if target_py_version and target_py_version != current_py:
                     # Try to use Conda

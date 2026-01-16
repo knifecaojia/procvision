@@ -121,9 +121,15 @@ class RunnerEngine:
              logger.warning(f"Failed to get info for PID {pid}: {res.get('message')}")
              return {}
 
-    def execute_flow(self, pid: str, image: Union[bytes, np.ndarray], context: Dict[str, Any] = {}) -> Dict[str, Any]:
+    def execute_flow(self, pid: str, 
+                     step_index: int, 
+                     step_desc: str, 
+                     cur_image: Union[bytes, np.ndarray], 
+                     guide_image: Union[bytes, np.ndarray],
+                     guide_info: list = [],
+                     context: Dict[str, Any] = {}) -> Dict[str, Any]:
         """
-        Executes the full detection flow (Pre -> Execute).
+        Executes the detection flow (Single Execute Phase).
         """
         # 1. Resolve Package
         pkg_entry = self.package_manager.get_active_package(pid)
@@ -139,72 +145,61 @@ class RunnerEngine:
                 pkg_entry = candidates[0]
                 logger.info(f"Fallback found: Using {pkg_entry['name']}:{pkg_entry['version']} for PID {pid}")
             elif len(candidates) > 1:
-                # If multiple, maybe pick the latest version?
-                # For now, just pick the first one but warn
                 pkg_entry = candidates[0]
                 logger.warning(f"Multiple packages support PID {pid}. Using first found: {pkg_entry['name']}:{pkg_entry['version']}")
             else:
                 raise InvalidPidError(f"PID {pid} not mapped to any active package and no installed package supports it")
 
         # 2. Prepare Resources
-        session_id = f"sid-{uuid.uuid4()}"
-        shared_mem_id = f"shm-{session_id}"
+        req_id = str(uuid.uuid4())
+        cur_shm_id = f"shm-{req_id}-cur"
+        guide_shm_id = f"shm-{req_id}-guide"
         
-        # Write Image
+        # Write Images
         try:
-            write_image_to_shared_memory(shared_mem_id, image)
+            write_image_to_shared_memory(cur_shm_id, cur_image)
+            write_image_to_shared_memory(guide_shm_id, guide_image)
         except Exception as e:
             raise RunnerError(f"Failed to write shared memory: {e}", "1002")
 
         proc = self._get_or_create_process(pkg_entry)
 
         # Image Meta
-        height, width = 0, 0
-        if isinstance(image, np.ndarray):
-            height, width = image.shape[:2]
-        # For bytes, we might need to parse headers or let algorithm handle it.
-        # Spec says inject width/height. If bytes, we might guess or set 0?
-        # SDK read_image handles 0 check.
-        
-        image_meta = {
-            "width": width,
-            "height": height,
-            "timestamp_ms": int(time.time() * 1000),
-            "camera_id": context.get("camera_id", "unknown"),
-            "color_space": self.config.color_space_default
+        def get_meta(img, suffix):
+            h, w = 0, 0
+            if isinstance(img, np.ndarray):
+                h, w = img.shape[:2]
+            return {
+                "width": w,
+                "height": h,
+                "timestamp_ms": int(time.time() * 1000),
+                "camera_id": context.get(f"camera_id_{suffix}", "unknown"),
+                "color_space": self.config.color_space_default
+            }
+
+        cur_meta = get_meta(cur_image, "cur")
+        guide_meta = get_meta(guide_image, "guide")
+
+        req_data = {
+            "step_index": step_index,
+            "step_desc": step_desc,
+            "guide_info": guide_info,
+            "cur_image_shm_id": cur_shm_id,
+            "cur_image_meta": cur_meta,
+            "guide_image_shm_id": guide_shm_id,
+            "guide_image_meta": guide_meta
         }
 
-        base_req = {
-            "pid": pid,
-            "session": {"id": session_id, "context": context},
-            "user_params": context.get("user_params", {}),
-            "shared_mem_id": shared_mem_id,
-            "image_meta": image_meta
+        req = {
+            "type": "call",
+            "request_id": req_id,
+            "data": req_data
         }
 
         try:
-            # 3. Pre-Execute
-            req_pre = base_req.copy()
-            req_pre.update({
-                "type": "call",
-                "phase": "pre",
-                "step_index": 1
-            })
-            
-            res_pre = proc.call(req_pre, self.config.pre_execute_timeout_ms)
-            if res_pre["status"] != "OK":
-                return res_pre # Return error immediately
-
-            # 4. Execute
-            req_exec = base_req.copy()
-            req_exec.update({
-                "type": "call",
-                "phase": "execute",
-                "step_index": 2
-            })
-            
-            res_exec = proc.call(req_exec, self.config.execute_timeout_ms)
-            return res_exec
+            # 3. Execute
+            res = proc.call(req, self.config.execute_timeout_ms)
+            return res
 
         except Exception as e:
             logger.error(f"Execution failed: {e}")
@@ -213,132 +208,11 @@ class RunnerEngine:
             return {"status": "ERROR", "error_code": "9999", "message": str(e)}
         finally:
             # Cleanup
-            clear_shared_memory(shared_mem_id)
+            clear_shared_memory(cur_shm_id)
+            clear_shared_memory(guide_shm_id)
 
     def stop_all(self):
         with self._proc_lock:
             for key, proc in self.processes.items():
                 proc.stop()
             self.processes.clear()
-
-    def setup_algorithm(self, pid: str) -> Dict[str, Any]:
-        pkg_entry = self.package_manager.get_active_package(pid)
-        if not pkg_entry:
-            candidates = []
-            for key, entry in self.package_manager.registry.items():
-                if pid in entry.get("supported_pids", []):
-                    candidates.append(entry)
-            if candidates:
-                pkg_entry = candidates[0]
-            else:
-                raise InvalidPidError(f"PID {pid} not mapped to any package")
-        proc = self._get_or_create_process(pkg_entry)
-        req = {
-            "type": "call",
-            "phase": "setup",
-            "pid": pid,
-            "session": {"id": "setup", "context": {}},
-            "user_params": {},
-            "shared_mem_id": "",
-            "image_meta": {}
-        }
-        res = proc.call(req, self.config.pre_execute_timeout_ms)
-        return res
-
-    def teardown_algorithm(self, pid: str) -> Dict[str, Any]:
-        pkg_entry = self.package_manager.get_active_package(pid)
-        if not pkg_entry:
-            candidates = []
-            for key, entry in self.package_manager.registry.items():
-                if pid in entry.get("supported_pids", []):
-                    candidates.append(entry)
-            if candidates:
-                pkg_entry = candidates[0]
-            else:
-                raise InvalidPidError(f"PID {pid} not mapped to any package")
-        proc = self._get_or_create_process(pkg_entry)
-        req = {
-            "type": "call",
-            "phase": "teardown",
-            "pid": pid,
-            "session": {"id": "teardown", "context": {}},
-            "user_params": {},
-            "shared_mem_id": "",
-            "image_meta": {}
-        }
-        res = proc.call(req, self.config.pre_execute_timeout_ms)
-        return res
-
-    def reset_algorithm(self, pid: str) -> Dict[str, Any]:
-        pkg_entry = self.package_manager.get_active_package(pid)
-        if not pkg_entry:
-            candidates = []
-            for key, entry in self.package_manager.registry.items():
-                if pid in entry.get("supported_pids", []):
-                    candidates.append(entry)
-            if candidates:
-                pkg_entry = candidates[0]
-            else:
-                raise InvalidPidError(f"PID {pid} not mapped to any package")
-        proc = self._get_or_create_process(pkg_entry)
-        req = {
-            "type": "call",
-            "phase": "reset",
-            "pid": pid,
-            "session": {"id": "reset", "context": {}},
-            "user_params": {},
-            "shared_mem_id": "",
-            "image_meta": {}
-        }
-        res = proc.call(req, self.config.pre_execute_timeout_ms)
-        return res
-
-    def on_step_start(self, pid: str, step_index: int, context: Dict[str, Any]) -> Dict[str, Any]:
-        pkg_entry = self.package_manager.get_active_package(pid)
-        if not pkg_entry:
-            candidates = []
-            for key, entry in self.package_manager.registry.items():
-                if pid in entry.get("supported_pids", []):
-                    candidates.append(entry)
-            if candidates:
-                pkg_entry = candidates[0]
-            else:
-                raise InvalidPidError(f"PID {pid} not mapped to any package")
-        proc = self._get_or_create_process(pkg_entry)
-        req = {
-            "type": "call",
-            "phase": "on_step_start",
-            "pid": pid,
-            "step_index": step_index,
-            "session": {"id": f"step-start-{step_index}", "context": context},
-            "user_params": context.get("user_params", {}),
-            "shared_mem_id": "",
-            "image_meta": {}
-        }
-        res = proc.call(req, self.config.execute_timeout_ms)
-        return res
-
-    def on_step_finish(self, pid: str, step_index: int, context: Dict[str, Any]) -> Dict[str, Any]:
-        pkg_entry = self.package_manager.get_active_package(pid)
-        if not pkg_entry:
-            candidates = []
-            for key, entry in self.package_manager.registry.items():
-                if pid in entry.get("supported_pids", []):
-                    candidates.append(entry)
-            if candidates:
-                pkg_entry = candidates[0]
-            else:
-                raise InvalidPidError(f"PID {pid} not mapped to any package")
-        proc = self._get_or_create_process(pkg_entry)
-        req = {
-            "type": "call",
-            "phase": "on_step_finish",
-            "pid": pid,
-            "step_index": step_index,
-            "session": {"id": f"step-finish-{step_index}", "context": context},
-            "user_params": context.get("user_params", {}),
-            "shared_mem_id": "",
-            "image_meta": {}
-        }
-        res = proc.call(req, self.config.execute_timeout_ms)
-        return res

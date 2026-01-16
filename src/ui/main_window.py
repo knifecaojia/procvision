@@ -186,6 +186,10 @@ class MainWindow(QMainWindow):
             self.camera_page.apply_theme(theme)
         except Exception:
             logger.exception("Failed to apply theme on camera page")
+        try:
+            self.records_page.apply_theme(theme)
+        except Exception:
+            logger.exception("Failed to apply theme on records page")
 
     def init_ui(self):
         """Initialize the UI components."""
@@ -327,7 +331,7 @@ class MainWindow(QMainWindow):
         self.system_page = SystemPage(initial_theme=self.current_theme)
         self.model_page = ModelPage()
         self.process_page = ProcessPage(camera_service=self.camera_service)
-        self.records_page = RecordsPage()
+        self.records_page = RecordsPage(initial_theme=self.current_theme)
         try:
             self.system_page.themeChanged.connect(self.on_theme_changed)
         except Exception:

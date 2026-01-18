@@ -69,6 +69,31 @@ class PackageManager:
                 # Convert list to dict key=<name>:<version>
                 registry = {}
                 for item in data:
+                    try:
+                        spids = item.get("supported_pids", [])
+                        if spids is None:
+                            spids = []
+                        item["supported_pids"] = [str(p).strip() for p in spids if str(p).strip()]
+                    except Exception:
+                        item["supported_pids"] = []
+                    try:
+                        if not item.get("supported_pids"):
+                            install_path = item.get("install_path")
+                            working_dir = item.get("working_dir")
+                            candidates = []
+                            if working_dir:
+                                candidates.append(os.path.join(working_dir, "manifest.json"))
+                            if install_path:
+                                candidates.append(os.path.join(install_path, "manifest.json"))
+                            for p in candidates:
+                                if p and os.path.exists(p):
+                                    with open(p, "r", encoding="utf-8") as mf:
+                                        mf_data = json.load(mf) or {}
+                                    sp = mf_data.get("supported_pids", []) or []
+                                    item["supported_pids"] = [str(x).strip() for x in sp if str(x).strip()]
+                                    break
+                    except Exception:
+                        pass
                     key = f"{item['name']}:{item['version']}"
                     registry[key] = item
                 return registry
@@ -213,6 +238,22 @@ class PackageManager:
                     "description": None,
                     "python_version": None
                 }
+
+                try:
+                    if manifest_path_corrected:
+                        with z.open(manifest_path_corrected) as mf:
+                            raw_manifest = json.load(mf) or {}
+                        if isinstance(raw_manifest, dict):
+                            if raw_manifest.get("entry_point"):
+                                manifest["entry_point"] = str(raw_manifest.get("entry_point")).strip()
+                            spids = raw_manifest.get("supported_pids", []) or []
+                            manifest["supported_pids"] = [str(p).strip() for p in spids if str(p).strip()]
+                            if raw_manifest.get("description") is not None:
+                                manifest["description"] = raw_manifest.get("description")
+                            if raw_manifest.get("python_version") is not None:
+                                manifest["python_version"] = raw_manifest.get("python_version")
+                except Exception as e:
+                    logger.warning(f"Failed to read manifest.json from zip: {e}")
 
                 manifest["_internal_root"] = algo_root_corrected
                 manifest["_internal_wheels_path"] = wheels_path_corrected
@@ -507,7 +548,10 @@ class PackageManager:
             raise RunnerError(f"Package {key} not installed", "2005")
 
         package = self.registry[key]
-        if pid not in package["supported_pids"]:
+        pid = str(pid).strip()
+        supported = [str(x).strip() for x in (package.get("supported_pids") or []) if str(x).strip()]
+        package["supported_pids"] = supported
+        if pid not in supported:
             raise ActivationConflictError(f"PID {pid} not supported by {key}")
 
         mapping: ActiveMapping = {

@@ -82,6 +82,129 @@ class CameraConnectWorker(QThread):
             self.finished.emit(False, f"Connection error: {e}")
 
 
+class GuideImageDownloadWorker(QThread):
+    result_ready = Signal(int, bool, object, str)  # step_index, ok, QImage|None, message
+
+    def __init__(self, step_index: int, url: str):
+        super().__init__()
+        self.step_index = int(step_index)
+        self.url = str(url or "").strip()
+
+    def _sanitize_url(self, url: str) -> str:
+        s = str(url or "").strip()
+        while True:
+            before = s
+            s = s.strip().strip("`").strip().strip("'").strip().strip('"').strip()
+            if s == before:
+                break
+        return s
+
+    def _redact_url_for_log(self, url: str) -> str:
+        s = str(url or "")
+        if "X-Amz-" in s or "X-Amz-Signature" in s:
+            return s.split("?", 1)[0] + "?<redacted>"
+        return s
+
+    def run(self):
+        raw_url = self._sanitize_url(self.url)
+        if not raw_url:
+            logger.info("Guide image skipped (empty url): step_index=%s", self.step_index)
+            self.result_ready.emit(self.step_index, False, None, "guide_url empty")
+            return
+        try:
+            from src.services.network_service import NetworkService
+            import requests
+            import os
+
+            ns = NetworkService()
+            url = raw_url
+            logger.info(
+                "Guide image downloading: step_index=%s url=%s",
+                self.step_index,
+                self._redact_url_for_log(url),
+            )
+            if url.startswith("file://"):
+                local_path = url[len("file://"):]
+                if os.path.exists(local_path):
+                    with open(local_path, "rb") as f:
+                        qi = QImage.fromData(f.read())
+                    if qi.isNull():
+                        logger.warning(
+                            "Guide image decode failed: step_index=%s url=%s",
+                            self.step_index,
+                            self._redact_url_for_log(url),
+                        )
+                        self.result_ready.emit(self.step_index, False, None, "guide image decode failed")
+                        return
+                    logger.info(
+                        "Guide image loaded: step_index=%s url=%s size=%sx%s",
+                        self.step_index,
+                        self._redact_url_for_log(url),
+                        qi.width(),
+                        qi.height(),
+                    )
+                    self.result_ready.emit(self.step_index, True, qi, "")
+                    return
+            if os.path.exists(url):
+                with open(url, "rb") as f:
+                    qi = QImage.fromData(f.read())
+                if qi.isNull():
+                    logger.warning(
+                        "Guide image decode failed: step_index=%s url=%s",
+                        self.step_index,
+                        self._redact_url_for_log(url),
+                    )
+                    self.result_ready.emit(self.step_index, False, None, "guide image decode failed")
+                    return
+                logger.info(
+                    "Guide image loaded: step_index=%s url=%s size=%sx%s",
+                    self.step_index,
+                    self._redact_url_for_log(url),
+                    qi.width(),
+                    qi.height(),
+                )
+                self.result_ready.emit(self.step_index, True, qi, "")
+                return
+
+            is_presigned = "X-Amz-" in url or "X-Amz-Signature" in url
+            if not (url.startswith("http://") or url.startswith("https://")):
+                base = str(getattr(ns, "base_url", "") or "").rstrip("/")
+                if url.startswith("/"):
+                    url = f"{base}{url}" if base else url
+                else:
+                    url = f"{base}/{url}" if base else url
+            if is_presigned:
+                resp = requests.get(url, timeout=getattr(ns, "timeout", 10))
+            else:
+                resp = ns.session.get(url, timeout=getattr(ns, "timeout", 10))
+            resp.raise_for_status()
+            qi = QImage.fromData(resp.content)
+            if qi.isNull():
+                logger.warning(
+                    "Guide image decode failed: step_index=%s url=%s",
+                    self.step_index,
+                    self._redact_url_for_log(url),
+                )
+                self.result_ready.emit(self.step_index, False, None, "guide image decode failed")
+                return
+            logger.info(
+                "Guide image loaded: step_index=%s url=%s size=%sx%s",
+                self.step_index,
+                self._redact_url_for_log(url),
+                qi.width(),
+                qi.height(),
+            )
+            self.result_ready.emit(self.step_index, True, qi, "")
+        except Exception as e:
+            logger.warning(
+                "Guide image download failed: step_index=%s url=%s error=%s",
+                self.step_index,
+                self._redact_url_for_log(raw_url),
+                e,
+            )
+            self.result_ready.emit(self.step_index, False, None, str(e))
+
+
 @dataclass
 class ProcessStep:
     """Data class for a process step."""
@@ -193,9 +316,15 @@ class ProcessExecutionWindow(QWidget):
         self.available_cameras = []
 
         # State management
-        self.product_sn = "SN-2025-VM-00123"
-        self.order_number = process_data.get('pid', process_data.get('name', 'ME-ASM-2024-001'))
-        self.operator_name = "张三"
+        self.product_sn = str(process_data.get("task_no") or process_data.get("name") or "")
+        self.order_number = str(process_data.get("display_pid") or process_data.get('pid', process_data.get('name', 'ME-ASM-2024-001')))
+        self.operator_name = str(
+            process_data.get("operator_name")
+            or process_data.get("username")
+            or process_data.get("worker_name")
+            or process_data.get("operator")
+            or ""
+        ).strip() or "—"
         self.network_status: Literal['online', 'offline'] = "online"
         self.total_steps = len(process_data.get('steps_detail', [])) or process_data.get('steps', 12)
         self.current_step_index = 0
@@ -220,22 +349,34 @@ class ProcessExecutionWindow(QWidget):
         self.current_theme = load_user_theme_preference()
         self.theme_loader = ThemeLoader(theme_name=self.current_theme)
         
-        # Initialize process steps via Algorithm Info
         self.steps: List[ProcessStep] = []
-        try:
-             self.steps = self._initialize_steps_from_algorithm()
-        except Exception as e:
-             logger.warning(f"Failed to load steps from algorithm: {e}")
-             # Fallback to local
-             self.steps = self._initialize_steps()
-        
+        task_steps = process_data.get("steps_detail") or process_data.get("step_infos")
+        if isinstance(task_steps, list) and task_steps:
+            try:
+                self.steps = self._initialize_steps_from_task(task_steps)
+            except Exception as e:
+                logger.warning(f"Failed to load steps from task: {e}")
+                self.steps = []
+
         if not self.steps:
-             self.steps = self._initialize_steps() # Ultimate fallback
+            try:
+                self.steps = self._initialize_steps_from_algorithm()
+            except Exception as e:
+                logger.warning(f"Failed to load steps from algorithm: {e}")
+                self.steps = self._initialize_steps()
+
+        if not self.steps:
+            self.steps = self._initialize_steps()
              
         self.total_steps = len(self.steps)
         self.current_instruction = self.steps[0].description if self.steps else "No steps available"
         self._debug_input_enabled = False
         self._debug_image_path: Optional[str] = None
+        self._guide_qimages: Dict[int, QImage] = {}
+        self._guide_workers: Dict[int, QThread] = {}
+        self._guide_errors: Dict[int, str] = {}
+        self._closing: bool = False
+        self._task_status_started: bool = False
 
         # Set window properties
         self.setWindowTitle(f"工艺执行 - {process_data.get('name', '')}")
@@ -268,6 +409,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Initialize with a neutral placeholder before any camera starts
         self.reset_camera_placeholder()
+        QTimer.singleShot(0, lambda: self._ensure_guide_for_step(self.current_step_index, preload_next=True))
 
         logger.info(f"ProcessExecutionWindow initialized for process: {process_data.get('name')}")
 
@@ -321,16 +463,16 @@ class ProcessExecutionWindow(QWidget):
         from src.runner.engine import RunnerEngine
         
         # Determine PID (prefer algorithm_code, not work order id)
-        pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+        runner = RunnerEngine()
+        pid = self._resolve_runner_pid(runner, self.process_data.get("algorithm_code", self.process_data.get("pid")))
         if not pid:
-             return []
+            return []
              
         # Use RunnerEngine to get info
         # NOTE: This might block UI if algorithm process needs to start up.
         # But since we optimized RunnerEngine to be singleton and process reusable, it should be fine.
         # Ideally show a loading spinner.
         start_time = datetime.now()
-        runner = RunnerEngine()
         init_time = (datetime.now() - start_time).total_seconds() * 1000
         logger.info(f"RunnerEngine init took {init_time:.2f}ms")
         
@@ -340,21 +482,6 @@ class ProcessExecutionWindow(QWidget):
             info = runner.get_algorithm_info(pid)
         except Exception as e:
             logger.warning(f"Primary info fetch failed for pid={pid}: {e}")
-            # Fallback: resolve by algorithm name/version from process_data -> registry entry -> use first supported PID
-            try:
-                algo_name = str(self.process_data.get("algorithm_name", "")).strip()
-                algo_ver = str(self.process_data.get("algorithm_version", "")).strip()
-                if algo_name and algo_ver:
-                    for key, entry in runner.package_manager.registry.items():
-                        if entry.get("name") == algo_name and entry.get("version") == algo_ver:
-                            spids = entry.get("supported_pids", [])
-                            if spids:
-                                alt_pid = spids[0]
-                                logger.info(f"Fallback using supported PID {alt_pid} for {algo_name}:{algo_ver}")
-                                info = runner.get_algorithm_info(alt_pid)
-                            break
-            except Exception as e2:
-                logger.warning(f"Fallback info fetch failed: {e2}")
         info_time = (datetime.now() - info_start).total_seconds() * 1000
         logger.info(f"get_algorithm_info took {info_time:.2f}ms")
         
@@ -388,6 +515,68 @@ class ProcessExecutionWindow(QWidget):
         # Update process_data with steps_detail so execute logic works too
         self.process_data['steps_detail'] = algo_steps
         
+        return steps
+
+    def _resolve_runner_pid(self, runner, preferred_pid) -> Optional[str]:
+        pid = str(preferred_pid).strip() if preferred_pid is not None else ""
+        if pid:
+            try:
+                if runner.package_manager.get_active_package(pid):
+                    return pid
+            except Exception:
+                pass
+            try:
+                for entry in (runner.package_manager.registry or {}).values():
+                    if pid in (entry.get("supported_pids") or []):
+                        return pid
+            except Exception:
+                pass
+
+        algo_name = str(self.process_data.get("algorithm_name", "")).strip()
+        algo_ver = str(self.process_data.get("algorithm_version", "")).strip()
+        if algo_name and algo_ver:
+            try:
+                for entry in (runner.package_manager.registry or {}).values():
+                    if entry.get("name") == algo_name and entry.get("version") == algo_ver:
+                        spids = entry.get("supported_pids") or []
+                        if spids:
+                            return str(spids[0])
+            except Exception:
+                pass
+        return None
+
+    def _initialize_steps_from_task(self, task_steps: List[Dict[str, Any]]) -> List[ProcessStep]:
+        steps: List[ProcessStep] = []
+        normalized_steps: List[Dict[str, Any]] = []
+        for i, item in enumerate(task_steps):
+            step_number_raw = item.get("step_number")
+            if step_number_raw is None:
+                step_number_raw = item.get("step_code")
+            try:
+                step_number = int(step_number_raw) if step_number_raw is not None and str(step_number_raw).strip() else (i + 1)
+            except Exception:
+                step_number = i + 1
+
+            step_name = item.get("step_name") or item.get("name") or f"步骤 {step_number}"
+            operation_guide = item.get("operation_guide") or item.get("step_content") or item.get("description") or step_name
+
+            normalized = dict(item) if isinstance(item, dict) else {}
+            normalized["step_number"] = step_number
+            normalized["step_name"] = str(step_name)
+            normalized["operation_guide"] = str(operation_guide)
+            normalized_steps.append(normalized)
+
+            status: StepStatus = "current" if i == 0 else "pending"
+            steps.append(
+                ProcessStep(
+                    id=i,
+                    name=str(step_name),
+                    description=str(operation_guide),
+                    status=status,
+                )
+            )
+
+        self.process_data["steps_detail"] = normalized_steps
         return steps
 
     def _initialize_steps(self) -> List[ProcessStep]:
@@ -563,12 +752,11 @@ class ProcessExecutionWindow(QWidget):
         username_widget = self.create_info_item("👤", "用户名", self.operator_name)
         layout.addWidget(username_widget)
 
-        # Product SN
-        sn_widget = self.create_info_item("📦", "产品 SN", self.product_sn)
+        sn_widget = self.create_info_item("📦", "任务编码", self.product_sn)
         layout.addWidget(sn_widget)
 
         # PID
-        pid_widget = self.create_info_item("🏷", "PID", self.order_number)
+        pid_widget = self.create_info_item("🏷", "工艺/工序ID", self.order_number)
         layout.addWidget(pid_widget)
 
         # Algorithm name
@@ -1105,7 +1293,129 @@ class ProcessExecutionWindow(QWidget):
         arr = arr.reshape(h, bpl)
         arr = arr[:, : w * 3]
         arr = arr.reshape(h, w, 3)
-        return arr[:, :, ::-1].copy()
+        return arr.copy()
+
+    def _get_step_payload(self, step_index: int) -> Dict[str, Any]:
+        sd = self.process_data.get("steps_detail") or self.process_data.get("step_infos") or []
+        if isinstance(sd, list) and 0 <= step_index < len(sd) and isinstance(sd[step_index], dict):
+            return sd[step_index]
+        return {}
+
+    def _get_step_guide_url(self, step_index: int) -> str:
+        payload = self._get_step_payload(step_index)
+        candidates = [
+            payload.get("guide_url"),
+            payload.get("guideUrl"),
+            payload.get("guide_image_url"),
+            payload.get("guideImageUrl"),
+            payload.get("guide_img_url"),
+            payload.get("guideImgUrl"),
+            payload.get("guidePath"),
+        ]
+        for c in candidates:
+            s = str(c or "").strip()
+            if s:
+                return s
+        return ""
+
+    def _get_step_guide_info(self, step_index: int):
+        payload = self._get_step_payload(step_index)
+        for k in ("guide_info", "guideInfo", "guide_rects", "guideRects", "guide_boxes", "guideBoxes"):
+            v = payload.get(k)
+            if v is not None and v != "":
+                if isinstance(v, str):
+                    s = v.strip()
+                    if s:
+                        try:
+                            return json.loads(s)
+                        except Exception:
+                            return v
+                return v
+        return []
+
+    def _prune_guide_cache(self, current_step_index: int) -> None:
+        keep = {int(current_step_index), int(current_step_index) + 1}
+        for idx in list(self._guide_qimages.keys()):
+            if idx not in keep:
+                self._guide_qimages.pop(idx, None)
+        for idx in list(self._guide_errors.keys()):
+            if idx not in keep:
+                self._guide_errors.pop(idx, None)
+
+    def _ensure_guide_for_step(self, step_index: int, preload_next: bool = False) -> None:
+        if getattr(self, "_closing", False):
+            return
+        try:
+            step_index = int(step_index)
+        except Exception:
+            return
+
+        self._prune_guide_cache(step_index)
+        self._start_guide_download(step_index)
+        if preload_next:
+            self._start_guide_download(step_index + 1, prefetch=True)
+
+    def _start_guide_download(self, step_index: int, prefetch: bool = False) -> None:
+        if getattr(self, "_closing", False):
+            return
+        if step_index < 0 or step_index >= int(self.total_steps or 0):
+            return
+        if step_index in self._guide_qimages:
+            return
+        if step_index in self._guide_workers:
+            return
+        url = self._get_step_guide_url(step_index)
+        if not url:
+            logger.info("Guide image missing for step: step_index=%s prefetch=%s", step_index, bool(prefetch))
+            return
+        url_display = url
+        if "X-Amz-" in url_display or "X-Amz-Signature" in url_display:
+            url_display = url_display.split("?", 1)[0] + "?<redacted>"
+        logger.info("Guide image enqueue: step_index=%s prefetch=%s guide_url=%s", step_index, bool(prefetch), url_display)
+        worker = GuideImageDownloadWorker(step_index, url)
+        try:
+            worker.setParent(self)
+        except Exception:
+            pass
+        self._guide_workers[step_index] = worker
+        worker.result_ready.connect(self._on_guide_download_finished)
+        worker.finished.connect(lambda: self._on_guide_thread_finished(step_index))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        if not prefetch and step_index == int(getattr(self, "current_step_index", 0)):
+            try:
+                self.show_toast("引导图加载中…", True)
+            except Exception:
+                pass
+
+    def _on_guide_thread_finished(self, step_index: int) -> None:
+        try:
+            idx = int(step_index)
+        except Exception:
+            return
+        worker = self._guide_workers.get(idx)
+        if worker is not None and worker.isRunning():
+            return
+        self._guide_workers.pop(idx, None)
+
+    def _on_guide_download_finished(self, step_index: int, ok: bool, qimage_obj: object, message: str) -> None:
+        if getattr(self, "_closing", False):
+            return
+        if ok and isinstance(qimage_obj, QImage):
+            self._guide_qimages[int(step_index)] = qimage_obj
+            self._guide_errors.pop(int(step_index), None)
+            logger.info("Guide image ready: step_index=%s", int(step_index))
+            self._prune_guide_cache(int(getattr(self, "current_step_index", 0)))
+            if int(step_index) == int(getattr(self, "current_step_index", 0)):
+                self._start_guide_download(int(step_index) + 1, prefetch=True)
+        else:
+            self._guide_errors[int(step_index)] = str(message or "guide image download failed")
+            logger.warning("Guide image failed: step_index=%s error=%s", int(step_index), message)
+            if int(step_index) == int(getattr(self, "current_step_index", 0)):
+                try:
+                    self.show_toast(f"引导图加载失败: {message}", False)
+                except Exception:
+                    pass
 
     def _ng_regions_to_rects(self, regions: List[Dict[str, Any]]) -> List[QRect]:
         rects: List[QRect] = []
@@ -1684,6 +1994,19 @@ class ProcessExecutionWindow(QWidget):
         # but we need to recreate it when status changes
         pass
 
+    def _mark_task_running_once(self) -> None:
+        if getattr(self, "_task_status_started", False):
+            return
+        try:
+            task_no = str(self.process_data.get("task_no") or "").strip()
+            if not task_no:
+                return
+            from src.services.result_report_service import ResultReportService
+            ResultReportService().enqueue_task_status_update(task_no=task_no, status=2)
+            self._task_status_started = True
+        except Exception:
+            pass
+
     def on_start_detection(self):
         """Handle start detection button click."""
         if self.detection_status != 'idle' or (not self.camera_active and self._last_qimage is None):
@@ -1691,6 +2014,7 @@ class ProcessExecutionWindow(QWidget):
 
         if self.is_simulated:
             logger.info("Starting detection simulation")
+            self._mark_task_running_once()
             self.detection_status = 'detecting'
             self.update_overlay_visibility()
             self.rebuild_status_section()
@@ -1704,21 +2028,50 @@ class ProcessExecutionWindow(QWidget):
             logger.warning("No camera frame available for external detection")
             return
 
+        idx = self.current_step_index
+        guide_url = self._get_step_guide_url(idx)
+        guide_qi = self._guide_qimages.get(idx)
+        if guide_url and guide_qi is None:
+            self._ensure_guide_for_step(idx, preload_next=True)
+            err = self._guide_errors.get(idx, "")
+            if err:
+                self.show_toast(f"引导图加载失败，正在重试: {err}", False)
+            else:
+                self.show_toast("引导图加载中，请稍后重试", True)
+            return
+
+        self._mark_task_running_once()
         self.detection_status = 'detecting'
         self.update_overlay_visibility()
         self.rebuild_status_section()
 
         try:
-            try:
-                from src.runner.engine import RunnerEngine
-                RunnerEngine().on_step_start(pid=str(self.process_data.get('algorithm_code', self.process_data.get('pid'))), step_index=step_number, context={"user_params": {"step_number": step_number}})
-            except Exception:
-                pass
             start_time = datetime.now()
             img = self._qimage_to_numpy(self._last_qimage)
-            idx = self.current_step_index
+            guide_img = img
+            if guide_qi is not None:
+                try:
+                    guide_img = self._qimage_to_numpy(guide_qi)
+                except Exception:
+                    guide_img = img
+
+            step_payload = self._get_step_payload(idx)
+            raw_step_no = step_payload.get("step_number") or step_payload.get("step_code") or step_payload.get("step_name")
+            try:
+                step_number = int(str(raw_step_no).strip())
+            except Exception:
+                step_number = idx + 1
+            step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or step_number).strip()
             sd = self.process_data.get('steps_detail', [])
-            step_number = sd[idx].get('step_number', idx + 1) if isinstance(sd, list) and idx < len(sd) else (idx + 1)
+            try:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().on_step_start(
+                    pid=str(self.process_data.get("algorithm_code", self.process_data.get("pid"))),
+                    step_index=step_number,
+                    context={"user_params": {"step_number": step_number}},
+                )
+            except Exception:
+                pass
             # Use algorithm_code as PID for Runner lookup
             # The work_order uses 'algorithm_code' to map to manifest supported_pids
             pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
@@ -1726,20 +2079,55 @@ class ProcessExecutionWindow(QWidget):
             # Use RunnerEngine to execute flow
             from src.runner.engine import RunnerEngine
             runner = RunnerEngine()
+            resolved_pid = self._resolve_runner_pid(runner, pid)
+            if resolved_pid:
+                pid = resolved_pid
             
             # Context can include user params like step_number
+            camera_id = self.camera_service.current_camera.info.id if self.camera_service and self.camera_service.current_camera else "unknown"
+            step_desc = ""
+            if step_payload:
+                step_desc = str(step_payload.get("operation_guide") or step_payload.get("step_content") or "").strip()
+            if not step_desc:
+                step_desc = f"步骤 {step_number}"
             context = {
                 "user_params": {
                     "step_number": step_number
                 },
-                "camera_id": self.camera_service.current_camera.info.id if self.camera_service and self.camera_service.current_camera else "unknown"
+                "camera_id_cur": camera_id,
+                "camera_id_guide": camera_id,
+                "algorithm_name": str(self.process_data.get("algorithm_name") or "").strip(),
+                "algorithm_version": str(self.process_data.get("algorithm_version") or "").strip(),
             }
             
             # Execute
             # Note: execute_flow is synchronous/blocking in this implementation.
             # For a UI, we should probably run this in a worker thread to avoid freezing.
             # But for now, we follow the pattern requested (using runner).
-            result = runner.execute_flow(pid=pid, image=img, context=context)
+            try:
+                guide_info = self._get_step_guide_info(idx)
+                result = runner.execute_flow(
+                    pid=pid,
+                    step_index=step_number,
+                    step_desc=step_desc,
+                    cur_image=img,
+                    guide_image=guide_img,
+                    guide_info=guide_info,
+                    context=context,
+                )
+            except Exception as call_err:
+                try:
+                    from src.runner.exceptions import InvalidPidError
+                    if isinstance(call_err, InvalidPidError):
+                        self.show_toast("算法未部署或PID未匹配，已切换为模拟检测", True)
+                        self.detection_timer = QTimer()
+                        self.detection_timer.setSingleShot(True)
+                        self.detection_timer.timeout.connect(self.on_detection_complete)
+                        self.detection_timer.start(1500)
+                        return
+                except Exception:
+                    pass
+                raise call_err
             
             end_time = datetime.now()
             duration_ms = (end_time - start_time).total_seconds() * 1000
@@ -1778,6 +2166,17 @@ class ProcessExecutionWindow(QWidget):
                     self.detection_status = 'pass'
                     self.update_overlay_visibility()
                     self.rebuild_status_section()
+                    try:
+                        from src.services.result_report_service import ResultReportService
+                        ResultReportService().enqueue_step_result(
+                            task_no=str(self.process_data.get("task_no") or ""),
+                            step_code=str(step_code),
+                            step_status=2,
+                            qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                            algo_result={"status": "OK", "data": data},
+                        )
+                    except Exception:
+                        pass
 
                     self.advance_timer = QTimer()
                     self.advance_timer.setSingleShot(True)
@@ -1810,6 +2209,17 @@ class ProcessExecutionWindow(QWidget):
                     self.update_overlay_visibility()
                     self.rebuild_status_section()
                     try:
+                        from src.services.result_report_service import ResultReportService
+                        ResultReportService().enqueue_step_result(
+                            task_no=str(self.process_data.get("task_no") or ""),
+                            step_code=str(step_code),
+                            step_status=2,
+                            qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                            algo_result={"status": "OK", "data": data},
+                        )
+                    except Exception:
+                        pass
+                    try:
                         from src.runner.engine import RunnerEngine
                         RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
                     except Exception:
@@ -1824,6 +2234,17 @@ class ProcessExecutionWindow(QWidget):
                 self.rebuild_status_section()
                 self.show_toast(f"执行出错: {result.get('message')}", False)
                 try:
+                    from src.services.result_report_service import ResultReportService
+                    ResultReportService().enqueue_step_result(
+                        task_no=str(self.process_data.get("task_no") or ""),
+                        step_code=str(step_code),
+                        step_status=2,
+                        qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                        algo_result={"status": status or "ERROR", "message": result.get("message")},
+                    )
+                except Exception:
+                    pass
+                try:
                     from src.runner.engine import RunnerEngine
                     RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
                 except Exception:
@@ -1835,6 +2256,19 @@ class ProcessExecutionWindow(QWidget):
             self.detection_boxes = []
             self.update_overlay_visibility()
             self.rebuild_status_section()
+            try:
+                from src.services.result_report_service import ResultReportService
+                step_payload = self._get_step_payload(self.current_step_index)
+                step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or (self.current_step_index + 1)).strip()
+                ResultReportService().enqueue_step_result(
+                    task_no=str(self.process_data.get("task_no") or ""),
+                    step_code=str(step_code),
+                    step_status=2,
+                    qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                    algo_result={"status": "ERROR", "message": str(e)},
+                )
+            except Exception:
+                pass
             try:
                 from src.runner.engine import RunnerEngine
                 RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
@@ -1853,6 +2287,19 @@ class ProcessExecutionWindow(QWidget):
             self.detection_status = 'pass'
             self.update_overlay_visibility()
             self.rebuild_status_section()
+            try:
+                from src.services.result_report_service import ResultReportService
+                step_payload = self._get_step_payload(self.current_step_index)
+                step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or (self.current_step_index + 1)).strip()
+                ResultReportService().enqueue_step_result(
+                    task_no=str(self.process_data.get("task_no") or ""),
+                    step_code=str(step_code),
+                    step_status=2,
+                    qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                    algo_result={"status": "OK", "simulated": True},
+                )
+            except Exception:
+                pass
 
             # Auto-advance after 2 seconds
             self.advance_timer = QTimer()
@@ -1864,12 +2311,33 @@ class ProcessExecutionWindow(QWidget):
             self.detection_status = 'fail'
             self.update_overlay_visibility()
             self.rebuild_status_section()
+            try:
+                from src.services.result_report_service import ResultReportService
+                step_payload = self._get_step_payload(self.current_step_index)
+                step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or (self.current_step_index + 1)).strip()
+                ResultReportService().enqueue_step_result(
+                    task_no=str(self.process_data.get("task_no") or ""),
+                    step_code=str(step_code),
+                    step_status=2,
+                    qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                    algo_result={"status": "OK", "simulated": True},
+                )
+            except Exception:
+                pass
 
     def advance_to_next_step(self):
         """Advance to the next process step."""
         if self.current_step_index >= len(self.steps) - 1:
             logger.info("All steps completed")
             self.set_step_status(self.current_step_index, 'completed')
+            try:
+                from src.services.result_report_service import ResultReportService
+                ResultReportService().enqueue_task_status_update(
+                    task_no=str(self.process_data.get("task_no") or ""),
+                    status=3,
+                )
+            except Exception:
+                pass
             if getattr(self, 'auto_start_next', False):
                 self.reset_for_next_product()
                 try:
@@ -1902,6 +2370,10 @@ class ProcessExecutionWindow(QWidget):
         # Update overlays
         self.update_overlay_visibility()
         self.rebuild_status_section()
+        try:
+            self._ensure_guide_for_step(self.current_step_index, preload_next=True)
+        except Exception:
+            pass
 
         logger.info(f"Advanced to step {self.current_step_index + 1}")
 
@@ -2097,6 +2569,12 @@ class ProcessExecutionWindow(QWidget):
         self.rebuild_step_cards()
         self.update_overlay_visibility()
         self.rebuild_status_section()
+        try:
+            self._guide_qimages = {}
+            self._guide_errors = {}
+            self._ensure_guide_for_step(self.current_step_index, preload_next=True)
+        except Exception:
+            pass
 
         logger.info("Reset for next product")
         try:
@@ -2109,11 +2587,39 @@ class ProcessExecutionWindow(QWidget):
 
     def closeEvent(self, event):
         """Handle window close event."""
+        self._closing = True
         # Stop preview worker only, keep camera connection alive
         if self.preview_worker:
             self.preview_worker.stop()
             self.preview_worker.wait(1000)
             self.preview_worker = None
+
+        try:
+            workers = list(getattr(self, "_guide_workers", {}).values())
+            for w in workers:
+                try:
+                    w.requestInterruption()
+                except Exception:
+                    pass
+            for w in workers:
+                try:
+                    if w.isRunning():
+                        w.wait(1000)
+                except Exception:
+                    pass
+            for w in workers:
+                try:
+                    if w.isRunning():
+                        w.terminate()
+                        w.wait(200)
+                except Exception:
+                    pass
+            try:
+                self._guide_workers = {}
+            except Exception:
+                pass
+        except Exception:
+            pass
         
         # Note: We do NOT call self.stop_camera_preview() here anymore.
         # This allows the camera connection and stream to persist across window sessions,

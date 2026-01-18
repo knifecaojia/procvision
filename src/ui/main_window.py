@@ -44,7 +44,7 @@ try:
     from .pages.camera_page import CameraPage
     from .pages.system_page import SystemPage
     from .pages.model_page import ModelPage
-    from .pages.process_page import ProcessPage
+    from .pages.assembly_tasks_page import AssemblyTasksPage
     from .pages.records_page import RecordsPage
 except ImportError:
     # Handle when running as script
@@ -57,7 +57,7 @@ except ImportError:
     from src.ui.pages.camera_page import CameraPage
     from src.ui.pages.system_page import SystemPage
     from src.ui.pages.model_page import ModelPage
-    from src.ui.pages.process_page import ProcessPage
+    from src.ui.pages.assembly_tasks_page import AssemblyTasksPage
     from src.ui.pages.records_page import RecordsPage
 
 logger = logging.getLogger(__name__)
@@ -190,6 +190,10 @@ class MainWindow(QMainWindow):
             self.records_page.apply_theme(theme)
         except Exception:
             logger.exception("Failed to apply theme on records page")
+        try:
+            self.process_page.apply_theme(theme)
+        except Exception:
+            logger.exception("Failed to apply theme on process page")
 
     def init_ui(self):
         """Initialize the UI components."""
@@ -330,7 +334,7 @@ class MainWindow(QMainWindow):
         self.camera_page = CameraPage(camera_service=self.camera_service, initial_theme=self.current_theme)
         self.system_page = SystemPage(initial_theme=self.current_theme)
         self.model_page = ModelPage()
-        self.process_page = ProcessPage(camera_service=self.camera_service)
+        self.process_page = AssemblyTasksPage(camera_service=self.camera_service, initial_theme=self.current_theme)
         self.records_page = RecordsPage(initial_theme=self.current_theme)
         try:
             self.system_page.themeChanged.connect(self.on_theme_changed)

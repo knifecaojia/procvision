@@ -87,12 +87,14 @@ class RunnerEngine:
         Calls the 'info' phase of the algorithm to get process details (steps, etc.).
         """
         # 1. Resolve Package (Reuse logic or refactor)
+        pid = str(pid).strip()
         pkg_entry = self.package_manager.get_active_package(pid)
         if not pkg_entry:
             # Fallback
             candidates = []
             for key, entry in self.package_manager.registry.items():
-                if pid in entry.get("supported_pids", []):
+                spids = entry.get("supported_pids", []) or []
+                if pid in [str(x).strip() for x in spids if str(x).strip()]:
                     candidates.append(entry)
             if len(candidates) >= 1:
                  pkg_entry = candidates[0]
@@ -132,13 +134,15 @@ class RunnerEngine:
         Executes the detection flow (Single Execute Phase).
         """
         # 1. Resolve Package
+        pid = str(pid).strip()
         pkg_entry = self.package_manager.get_active_package(pid)
         if not pkg_entry:
             # Fallback: Try to find a package that supports this PID from registry
             logger.info(f"PID {pid} not mapped to active package. Searching registry for fallback...")
             candidates = []
             for key, entry in self.package_manager.registry.items():
-                if pid in entry.get("supported_pids", []):
+                spids = entry.get("supported_pids", []) or []
+                if pid in [str(x).strip() for x in spids if str(x).strip()]:
                     candidates.append(entry)
             
             if len(candidates) == 1:
@@ -148,7 +152,13 @@ class RunnerEngine:
                 pkg_entry = candidates[0]
                 logger.warning(f"Multiple packages support PID {pid}. Using first found: {pkg_entry['name']}:{pkg_entry['version']}")
             else:
-                raise InvalidPidError(f"PID {pid} not mapped to any active package and no installed package supports it")
+                algo_name = str(context.get("algorithm_name") or context.get("algo_name") or "").strip()
+                algo_ver = str(context.get("algorithm_version") or context.get("algo_version") or "").strip()
+                if algo_name and algo_ver:
+                    key = f"{algo_name}:{algo_ver}"
+                    pkg_entry = self.package_manager.registry.get(key)
+                if not pkg_entry:
+                    raise InvalidPidError(f"PID {pid} not mapped to any active package and no installed package supports it")
 
         # 2. Prepare Resources
         req_id = str(uuid.uuid4())

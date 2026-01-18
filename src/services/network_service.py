@@ -112,51 +112,45 @@ class NetworkService:
 
     def get_work_orders(self, page_num: int = 1, page_size: int = 10, status: Optional[int] = None) -> Dict[str, Any]:
         """
-        Fetch work orders from the server.
+        Fetch assembly tasks from the server.
         
         Args:
             page_num: Page number
             page_size: Page size
-            status: Optional status filter (1: Pending, 2: In Progress, 3: Completed, 4: Blocked)
+            status: Optional status filter (-1/-2/1/2/3/4)
             
         Returns:
-            Work order list data
+            Task list data
         """
         self._require_token()
-        url = f"{self.base_url}/client/workorder/list"
+        url = f"{self.base_url}/client/task/list"
         params = {"pageNum": page_num, "pageSize": page_size}
         if status is not None:
             params["status"] = status
             
-        logger.debug(f"Fetching work orders: {params}")
+        logger.debug(f"Fetching tasks: {params}")
             
         try:
             response = self.session.get(url, params=params, timeout=self.timeout)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
-            logger.error(f"Get work orders error: {e}")
+            logger.error(f"Get tasks error: {e}")
             raise
 
-    def get_algorithms(self, page_num: int = 1, page_size: int = 10) -> Dict[str, Any]:
+    def get_algorithms(self) -> Dict[str, Any]:
         """
         Fetch algorithms from the server.
         
-        Args:
-            page_num: Page number
-            page_size: Page size
-            
         Returns:
             Algorithm list data
         """
         self._require_token()
         url = f"{self.base_url}/client/algorithm/list"
-        params = {"pageNum": page_num, "pageSize": page_size}
-        
-        logger.debug(f"Fetching algorithms: {params}")
+        logger.debug("Fetching algorithms")
         
         try:
-            response = self.session.get(url, params=params, timeout=self.timeout)
+            response = self.session.get(url, timeout=self.timeout)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:

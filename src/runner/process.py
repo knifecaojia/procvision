@@ -45,7 +45,10 @@ class AlgorithmProcess:
             # Resolve python executable
             # Prefer python_rel_path from registry if available (supports conda structure)
             if hasattr(self, 'python_rel_path') and self.python_rel_path:
-                python_exe = os.path.join(self.install_path, self.python_rel_path)
+                if os.path.isabs(self.python_rel_path):
+                    python_exe = self.python_rel_path
+                else:
+                    python_exe = os.path.join(self.install_path, self.python_rel_path)
             else:
                 # Fallback to standard venv structure
                 if os.name == 'nt':

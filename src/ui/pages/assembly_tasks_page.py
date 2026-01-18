@@ -190,6 +190,13 @@ class AssemblyTasksPage(QFrame):
         self.pagination.set_current_page(self.current_page)
         self.html_viewer.setHtml(self._render_work_orders_table_html(items, error_msg))
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        try:
+            QTimer.singleShot(0, self.load_data)
+        except Exception:
+            pass
+
     def _build_algorithm_lookup(self) -> Dict[str, Dict[str, str]]:
         lookup: Dict[str, Dict[str, str]] = {}
         try:

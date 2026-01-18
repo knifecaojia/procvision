@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
 )
-from PySide6.QtCore import Qt, QUrl, QUrlQuery, QObject, Signal, QRunnable, QThreadPool, QByteArray, QBuffer, QIODevice
+from PySide6.QtCore import Qt, QUrl, QUrlQuery, QObject, Signal, QRunnable, QThreadPool, QByteArray, QBuffer, QIODevice, QTimer
 from PySide6.QtGui import QPixmap, QImage, QGuiApplication
 
 from src.services.data_service import DataService
@@ -261,6 +261,13 @@ class RecordsPage(QFrame):
             self.pagination.set_current_page(self.current_page)
         self._refresh_table_view(error_msg=error)
         self.update_record_summary(self.total_records)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        try:
+            QTimer.singleShot(0, self.load_data)
+        except Exception:
+            pass
 
     # -------------------------------------------------------- Interaction ----
     def on_page_size_changed(self, _index=None):
@@ -655,8 +662,8 @@ class RecordsPage(QFrame):
             f"body{{margin:0;padding:0;width:100%;background:{steel_grey};color:{text_primary};font-family:'Source Han Sans SC','Microsoft YaHei',sans-serif;}}"
             ".table-wrap{width:100%;}"
             ".records-table{width:100%;border-collapse:collapse;background:transparent;}"
-            f"th{{text-align:left;font-size:14px;color:{text_muted};font-weight:800;padding:12px 14px;border-bottom:1px solid {border};}}"
-            f"td{{font-size:14px;color:{text_primary};padding:14px;border-bottom:1px solid {border};vertical-align:top;}}"
+            f".records-table th{{text-align:left;font-size:21px;color:{text_muted};font-weight:800;padding:12px 14px;border-bottom:1px solid {border};}}"
+            f".records-table td{{font-size:21px;color:{text_primary};padding:14px;border-bottom:1px solid {border};vertical-align:top;}}"
             f"code{{font-family:Consolas,'Courier New',monospace;color:{text_primary};background:{deep_graphite};padding:2px 8px;border:1px solid {border};border-radius:8px;}}"
             ".badge{display:inline-block;font-size:13px;font-weight:800;border-radius:999px;padding:4px 10px;}"
             f".badge-warn{{border:1px solid {warning_yellow};background:rgba(255,179,71,0.16);color:{warning_yellow};}}"

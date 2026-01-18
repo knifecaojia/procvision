@@ -5,6 +5,7 @@ import logging
 import os
 from typing import Dict, Any, Optional, Union
 import numpy as np
+import json
 
 from .config import RunnerConfig, default_config
 from .manager import PackageManager
@@ -60,18 +61,40 @@ class RunnerEngine:
             working_dir = entry.get('working_dir', entry['install_path'])
             manifest_path = os.path.join(working_dir, "manifest.json")
             
-            import json
-            try:
-                with open(manifest_path) as f:
-                    manifest = json.load(f)
-                    entry_point = manifest["entry_point"]
-            except Exception as e:
-                # Fallback to install_path
+            def _read_manifest(p: str) -> Dict[str, Any]:
                 try:
-                    with open(os.path.join(entry['install_path'], "manifest.json")) as f:
-                        manifest = json.load(f)
-                        entry_point = manifest["entry_point"]
-                except:
+                    with open(p, "r", encoding="utf-8") as f:
+                        return json.load(f) or {}
+                except UnicodeDecodeError:
+                    pass
+                try:
+                    with open(p, "r", encoding="utf-8-sig") as f:
+                        return json.load(f) or {}
+                except Exception:
+                    pass
+                try:
+                    with open(p, "r", encoding="gbk") as f:
+                        return json.load(f) or {}
+                except Exception:
+                    pass
+                with open(p, "rb") as f:
+                    raw = f.read()
+                try:
+                    return json.loads(raw.decode("utf-8", errors="ignore")) or {}
+                except Exception:
+                    return json.loads(raw.decode("latin-1")) or {}
+            try:
+                manifest = _read_manifest(manifest_path)
+                entry_point = str(manifest.get("entry_point") or "").strip()
+                if not entry_point:
+                    raise RunnerError("entry_point missing", "2002")
+            except Exception as e:
+                try:
+                    manifest = _read_manifest(os.path.join(entry['install_path'], "manifest.json"))
+                    entry_point = str(manifest.get("entry_point") or "").strip()
+                    if not entry_point:
+                        raise RunnerError("entry_point missing", "2002")
+                except Exception:
                     raise RunnerError(f"Failed to read manifest for {key}: {e}", "2002")
 
             python_rel_path = entry.get("python_rel_path", "")

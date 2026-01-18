@@ -399,7 +399,7 @@ class PackageManager:
                      logger.warning(f"Bundled python executable not found at expected path. Fallback.")
                      internal_python_path = None
 
-            # Fallback Logic (Conda / System)
+            # Fallback Logic (Conda / System or App-bundled runtime)
             if not internal_python_path:
                 logger.info("Internal python interpreter NOT found. Falling back to environment detection.")
                 
@@ -434,28 +434,81 @@ class PackageManager:
 
                 # Check if we need Conda
                 use_conda = False
+                conda_cmd = "conda"
                 current_py = f"{sys.version_info.major}.{sys.version_info.minor}"
                 
                 logger.info(f"Environment Check: Target={target_py_version}, Current={current_py}")
                 
                 if target_py_version and target_py_version != current_py:
-                    # Try to use Conda
-                    try:
-                        subprocess.check_call(["conda", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        use_conda = True
-                        logger.info(f"Target Python {target_py_version} != Current {current_py}. Using Conda.")
-                    except (subprocess.CalledProcessError, FileNotFoundError):
-                        logger.warning(f"Target Python {target_py_version} requested but Conda not found. Trying venv (might fail).")
+                    if os.name == "nt":
+                        try:
+                            subprocess.check_call("conda --version", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
+                            use_conda = True
+                            logger.info(f"Target Python {target_py_version} != Current {current_py}. Using Conda.")
+                        except Exception:
+                            candidates = [
+                                os.environ.get("CONDA_EXE"),
+                                os.path.join(os.environ.get("USERPROFILE", ""), "miniconda3", "condabin", "conda.bat"),
+                                os.path.join(os.environ.get("USERPROFILE", ""), "miniconda3", "Scripts", "conda.exe"),
+                                os.path.join("C:\\ProgramData\\miniconda3", "condabin", "conda.bat"),
+                                os.path.join("C:\\ProgramData\\miniconda3", "Scripts", "conda.exe"),
+                            ]
+                            for c in candidates:
+                                if c and os.path.exists(c):
+                                    conda_cmd = c
+                                    use_conda = True
+                                    logger.info(f"Detected Conda at {conda_cmd}")
+                                    break
+                            if not use_conda:
+                                logger.warning(f"Target Python {target_py_version} requested but Conda not found. Trying venv (might fail).")
+                    else:
+                        try:
+                            subprocess.check_call(["conda", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            use_conda = True
+                            logger.info(f"Target Python {target_py_version} != Current {current_py}. Using Conda.")
+                        except Exception:
+                            c = os.environ.get("CONDA_EXE")
+                            if c and os.path.exists(c):
+                                conda_cmd = c
+                                use_conda = True
+                                logger.info(f"Detected Conda at {conda_cmd}")
+                            else:
+                                logger.warning(f"Target Python {target_py_version} requested but Conda not found. Trying venv (might fail).")
 
-                if use_conda:
+                # Priority: Use app-bundled runtime if present (PyInstaller one-dir)
+                packaged_python_exe = None
+                try:
+                    if getattr(sys, "frozen", False):
+                        app_root = os.path.dirname(sys.executable)
+                        candidates = [
+                            os.path.join(app_root, "_internal", "runtime", "python", "python.exe"),
+                            os.path.join(app_root, "runtime", "python", "python.exe"),
+                            os.path.join(app_root, "_internal", "runtime", "venv", "Scripts", "python.exe"),
+                            os.path.join(app_root, "runtime", "venv", "Scripts", "python.exe"),
+                        ]
+                        for p in candidates:
+                            if os.path.exists(p):
+                                packaged_python_exe = p
+                                break
+                        if packaged_python_exe:
+                            logger.info(f"Using app-bundled python runtime: {packaged_python_exe}")
+                            python_cmd = packaged_python_exe
+                            # Store absolute path so process can use it
+                            python_rel_path = os.path.abspath(packaged_python_exe).replace("\\", "/")
+                except Exception:
+                    packaged_python_exe = None
+                
+                if packaged_python_exe:
+                    pass
+                elif use_conda:
                     logger.info(f"Creating Conda env at {venv_dir} with python={target_py_version}...")
-                    # Create conda env in prefix mode
-                    cmd = ["conda", "create", "-p", venv_dir, f"python={target_py_version}", "-y"]
-                    # We might need to handle offline mode for conda too if no internet?
-                    # Assuming conda can fetch python or has it cached. 
-                    # If offline, this will fail unless user has local channel.
                     try:
-                        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                        if os.name == "nt":
+                            cmd = f'\"{conda_cmd}\" create -p \"{venv_dir}\" python={target_py_version} -y'
+                            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, shell=True)
+                        else:
+                            cmd = [conda_cmd, "create", "-p", venv_dir, f"python={target_py_version}", "-y"]
+                            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                     except subprocess.CalledProcessError as e:
                         logger.error("Conda create failed. Check internet connection or conda config.")
                         raise InstallFailedError(f"Conda create failed: {e}")
@@ -464,24 +517,41 @@ class PackageManager:
                     # In prefix env: python.exe is at root, pip is in Scripts
                     if os.name == 'nt':
                         python_cmd = os.path.join(venv_dir, "python.exe")
-                        pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
                         python_rel_path = "venv/python.exe"
                     else:
                         python_cmd = os.path.join(venv_dir, "bin", "python")
-                        pip_cmd = os.path.join(venv_dir, "bin", "pip")
                         python_rel_path = "venv/bin/python"
 
                 else:
                     logger.info(f"Creating venv at {venv_dir}...")
-                    subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
+                    if getattr(sys, "frozen", False):
+                        try:
+                            python_which = shutil.which("python")
+                            if python_which:
+                                subprocess.check_call([python_which, "-m", "venv", venv_dir])
+                            else:
+                                raise FileNotFoundError("python command not found in PATH")
+                        except Exception as e:
+                            if use_conda and conda_cmd:
+                                try:
+                                    if os.name == "nt":
+                                        cmd = f'\"{conda_cmd}\" create -p \"{venv_dir}\" python={target_py_version or current_py} -y'
+                                        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, shell=True)
+                                    else:
+                                        cmd = [conda_cmd, "create", "-p", venv_dir, f"python={target_py_version or current_py}", "-y"]
+                                        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                                except subprocess.CalledProcessError as e2:
+                                    raise InstallFailedError(f"Conda create failed: {e2}")
+                            else:
+                                raise InstallFailedError(f"Python runtime not found. Include python_runtime in package or install Python: {e}")
+                    else:
+                        subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
                     
                     if os.name == 'nt':
                         python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
-                        pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
                         python_rel_path = "venv/Scripts/python.exe"
                     else:
                         python_cmd = os.path.join(venv_dir, "bin", "python")
-                        pip_cmd = os.path.join(venv_dir, "bin", "pip")
                         python_rel_path = "venv/bin/python"
 
             # 3. Install dependencies
@@ -495,8 +565,21 @@ class PackageManager:
             logger.info(f"Wheels dir: {wheels_dir}")
             logger.info(f"Requirements: {requirements_path}")
             
+            if python_cmd:
+                try:
+                    subprocess.run(
+                        [python_cmd, "-m", "ensurepip", "--upgrade"],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                except Exception:
+                    pass
             cmd = [
-                pip_cmd, "install",
+                python_cmd, "-m", "pip", "install",
                 "--no-index",
                 "--find-links", wheels_dir,
                 "-r", requirements_path
@@ -515,7 +598,34 @@ class PackageManager:
             except subprocess.CalledProcessError as e:
                 logger.error(f"Pip install stdout: {e.stdout}")
                 logger.error(f"Pip install stderr: {e.stderr}")
-                raise InstallFailedError(f"Pip install failed: {e.stderr}")
+                # If pip is missing in conda-created env, install pip via conda then retry
+                try:
+                    if 'not found' in (e.stderr or '').lower() or 'no module named pip' in (e.stderr or '').lower():
+                        if 'use_conda' in locals() and use_conda:
+                            logger.info("Installing pip into conda prefix environment...")
+                            if os.name == "nt":
+                                ccmd = f'\"{conda_cmd}\" install -p \"{venv_dir}\" pip -y'
+                                subprocess.check_call(ccmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, shell=True)
+                            else:
+                                ccmd = [conda_cmd, "install", "-p", venv_dir, "pip", "-y"]
+                                subprocess.check_call(ccmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                            subprocess.run(
+                                cmd, 
+                                check=True, 
+                                stdout=subprocess.PIPE, 
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                encoding='utf-8',
+                                errors='replace'
+                            )
+                            logger.info("Pip install succeeded after installing pip via conda.")
+                        else:
+                            raise InstallFailedError(f"Pip install failed and conda not available: {e.stderr}")
+                    else:
+                        raise InstallFailedError(f"Pip install failed: {e.stderr}")
+                except subprocess.CalledProcessError as e2:
+                    logger.error("Conda pip install failed.")
+                    raise InstallFailedError(f"Conda pip install failed: {e2}")
 
             # 4. Register
             entry: RegistryEntry = {

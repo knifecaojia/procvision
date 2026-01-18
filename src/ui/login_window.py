@@ -15,7 +15,6 @@ from typing import Optional, Any
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -41,6 +40,13 @@ except ImportError:
     from src.auth.services import AuthService, SessionManager  # type: ignore
     from src.core.config import get_config  # type: ignore
 
+from .styles import (
+    ThemeLoader,
+    build_theme_variables,
+    refresh_widget_styles,
+    load_user_theme_preference,
+    resolve_theme_colors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +71,8 @@ class LoginWindow(QMainWindow):
 
         self.config = get_config()
         self.colors = self.config.ui.colors
+        self.current_theme = load_user_theme_preference()
+        self.theme_loader = ThemeLoader(theme_name=self.current_theme)
 
         self.is_loading = False
         self.login_attempts = 0
@@ -175,6 +183,7 @@ class LoginWindow(QMainWindow):
         self.hero_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hero_label.setScaledContents(True)
         self.hero_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.hero_label.setProperty("contentState", "placeholder")
 
         left_layout.addWidget(self.hero_label)
         parent.addWidget(left_frame)
@@ -210,6 +219,7 @@ class LoginWindow(QMainWindow):
         self.username_input.setObjectName("inputField")
         self.username_input.setClearButtonEnabled(True)
         self.username_input.setPlaceholderText("请输入用户名")
+        self.username_input.setText("admin")  # Default per spec
         self.username_input.setFixedHeight(48)
 
         password_label = QLabel("密码")
@@ -218,20 +228,9 @@ class LoginWindow(QMainWindow):
         self.password_input.setObjectName("inputField")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setPlaceholderText("请输入密码")
+        self.password_input.setText("admin123")  # Default per spec
         self.password_input.setFixedHeight(48)
-
-        workstation_label = QLabel("工位")
-        workstation_label.setObjectName("fieldLabel")
-        self.workstation_combo = QComboBox()
-        self.workstation_combo.setObjectName("comboBox")
-        self.workstation_combo.addItems([
-            "装配工位-01",
-            "装配工位-02",
-            "检测工位-01",
-            "测试工位-02",
-            "包装工位-01",
-        ])
-        self.workstation_combo.setFixedHeight(48)
+        self.password_input.setProperty("inputState", "default")
 
         self.remember_checkbox = QCheckBox("记住用户名")
         self.remember_checkbox.setObjectName("checkBox")
@@ -241,6 +240,7 @@ class LoginWindow(QMainWindow):
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setWordWrap(True)
         self.status_label.setMinimumHeight(26)
+        self.status_label.setProperty("statusState", "normal")
 
         self.login_button = QPushButton("登录")
         self.login_button.setObjectName("loginButton")
@@ -256,10 +256,6 @@ class LoginWindow(QMainWindow):
 
         right_layout.addWidget(password_label)
         right_layout.addWidget(self.password_input)
-        right_layout.addSpacing(16)
-
-        right_layout.addWidget(workstation_label)
-        right_layout.addWidget(self.workstation_combo)
         right_layout.addSpacing(20)
 
         right_layout.addWidget(self.remember_checkbox)
@@ -278,207 +274,12 @@ class LoginWindow(QMainWindow):
 
     # --- Styling ---------------------------------------------------------
     def setup_style(self) -> None:
-        font_family = getattr(self, "custom_font_family", "Arial")
-        self.setStyleSheet(
-            f"""
-            QMainWindow {{
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 10px;
-                font-family: '{font_family}';
-            }}
+        self.theme_loader.apply(self, "login_window", variables=self._build_theme_variables())
 
-            #centralWidget {{
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 10px;
-                font-family: '{font_family}';
-            }}
-
-            #mainSplitter {{
-                background-color: {self.colors['deep_graphite']};
-                font-family: '{font_family}';
-            }}
-
-            #mainSplitter::handle {{
-                background-color: transparent;
-            }}
-
-            #titleBar {{
-                background-color: {self.colors['title_bar_dark']};
-                border-bottom: 1px solid {self.colors['dark_border']};
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-            }}
-
-            #titleBarLabel {{
-                color: {self.colors['arctic_white']};
-                font-size: 16px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-                font-family: '{font_family}';
-            }}
-
-            #titleVersion {{
-                color: {self.colors['cool_grey']};
-                font-size: 12px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #windowButton {{
-                background-color: transparent;
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-weight: bold;
-                border-radius: 3px;
-                font-family: '{font_family}';
-            }}
-
-            #windowButton:hover {{
-                border: 1px solid {self.colors['hover_orange']};
-                color: {self.colors['hover_orange']};
-            }}
-
-            #closeButton {{
-                background-color: transparent;
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-weight: bold;
-                border-radius: 3px;
-                font-family: '{font_family}';
-            }}
-
-            #closeButton:hover {{
-                background-color: {self.colors['error_red']};
-                border: 1px solid {self.colors['error_red']};
-            }}
-
-            #leftFrame {{
-                border-top-left-radius: 10px;
-                border-bottom-left-radius: 10px;
-                border-right: none;
-            }}
-
-            #leftImage {{
-                border-radius: 10px 0 0 10px;
-            }}
-
-            #rightFrame {{
-                background-color: {self.colors['steel_grey']};
-                border-top-right-radius: 10px;
-                border-bottom-right-radius: 10px;
-                border-left: 1px solid {self.colors['dark_border']};
-            }}
-
-            #brandTitle {{
-                color: {self.colors['arctic_white']};
-                font-size: 30px;
-                font-weight: bold;
-                letter-spacing: 1px;
-                font-family: '{font_family}';
-            }}
-
-            #loginTitle {{
-                color: {self.colors['cool_grey']};
-                font-size: 16px;
-                letter-spacing: 2px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #fieldLabel {{
-                color: {self.colors['cool_grey']};
-                font-size: 14px;
-                font-weight: bold;
-                letter-spacing: 0.5px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #inputField {{
-                background-color: {self.colors['deep_graphite']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-size: 14px;
-                padding: 0 18px;
-                border-radius: 6px;
-                font-family: '{font_family}';
-            }}
-
-            #inputField:focus {{
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #comboBox {{
-                background-color: {self.colors['deep_graphite']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                font-size: 14px;
-                padding: 0 14px;
-                border-radius: 6px;
-                font-family: '{font_family}';
-            }}
-
-            #comboBox:focus {{
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #comboBox QAbstractItemView {{
-                background-color: {self.colors['steel_grey']};
-                border: 1px solid {self.colors['dark_border']};
-                color: {self.colors['arctic_white']};
-                selection-background-color: {self.colors['hover_orange']};
-                font-family: '{font_family}';
-            }}
-
-            #checkBox {{
-                color: {self.colors['arctic_white']};
-                font-size: 12px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #checkBox::indicator {{
-                width: 16px;
-                height: 16px;
-                border: 1px solid {self.colors['dark_border']};
-                background-color: {self.colors['deep_graphite']};
-                border-radius: 2px;
-            }}
-
-            #checkBox::indicator:checked {{
-                background-color: {self.colors['hover_orange']};
-                border: 1px solid {self.colors['hover_orange']};
-            }}
-
-            #loginButton {{
-                background-color: {self.colors['hover_orange']};
-                color: {self.colors['arctic_white']};
-                border: none;
-                font-size: 15px;
-                font-weight: bold;
-                letter-spacing: 1px;
-                border-radius: 6px;
-                text-transform: uppercase;
-                font-family: '{font_family}';
-            }}
-
-            #loginButton:hover {{
-                background-color: {self.colors['amber']};
-            }}
-
-            #loginButton:disabled {{
-                background-color: {self.colors['dark_border']};
-                color: {self.colors['cool_grey']};
-            }}
-
-            #statusLabel {{
-                color: {self.colors['cool_grey']};
-                font-size: 12px;
-                font-weight: bold;
-                font-family: '{font_family}';
-            }}
-            """
-        )
+    def _build_theme_variables(self) -> dict[str, str]:
+        font_family = getattr(self, "custom_font_family", "Arial") or "Arial"
+        theme_colors = resolve_theme_colors(getattr(self, "current_theme", "dark"), self.colors)
+        return build_theme_variables(theme_colors, font_family)
 
     # --- Connections -----------------------------------------------------
     def setup_connections(self) -> None:
@@ -505,27 +306,22 @@ class LoginWindow(QMainWindow):
                     Qt.TransformationMode.SmoothTransformation,
                 )
                 self.hero_label.setPixmap(scaled)
+                self._set_widget_state(self.hero_label, "contentState", "image")
                 return
         self.hero_label.setText("PROC VISION")
-        self.hero_label.setStyleSheet("color: rgba(255,255,255,0.4); font-size: 20px; letter-spacing: 4px;")
+        self._set_widget_state(self.hero_label, "contentState", "placeholder")
 
     # --- Preference handling --------------------------------------------
     def load_saved_preferences(self) -> None:
         if self.session_manager.is_authenticated():
             username = self.session_manager.get_username()
-            workstation = self.session_manager.get_language_preference()
             if username:
                 self.username_input.setText(username)
                 self.remember_checkbox.setChecked(True)
-            if workstation:
-                index = self.workstation_combo.findText(workstation)
-                if index >= 0:
-                    self.workstation_combo.setCurrentIndex(index)
 
-    def save_user_preferences(self, username: str, workstation: str) -> None:
+    def save_user_preferences(self, username: str) -> None:
         try:
             preferences = {
-                "language_preference": workstation,
                 "remember_username": self.remember_checkbox.isChecked(),
             }
             self.auth_service.update_user_preferences(username, preferences)
@@ -539,7 +335,6 @@ class LoginWindow(QMainWindow):
 
         username = self.username_input.text().strip()
         password = self.password_input.text()
-        workstation = self.workstation_combo.currentText()
         remember_me = self.remember_checkbox.isChecked()
 
         self.clear_status()
@@ -551,18 +346,14 @@ class LoginWindow(QMainWindow):
 
         self.set_loading_state(True)
         try:
-            # 修改为允许任意用户登录，无需数据库验证
-            # success, error = self.session_manager.login(username=username, password=password, language=workstation)
-            # 模拟登录成功
-            success = True
-            error = None
+            success, error = self.session_manager.login(username=username, password=password)
             
             if success:
                 # 直接设置会话状态
-                self.session_manager.auth_service.auth_state.is_authenticated = True
+                # self.session_manager.auth_service.auth_state.is_authenticated = True (Done inside login)
                 # 保存用户偏好
                 if remember_me:
-                    self.save_user_preferences(username, workstation)
+                    self.save_user_preferences(username)
                 self.show_success("登录成功，正在跳转...")
                 QTimer.singleShot(800, self.navigate_to_main_window)
             else:
@@ -584,7 +375,6 @@ class LoginWindow(QMainWindow):
         self.is_loading = loading
         self.username_input.setEnabled(not loading)
         self.password_input.setEnabled(not loading)
-        self.workstation_combo.setEnabled(not loading)
         self.remember_checkbox.setEnabled(not loading)
         self.login_button.setEnabled(not loading)
         if loading:
@@ -594,19 +384,18 @@ class LoginWindow(QMainWindow):
 
     def show_error(self, message: str) -> None:
         self.status_label.setText(message)
-        self.status_label.setStyleSheet(f"color: {self.colors['error_red']}; font-size: 12px;")
-        self.password_input.setStyleSheet(
-            f"border: 1px solid {self.colors['error_red']}; background-color: {self.colors['deep_graphite']};"
-        )
+        self._set_widget_state(self.status_label, "statusState", "error")
+        self._set_widget_state(self.password_input, "inputState", "error")
 
     def show_success(self, message: str) -> None:
         self.status_label.setText(message)
-        self.status_label.setStyleSheet(f"color: {self.colors['success_green']}; font-size: 12px;")
+        self._set_widget_state(self.status_label, "statusState", "success")
+        self._set_widget_state(self.password_input, "inputState", "default")
 
     def clear_status(self) -> None:
         self.status_label.setText("")
-        self.status_label.setStyleSheet("")
-        self.password_input.setStyleSheet("")
+        self._set_widget_state(self.status_label, "statusState", "normal")
+        self._set_widget_state(self.password_input, "inputState", "default")
 
     def lock_login_form(self) -> None:
         self.show_error("Too many failed attempts. Please wait…")
@@ -621,6 +410,13 @@ class LoginWindow(QMainWindow):
         self.password_input.setEnabled(True)
         self.login_button.setEnabled(True)
         self.login_attempts = 0
+
+    @staticmethod
+    def _set_widget_state(widget: Optional[QWidget], prop: str, value: str) -> None:
+        if widget is None:
+            return
+        widget.setProperty(prop, value)
+        refresh_widget_styles(widget)
 
     def on_remember_toggled(self, checked: bool) -> None:  # pragma: no cover - logging only
         logger.info(f"Remember username toggled: {checked}")

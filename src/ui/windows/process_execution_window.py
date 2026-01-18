@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QProgressBar,
     QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy, QFileDialog
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent
+from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent, QThread
 from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtSvgWidgets import QSvgWidget
@@ -23,11 +23,186 @@ import importlib.util
 import sys
 import json
 
+try:
+    from ..core.config import get_config
+except Exception:  # pragma: no cover
+    from src.core.config import get_config  # type: ignore
+
+from ..styles import (
+    ThemeLoader,
+    refresh_widget_styles,
+    build_theme_variables,
+    load_user_theme_preference,
+    resolve_theme_colors,
+)
+
 logger = logging.getLogger(__name__)
 
 # Type definitions
 StepStatus = Literal['completed', 'current', 'pending']
 DetectionStatus = Literal['idle', 'detecting', 'pass', 'fail']
+
+
+class CameraConnectWorker(QThread):
+    """Background worker for connecting to camera to avoid UI freeze."""
+    finished = Signal(bool, str) # success, message/device_id
+
+    def __init__(self, service, camera_info):
+        super().__init__()
+        self.service = service
+        self.info = camera_info
+
+    def run(self):
+        try:
+            # 1. Connect
+            if not self.service.connect_camera(self.info):
+                self.finished.emit(False, "Failed to connect to camera")
+                return
+
+            # 2. Get Device
+            device = self.service.get_connected_camera()
+            if not device:
+                self.finished.emit(False, "No camera device retrieved after connection")
+                return
+
+            # 3. Start Stream
+            try:
+                device.start_stream()
+            except Exception as e:
+                # Rollback connection if stream fails
+                try:
+                    self.service.disconnect_camera()
+                except:
+                    pass
+                self.finished.emit(False, f"Failed to start stream: {e}")
+                return
+
+            self.finished.emit(True, "Connected")
+        except Exception as e:
+            self.finished.emit(False, f"Connection error: {e}")
+
+
+class GuideImageDownloadWorker(QThread):
+    result_ready = Signal(int, bool, object, str)  # step_index, ok, QImage|None, message
+
+    def __init__(self, step_index: int, url: str):
+        super().__init__()
+        self.step_index = int(step_index)
+        self.url = str(url or "").strip()
+
+    def _sanitize_url(self, url: str) -> str:
+        s = str(url or "").strip()
+        while True:
+            before = s
+            s = s.strip().strip("`").strip().strip("'").strip().strip('"').strip()
+            if s == before:
+                break
+        return s
+
+    def _redact_url_for_log(self, url: str) -> str:
+        s = str(url or "")
+        if "X-Amz-" in s or "X-Amz-Signature" in s:
+            return s.split("?", 1)[0] + "?<redacted>"
+        return s
+
+    def run(self):
+        raw_url = self._sanitize_url(self.url)
+        if not raw_url:
+            logger.info("Guide image skipped (empty url): step_index=%s", self.step_index)
+            self.result_ready.emit(self.step_index, False, None, "guide_url empty")
+            return
+        try:
+            from src.services.network_service import NetworkService
+            import requests
+            import os
+
+            ns = NetworkService()
+            url = raw_url
+            logger.info(
+                "Guide image downloading: step_index=%s url=%s",
+                self.step_index,
+                self._redact_url_for_log(url),
+            )
+            if url.startswith("file://"):
+                local_path = url[len("file://"):]
+                if os.path.exists(local_path):
+                    with open(local_path, "rb") as f:
+                        qi = QImage.fromData(f.read())
+                    if qi.isNull():
+                        logger.warning(
+                            "Guide image decode failed: step_index=%s url=%s",
+                            self.step_index,
+                            self._redact_url_for_log(url),
+                        )
+                        self.result_ready.emit(self.step_index, False, None, "guide image decode failed")
+                        return
+                    logger.info(
+                        "Guide image loaded: step_index=%s url=%s size=%sx%s",
+                        self.step_index,
+                        self._redact_url_for_log(url),
+                        qi.width(),
+                        qi.height(),
+                    )
+                    self.result_ready.emit(self.step_index, True, qi, "")
+                    return
+            if os.path.exists(url):
+                with open(url, "rb") as f:
+                    qi = QImage.fromData(f.read())
+                if qi.isNull():
+                    logger.warning(
+                        "Guide image decode failed: step_index=%s url=%s",
+                        self.step_index,
+                        self._redact_url_for_log(url),
+                    )
+                    self.result_ready.emit(self.step_index, False, None, "guide image decode failed")
+                    return
+                logger.info(
+                    "Guide image loaded: step_index=%s url=%s size=%sx%s",
+                    self.step_index,
+                    self._redact_url_for_log(url),
+                    qi.width(),
+                    qi.height(),
+                )
+                self.result_ready.emit(self.step_index, True, qi, "")
+                return
+
+            is_presigned = "X-Amz-" in url or "X-Amz-Signature" in url
+            if not (url.startswith("http://") or url.startswith("https://")):
+                base = str(getattr(ns, "base_url", "") or "").rstrip("/")
+                if url.startswith("/"):
+                    url = f"{base}{url}" if base else url
+                else:
+                    url = f"{base}/{url}" if base else url
+            if is_presigned:
+                resp = requests.get(url, timeout=getattr(ns, "timeout", 10))
+            else:
+                resp = ns.session.get(url, timeout=getattr(ns, "timeout", 10))
+            resp.raise_for_status()
+            qi = QImage.fromData(resp.content)
+            if qi.isNull():
+                logger.warning(
+                    "Guide image decode failed: step_index=%s url=%s",
+                    self.step_index,
+                    self._redact_url_for_log(url),
+                )
+                self.result_ready.emit(self.step_index, False, None, "guide image decode failed")
+                return
+            logger.info(
+                "Guide image loaded: step_index=%s url=%s size=%sx%s",
+                self.step_index,
+                self._redact_url_for_log(url),
+                qi.width(),
+                qi.height(),
+            )
+            self.result_ready.emit(self.step_index, True, qi, "")
+        except Exception as e:
+            logger.warning(
+                "Guide image download failed: step_index=%s url=%s error=%s",
+                self.step_index,
+                self._redact_url_for_log(raw_url),
+                e,
+            )
+            self.result_ready.emit(self.step_index, False, None, str(e))
 
 
 @dataclass
@@ -46,7 +221,7 @@ class OverlayWidget(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setStyleSheet("background-color: transparent;")
+        self.setObjectName("processOverlay")
         self._boxes: List[QRect] = []
         self._status: DetectionStatus = 'idle'
         self._draw_ok: bool = True
@@ -141,10 +316,15 @@ class ProcessExecutionWindow(QWidget):
         self.available_cameras = []
 
         # State management
-        self.product_sn = "SN-2025-VM-00123"
-        self.order_number = process_data.get('pid', process_data.get('name', 'ME-ASM-2024-001'))
-        self.operator_name = "张三"
-        self.operator_station = "A01"
+        self.product_sn = str(process_data.get("task_no") or process_data.get("name") or "")
+        self.order_number = str(process_data.get("display_pid") or process_data.get('pid', process_data.get('name', 'ME-ASM-2024-001')))
+        self.operator_name = str(
+            process_data.get("operator_name")
+            or process_data.get("username")
+            or process_data.get("worker_name")
+            or process_data.get("operator")
+            or ""
+        ).strip() or "—"
         self.network_status: Literal['online', 'offline'] = "online"
         self.total_steps = len(process_data.get('steps_detail', [])) or process_data.get('steps', 12)
         self.current_step_index = 0
@@ -164,11 +344,39 @@ class ProcessExecutionWindow(QWidget):
         self.custom_font_family = "Arial"
         self.custom_font = QFont(self.custom_font_family)
         self._load_custom_font()
-        # Initialize process steps
-        self.steps: List[ProcessStep] = self._initialize_steps()
+        self.config = get_config()
+        self.colors = getattr(self.config.ui, "colors", {})
+        self.current_theme = load_user_theme_preference()
+        self.theme_loader = ThemeLoader(theme_name=self.current_theme)
+        
+        self.steps: List[ProcessStep] = []
+        task_steps = process_data.get("steps_detail") or process_data.get("step_infos")
+        if isinstance(task_steps, list) and task_steps:
+            try:
+                self.steps = self._initialize_steps_from_task(task_steps)
+            except Exception as e:
+                logger.warning(f"Failed to load steps from task: {e}")
+                self.steps = []
+
+        if not self.steps:
+            try:
+                self.steps = self._initialize_steps_from_algorithm()
+            except Exception as e:
+                logger.warning(f"Failed to load steps from algorithm: {e}")
+                self.steps = self._initialize_steps()
+
+        if not self.steps:
+            self.steps = self._initialize_steps()
+             
+        self.total_steps = len(self.steps)
         self.current_instruction = self.steps[0].description if self.steps else "No steps available"
         self._debug_input_enabled = False
         self._debug_image_path: Optional[str] = None
+        self._guide_qimages: Dict[int, QImage] = {}
+        self._guide_workers: Dict[int, QThread] = {}
+        self._guide_errors: Dict[int, str] = {}
+        self._closing: bool = False
+        self._task_status_started: bool = False
 
         # Set window properties
         self.setWindowTitle(f"工艺执行 - {process_data.get('name', '')}")
@@ -191,6 +399,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Initialize UI
         self.init_ui()
+        self._apply_theme()
 
         # Connect signals
         self.setup_connections()
@@ -200,11 +409,19 @@ class ProcessExecutionWindow(QWidget):
 
         # Initialize with a neutral placeholder before any camera starts
         self.reset_camera_placeholder()
+        QTimer.singleShot(0, lambda: self._ensure_guide_for_step(self.current_step_index, preload_next=True))
 
         logger.info(f"ProcessExecutionWindow initialized for process: {process_data.get('name')}")
 
         # Align overlay geometry with base video label once widget tree is ready
         QTimer.singleShot(0, self._align_overlay_geometry)
+        try:
+            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+            if pid:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().setup_algorithm(str(pid))
+        except Exception:
+            pass
 
     def _load_custom_font(self) -> None:
         """Load custom font from assets and apply to this window (same as MainWindow)."""
@@ -229,6 +446,138 @@ class ProcessExecutionWindow(QWidget):
         self.custom_font_family = font_family
         self.setFont(self.custom_font)
         logger.info("Custom font applied to ProcessExecutionWindow: %s", font_family)
+
+    def _apply_theme(self) -> None:
+        """Apply the process execution window stylesheet."""
+        try:
+            variables = build_theme_variables(
+                resolve_theme_colors(getattr(self, "current_theme", "dark"), self.colors),
+                self.custom_font_family,
+            )
+            self.theme_loader.apply(self, "process_execution_window", variables=variables)
+        except FileNotFoundError:
+            logger.error("Process execution stylesheet missing")
+
+    def _initialize_steps_from_algorithm(self) -> List[ProcessStep]:
+        """Fetch process steps directly from the algorithm package."""
+        from src.runner.engine import RunnerEngine
+        
+        # Determine PID (prefer algorithm_code, not work order id)
+        runner = RunnerEngine()
+        pid = self._resolve_runner_pid(runner, self.process_data.get("algorithm_code", self.process_data.get("pid")))
+        if not pid:
+            return []
+             
+        # Use RunnerEngine to get info
+        # NOTE: This might block UI if algorithm process needs to start up.
+        # But since we optimized RunnerEngine to be singleton and process reusable, it should be fine.
+        # Ideally show a loading spinner.
+        start_time = datetime.now()
+        init_time = (datetime.now() - start_time).total_seconds() * 1000
+        logger.info(f"RunnerEngine init took {init_time:.2f}ms")
+        
+        info_start = datetime.now()
+        info = {}
+        try:
+            info = runner.get_algorithm_info(pid)
+        except Exception as e:
+            logger.warning(f"Primary info fetch failed for pid={pid}: {e}")
+        info_time = (datetime.now() - info_start).total_seconds() * 1000
+        logger.info(f"get_algorithm_info took {info_time:.2f}ms")
+        
+        # Some algorithms return a wrapper with "info" inside data
+        info_block = info.get("info", info)
+        # Persist algorithm name/version in process_data if provided
+        try:
+            if "algorithm_name" in info_block:
+                self.process_data["algorithm_name"] = info_block.get("algorithm_name")
+            if "algorithm_version" in info_block:
+                self.process_data["algorithm_version"] = info_block.get("algorithm_version")
+        except Exception:
+            pass
+        algo_steps = info_block.get("steps", [])
+        if not algo_steps:
+             return []
+             
+        steps: List[ProcessStep] = []
+        for i, item in enumerate(algo_steps):
+            step_number = item.get('step_number', i + 1)
+            step_name = item.get('step_name', f"步骤 {step_number}")
+            operation_guide = item.get('operation_guide', step_name)
+            status: StepStatus = 'current' if i == 0 else 'pending'
+            steps.append(ProcessStep(
+                id=i,
+                name=(step_name if step_name else f"步骤 {step_number}"),
+                description=operation_guide,
+                status=status
+            ))
+        
+        # Update process_data with steps_detail so execute logic works too
+        self.process_data['steps_detail'] = algo_steps
+        
+        return steps
+
+    def _resolve_runner_pid(self, runner, preferred_pid) -> Optional[str]:
+        pid = str(preferred_pid).strip() if preferred_pid is not None else ""
+        if pid:
+            try:
+                if runner.package_manager.get_active_package(pid):
+                    return pid
+            except Exception:
+                pass
+            try:
+                for entry in (runner.package_manager.registry or {}).values():
+                    if pid in (entry.get("supported_pids") or []):
+                        return pid
+            except Exception:
+                pass
+
+        algo_name = str(self.process_data.get("algorithm_name", "")).strip()
+        algo_ver = str(self.process_data.get("algorithm_version", "")).strip()
+        if algo_name and algo_ver:
+            try:
+                for entry in (runner.package_manager.registry or {}).values():
+                    if entry.get("name") == algo_name and entry.get("version") == algo_ver:
+                        spids = entry.get("supported_pids") or []
+                        if spids:
+                            return str(spids[0])
+            except Exception:
+                pass
+        return None
+
+    def _initialize_steps_from_task(self, task_steps: List[Dict[str, Any]]) -> List[ProcessStep]:
+        steps: List[ProcessStep] = []
+        normalized_steps: List[Dict[str, Any]] = []
+        for i, item in enumerate(task_steps):
+            step_number_raw = item.get("step_number")
+            if step_number_raw is None:
+                step_number_raw = item.get("step_code")
+            try:
+                step_number = int(step_number_raw) if step_number_raw is not None and str(step_number_raw).strip() else (i + 1)
+            except Exception:
+                step_number = i + 1
+
+            step_name = item.get("step_name") or item.get("name") or f"步骤 {step_number}"
+            operation_guide = item.get("operation_guide") or item.get("step_content") or item.get("description") or step_name
+
+            normalized = dict(item) if isinstance(item, dict) else {}
+            normalized["step_number"] = step_number
+            normalized["step_name"] = str(step_name)
+            normalized["operation_guide"] = str(operation_guide)
+            normalized_steps.append(normalized)
+
+            status: StepStatus = "current" if i == 0 else "pending"
+            steps.append(
+                ProcessStep(
+                    id=i,
+                    name=str(step_name),
+                    description=str(operation_guide),
+                    status=status,
+                )
+            )
+
+        self.process_data["steps_detail"] = normalized_steps
+        return steps
 
     def _initialize_steps(self) -> List[ProcessStep]:
         """Initialize process steps from provided JSON (steps_detail) or fallback."""
@@ -305,25 +654,18 @@ class ProcessExecutionWindow(QWidget):
 
         # Set window background and unify font family (scoped to this window only)
         self.setObjectName("processExecutionWindow")
-        self.setStyleSheet(f"""
-            QWidget#processExecutionWindow {{
-                background-color: #1a1a1a;
-                color: #ffffff;
-                font-family: {self.custom_font_family};
-            }}
-        """)
 
         self.toast_container = QFrame(self)
         self.toast_container.setObjectName("toastOverlay")
         self.toast_container.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.toast_container.setStyleSheet("background-color: transparent;")
         self.toast_container.setFixedHeight(60)
         toast_layout = QHBoxLayout(self.toast_container)
         toast_layout.setContentsMargins(0, 0, 0, 0)
         toast_layout.addStretch()
         self.toast_label = QLabel()
         self.toast_label.setVisible(False)
-        self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#3CC37A; color:#FFFFFF;")
+        self.toast_label.setObjectName("toastLabel")
+        self.toast_label.setProperty("toastState", "success")
         toast_layout.addWidget(self.toast_label)
         toast_layout.addStretch()
         self.toast_container.setVisible(False)
@@ -332,16 +674,37 @@ class ProcessExecutionWindow(QWidget):
         except Exception:
             pass
 
+    def _set_toast_state(self, state: str) -> None:
+        if hasattr(self, "toast_label") and self.toast_label:
+            self.toast_label.setProperty("toastState", state)
+            refresh_widget_styles(self.toast_label)
+
+    def _set_video_state(self, state: str) -> None:
+        if hasattr(self, "base_image_label") and self.base_image_label:
+            self.base_image_label.setProperty("videoState", state)
+            refresh_widget_styles(self.base_image_label)
+
+    def _apply_step_card_state(
+        self,
+        card: Optional[QFrame],
+        status: StepStatus,
+        name_label: Optional[QLabel],
+        desc_label: Optional[QLabel],
+    ) -> None:
+        if card:
+            card.setProperty("stepStatus", status)
+            refresh_widget_styles(card)
+        if name_label:
+            name_label.setProperty("stepStatus", status)
+            refresh_widget_styles(name_label)
+        if desc_label:
+            desc_label.setProperty("stepStatus", status)
+            refresh_widget_styles(desc_label)
+
     def create_header_bar(self) -> QWidget:
         """Create the top header bar with product info, progress, and controls."""
         header_frame = QFrame()
         header_frame.setObjectName("headerBar")
-        header_frame.setStyleSheet("""
-            QFrame#headerBar {
-                background-color: #252525;
-                border-bottom: 1px solid #3a3a3a;
-            }
-        """)
         # 顶部整体高度适当增加
         header_frame.setMinimumHeight(56)
 
@@ -357,7 +720,7 @@ class ProcessExecutionWindow(QWidget):
         separator1 = QFrame()
         separator1.setFrameShape(QFrame.Shape.VLine)
         separator1.setFixedHeight(32)
-        separator1.setStyleSheet("background-color: #3a3a3a;")
+        separator1.setObjectName("headerSeparator")
         header_layout.addWidget(separator1)
 
         # Center section: Progress（自适应填充宽度）
@@ -368,7 +731,7 @@ class ProcessExecutionWindow(QWidget):
         separator2 = QFrame()
         separator2.setFrameShape(QFrame.Shape.VLine)
         separator2.setFixedHeight(32)
-        separator2.setStyleSheet("background-color: #3a3a3a;")
+        separator2.setObjectName("headerSeparator")
         header_layout.addWidget(separator2)
 
         # Right section: Controls 最右侧（包含相机/时钟/返回）
@@ -381,11 +744,6 @@ class ProcessExecutionWindow(QWidget):
         """Create the left section with product SN, PID, and algorithm info."""
         section = QWidget()
         section.setObjectName("productInfoSection")
-        section.setStyleSheet("""
-            QWidget#productInfoSection {
-                background-color: #252525;
-            }
-        """)
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(16)
@@ -394,16 +752,11 @@ class ProcessExecutionWindow(QWidget):
         username_widget = self.create_info_item("👤", "用户名", self.operator_name)
         layout.addWidget(username_widget)
 
-        # Workstation
-        station_widget = self.create_info_item("🛠", "工作站", self.operator_station)
-        layout.addWidget(station_widget)
-
-        # Product SN
-        sn_widget = self.create_info_item("📦", "产品 SN", self.product_sn)
+        sn_widget = self.create_info_item("📦", "任务编码", self.product_sn)
         layout.addWidget(sn_widget)
 
         # PID
-        pid_widget = self.create_info_item("🏷", "PID", self.order_number)
+        pid_widget = self.create_info_item("🏷", "工艺/工序ID", self.order_number)
         layout.addWidget(pid_widget)
 
         # Algorithm name
@@ -422,18 +775,13 @@ class ProcessExecutionWindow(QWidget):
         """Create an info item with icon, label, and value."""
         widget = QWidget()
         widget.setObjectName("infoItem")
-        widget.setStyleSheet("""
-            QWidget#infoItem {
-                background-color: #252525;
-            }
-        """)
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
         # Icon
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet("font-size: 19px; color: #f97316;")
+        icon_label.setObjectName("productInfoIcon")
         layout.addWidget(icon_label)
 
         # Label and value
@@ -441,10 +789,10 @@ class ProcessExecutionWindow(QWidget):
         text_layout.setSpacing(0)
 
         label_widget = QLabel(label)
-        label_widget.setStyleSheet("font-size: 14px; color: #9ca3af;")
+        label_widget.setObjectName("productInfoLabel")
 
         value_widget = QLabel(value)
-        value_widget.setStyleSheet("font-size: 17px; color: #ffffff;")
+        value_widget.setObjectName("productInfoValue")
 
         text_layout.addWidget(label_widget)
         text_layout.addWidget(value_widget)
@@ -457,18 +805,13 @@ class ProcessExecutionWindow(QWidget):
         """Create the center section with step progress."""
         section = QWidget()
         section.setObjectName("progressSection")
-        section.setStyleSheet("""
-            QWidget#progressSection {
-                background-color: #252525;
-            }
-        """)
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
         # Progress text
         self.progress_label = QLabel(f"步骤: {self.current_step_index + 1} / {self.total_steps}")
-        self.progress_label.setStyleSheet("font-size: 16px; color: #ffffff;")
+        self.progress_label.setObjectName("progressLabel")
         layout.addWidget(self.progress_label)
 
         # Progress bar row
@@ -477,22 +820,11 @@ class ProcessExecutionWindow(QWidget):
         row_layout.setSpacing(8)
 
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("progressBar")
         self.progress_bar.setFixedHeight(6)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setMaximum(self.total_steps)
         self.progress_bar.setValue(self.current_step_index + 1)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                background-color: #1e1e1e;
-                border: none;
-                border-radius: 3px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                          stop:0 #f97316, stop:1 #fb923c);
-                border-radius: 3px;
-            }
-        """)
         # 让进度条按可用空间自适应填充宽度
         self.progress_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         row_layout.addWidget(self.progress_bar, 1)
@@ -506,33 +838,9 @@ class ProcessExecutionWindow(QWidget):
         """Create the right section with buttons and status."""
         section = QWidget()
         section.setObjectName("headerControlsSection")
-        section.setStyleSheet("""
-            QWidget#headerControlsSection {
-                background-color: #252525;
-            }
-        """)
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
-        # Product image button（靠右组最前）
-        self.product_img_btn = QPushButton("🖼 产品实物图")
-        self.product_img_btn.setObjectName("productImageButton")
-        self.product_img_btn.setFixedHeight(36)
-        self.product_img_btn.setStyleSheet("""
-            QPushButton#productImageButton {
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                color: #ffffff;
-                border-radius: 4px;
-                padding: 0 14px;
-                font-size: 16px;
-            }
-            QPushButton#productImageButton:hover {
-                border: 1px solid #f97316;
-            }
-        """)
-        layout.addWidget(self.product_img_btn)
-
         # 相机控件内联：列表、刷新、启动
         camera_section = self.create_camera_controls_section()
         layout.addWidget(camera_section)
@@ -541,20 +849,6 @@ class ProcessExecutionWindow(QWidget):
         self.return_btn = QPushButton("← 返回任务列表")
         self.return_btn.setObjectName("returnButton")
         self.return_btn.setFixedHeight(36)
-        self.return_btn.setStyleSheet("""
-            QPushButton#returnButton {
-                background-color: #252525;
-                border: 1px solid #f97316;
-                color: #f97316;
-                border-radius: 4px;
-                padding: 0 14px;
-                font-size: 16px;
-            }
-            QPushButton#returnButton:hover {
-                background-color: #f97316;
-                color: #ffffff;
-            }
-        """)
         self.return_btn.clicked.connect(self.close)
         layout.addWidget(self.return_btn)
 
@@ -568,11 +862,9 @@ class ProcessExecutionWindow(QWidget):
 
         self.date_label = QLabel(datetime.now().strftime("%Y-%m-%d"))
         self.date_label.setObjectName("dateLabel")
-        self.date_label.setStyleSheet("font-size: 14px; color: #22c55e;")
 
         self.time_label = QLabel(datetime.now().strftime("%H:%M:%S"))
         self.time_label.setObjectName("timeLabel")
-        self.time_label.setStyleSheet("font-size: 18px; color: #22c55e;")
         try:
             f = self._make_time_debug_filter()
             self.time_label.installEventFilter(f)
@@ -605,14 +897,18 @@ class ProcessExecutionWindow(QWidget):
 
         if self.network_status == "online":
             icon = QLabel("📶")
-            icon.setStyleSheet("font-size: 16px; color: #22c55e;")
+            icon.setObjectName("networkStatusIcon")
+            icon.setProperty("networkState", "online")
             text = QLabel("在线")
-            text.setStyleSheet("font-size: 14px; color: #22c55e;")
+            text.setObjectName("networkStatusText")
+            text.setProperty("networkState", "online")
         else:
             icon = QLabel("📵")
-            icon.setStyleSheet("font-size: 16px; color: #ef4444;")
+            icon.setObjectName("networkStatusIcon")
+            icon.setProperty("networkState", "offline")
             text = QLabel("离线")
-            text.setStyleSheet("font-size: 14px; color: #ef4444;")
+            text.setObjectName("networkStatusText")
+            text.setProperty("networkState", "offline")
 
         layout.addWidget(icon)
         layout.addWidget(text)
@@ -623,11 +919,6 @@ class ProcessExecutionWindow(QWidget):
         """Create the camera controls section with selection and power toggle."""
         section = QWidget()
         section.setObjectName("cameraControlsSection")
-        section.setStyleSheet("""
-            QWidget#cameraControlsSection {
-                background-color: #252525;
-            }
-        """)
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
@@ -637,92 +928,27 @@ class ProcessExecutionWindow(QWidget):
         self.camera_combo.setObjectName("cameraCombo")
         self.camera_combo.setFixedHeight(36)
         self.camera_combo.setMinimumWidth(180)
-        self.camera_combo.setStyleSheet("""
-            QComboBox#cameraCombo {
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                border-radius: 4px;
-                padding: 4px 8px;
-                color: #ffffff;
-                font-size: 16px;
-            }
-            QComboBox#cameraCombo:hover {
-                border: 1px solid #f97316;
-            }
-            QComboBox#cameraCombo::drop-down {
-                border: none;
-            }
-            QComboBox#cameraCombo::down-arrow {
-                image: none;
-                border-left: 4px solid transparent;
-                border-right: 4px solid transparent;
-                border-top: 6px solid #9ca3af;
-                margin-right: 6px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                selection-background-color: #f97316;
-                color: #ffffff;
-            }
-        """)
-
-        # Populate camera list
-        self.refresh_camera_list()
-
-        layout.addWidget(self.camera_combo)
 
         # Refresh button（与父容器同色背景）
-        refresh_btn = QPushButton("🔄")
-        refresh_btn.setObjectName("cameraRefreshButton")
-        refresh_btn.setFixedSize(36, 36)
-        refresh_btn.setToolTip("刷新相机列表")
-        refresh_btn.setStyleSheet("""
-            QPushButton#cameraRefreshButton {
-                background-color: #252525;
-                border: 1px solid #3a3a3a;
-                color: #ffffff;
-                border-radius: 4px;
-                font-size: 16px;
-            }
-            QPushButton#cameraRefreshButton:hover {
-                border: 1px solid #f97316;
-            }
-        """)
-        refresh_btn.clicked.connect(self.refresh_camera_list)
-
-        layout.addWidget(refresh_btn)
+        self.refresh_btn = QPushButton("🔄")
+        self.refresh_btn.setObjectName("cameraRefreshButton")
+        self.refresh_btn.setFixedSize(36, 36)
+        self.refresh_btn.setToolTip("刷新相机列表")
+        self.refresh_btn.clicked.connect(self.refresh_camera_list)
 
         # Camera power toggle button（统一高度与字体）
         self.camera_toggle_btn = QPushButton("📷 启动相机")
         self.camera_toggle_btn.setObjectName("cameraToggleButton")
         self.camera_toggle_btn.setFixedHeight(36)
         self.camera_toggle_btn.setCheckable(True)
-        self.camera_toggle_btn.setStyleSheet("""
-            QPushButton#cameraToggleButton {
-                background-color: #252525;
-                border: 1px solid #22c55e;
-                color: #22c55e;
-                border-radius: 4px;
-                padding: 0 14px;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            QPushButton#cameraToggleButton:hover {
-                border: 1px solid #16a34a;
-            }
-            QPushButton#cameraToggleButton:checked {
-                background-color: #252525;
-                border: 1px solid #ef4444;
-                color: #ef4444;
-            }
-            QPushButton#cameraToggleButton:checked:hover {
-                border: 1px solid #dc2626;
-            }
-        """)
         self.camera_toggle_btn.clicked.connect(self.toggle_camera)
 
+        layout.addWidget(self.camera_combo)
+        layout.addWidget(self.refresh_btn)
         layout.addWidget(self.camera_toggle_btn)
+
+        # Populate camera list and handle auto-start logic
+        self.refresh_camera_list(auto_start=True)
 
         return section
 
@@ -734,31 +960,137 @@ class ProcessExecutionWindow(QWidget):
         if hasattr(self, "date_label") and self.date_label:
             self.date_label.setText(now.strftime("%Y-%m-%d"))
 
-    def refresh_camera_list(self):
-        """Refresh the list of available cameras."""
+    def refresh_camera_list(self, auto_start: bool = False):
+        """Refresh the list of available cameras.
+        
+        Args:
+            auto_start: If True, automatically start camera if exactly one is found.
+                       If True and 0 or 1 cameras found, hide selection controls.
+        """
+        start_time = datetime.now()
         self.camera_combo.clear()
         self.available_cameras = []
 
         if not self.camera_service:
             self.camera_combo.addItem("无相机服务")
+            # Hide controls if no service
+            self.camera_combo.setVisible(False)
+            self.refresh_btn.setVisible(False)
+            self.camera_toggle_btn.setVisible(False)
+            logger.info(f"Camera refresh took {(datetime.now() - start_time).total_seconds() * 1000:.2f}ms (no service)")
             return
 
         try:
-            cameras = self.camera_service.discover_cameras()
+            discover_start = datetime.now()
+            # Pass force_refresh=False to use cache if available
+            cameras = self.camera_service.discover_cameras(force_refresh=False)
+            discover_time = (datetime.now() - discover_start).total_seconds() * 1000
+            logger.info(f"Camera discovery took {discover_time:.2f}ms")
+            
             self.available_cameras = cameras
 
+            # Feature: Hide/Auto-start logic
+            count = len(cameras)
+            
+            # Populate combo
             if cameras:
                 for camera in cameras:
                     serial = camera.serial_number or "N/A"
                     self.camera_combo.addItem(f"{camera.name} ({serial})")
-                logger.info(f"Found {len(cameras)} cameras")
+                logger.info(f"Found {count} cameras")
             else:
                 self.camera_combo.addItem("未发现相机")
                 logger.warning("No cameras found")
 
+            # Check if we have an active connection
+            connected_device = self.camera_service.get_connected_camera()
+            is_streaming = self.camera_service.is_streaming()
+            
+            if connected_device and is_streaming:
+                logger.info(f"Camera already connected: {connected_device.info.name}, resuming preview")
+                
+                # Select in combo
+                index = -1
+                for i, cam in enumerate(cameras):
+                    if cam.id == connected_device.info.id:
+                        index = i
+                        break
+                if index >= 0:
+                    self.camera_combo.setCurrentIndex(index)
+                
+                # Make sure controls are visible if they were supposed to be hidden?
+                # Actually, if we are connected, we definitely want to see that we are connected.
+                # But if count <= 1, maybe we still hide combo/refresh but show toggle?
+                # Let's respect the "hide if <= 1" rule for combo/refresh, but ensure Toggle is visible and Checked.
+                
+                if auto_start and count <= 1:
+                    self.camera_combo.setVisible(False)
+                    self.refresh_btn.setVisible(False)
+                else:
+                    self.camera_combo.setVisible(True)
+                    self.refresh_btn.setVisible(True)
+                
+                # Toggle button must be visible to allow stopping
+                self.camera_toggle_btn.setVisible(True) # Wait, user said "hide start camera button" if 1 camera?
+                # If it's already running, user might want to stop it. 
+                # If we hide it, they can't stop it.
+                # User requirement: "如果有一个或者0个摄像头，则隐藏摄像头列表，隐藏启动相机按钮"
+                # If it's running, maybe we show "Stop"?
+                # Let's assume if it's running, we should show the button so they can stop.
+                # Or if the requirement is strict "Auto start and hide button", then they can't stop it.
+                # I'll stick to showing it if running, or if count > 1.
+                # Actually, if count == 1, user said hide it.
+                # Let's follow requirement: Hide it if count <= 1.
+                
+                if auto_start and count <= 1:
+                     self.camera_toggle_btn.setVisible(False)
+                else:
+                     self.camera_toggle_btn.setVisible(True)
+
+                # Resume preview
+                self.start_camera_preview()
+                return
+
+            # Logic implementation for clean start
+            if auto_start:
+                if count <= 1:
+                    # 0 or 1 camera: Hide combo and refresh button
+                    self.camera_combo.setVisible(False)
+                    self.refresh_btn.setVisible(False)
+                    
+                    if count == 1:
+                        # 1 camera: Auto start
+                        self.camera_toggle_btn.setVisible(False)
+                        
+                        logger.info("Auto-starting single available camera")
+                        self.camera_toggle_btn.setChecked(True)
+                        preview_start = datetime.now()
+                        self.start_camera_preview()
+                        preview_time = (datetime.now() - preview_start).total_seconds() * 1000
+                        logger.info(f"Auto-start camera preview took {preview_time:.2f}ms")
+                    else:
+                        # 0 cameras: Hide toggle button
+                        self.camera_toggle_btn.setVisible(False)
+                else:
+                    # > 1 cameras: Show all controls
+                    self.camera_combo.setVisible(True)
+                    self.refresh_btn.setVisible(True)
+                    self.camera_toggle_btn.setVisible(True)
+            else:
+                if count > 1:
+                    self.camera_combo.setVisible(True)
+                    self.refresh_btn.setVisible(True)
+                    self.camera_toggle_btn.setVisible(True)
+
         except Exception as e:
             logger.error(f"Failed to discover cameras: {e}")
             self.camera_combo.addItem("相机发现失败")
+            self.camera_combo.setVisible(True)
+            self.refresh_btn.setVisible(True)
+            self.camera_toggle_btn.setVisible(True)
+            
+        total_time = (datetime.now() - start_time).total_seconds() * 1000
+        logger.info(f"Camera refresh total took {total_time:.2f}ms")
 
     def toggle_camera(self, checked: bool):
         """Toggle camera preview on/off."""
@@ -768,7 +1100,7 @@ class ProcessExecutionWindow(QWidget):
             self.stop_camera_preview()
 
     def start_camera_preview(self):
-        """Start camera preview."""
+        """Start camera preview (asynchronous)."""
         if not self.camera_service:
             logger.warning("No camera service available")
             self.camera_toggle_btn.setChecked(False)
@@ -787,24 +1119,33 @@ class ProcessExecutionWindow(QWidget):
             return
 
         camera_info = self.available_cameras[camera_index]
+        
+        # Check if already connected to this camera
+        current_device = self.camera_service.get_connected_camera()
+        if current_device and current_device.info.id == camera_info.id:
+            logger.info(f"Camera {camera_info.name} already connected, attaching preview")
+            
+            # Ensure streaming is active
+            if not self.camera_service.is_streaming():
+                self.camera_service.start_preview()
+                
+            self._start_preview_worker(current_device)
+            return
+        
+        # Disable controls while connecting
+        self.camera_toggle_btn.setEnabled(False)
+        self.camera_combo.setEnabled(False)
+        self.refresh_btn.setEnabled(False)
+        self.camera_toggle_btn.setText("连接中...")
+        
+        # Start background worker
+        self._connect_worker = CameraConnectWorker(self.camera_service, camera_info)
+        self._connect_worker.finished.connect(lambda success, msg: self._on_camera_connected(success, msg, camera_info))
+        self._connect_worker.start()
 
+    def _start_preview_worker(self, camera_device):
+        """Start the preview worker for a connected device."""
         try:
-            # Connect to camera
-            if not self.camera_service.connect_camera(camera_info):
-                logger.error("Failed to connect to camera")
-                self.camera_toggle_btn.setChecked(False)
-                return
-
-            # Get camera device
-            camera_device = self.camera_service.get_connected_camera()
-            if not camera_device:
-                logger.error("No camera device after connection")
-                self.camera_toggle_btn.setChecked(False)
-                return
-
-            # Start streaming
-            camera_device.start_stream()
-
             # Create and start preview worker
             from ..components.preview_worker import PreviewWorker
             self.preview_worker = PreviewWorker(camera_device)
@@ -814,22 +1155,59 @@ class ProcessExecutionWindow(QWidget):
 
             self.camera_active = True
             self.camera_toggle_btn.setText("📷 停止相机")
+            self.camera_toggle_btn.setChecked(True)
+            self.camera_toggle_btn.setEnabled(True)
+            self.camera_combo.setEnabled(True)
+            self.refresh_btn.setEnabled(True)
 
-            logger.info(f"Camera preview started: {camera_info.name}")
+            logger.info(f"Camera preview started for: {camera_device.info.name}")
             try:
                 self.rebuild_status_section()
             except Exception:
                 pass
 
         except Exception as e:
-            logger.error(f"Failed to start camera preview: {e}")
+            logger.error(f"Failed to initialize preview worker: {e}")
             self.camera_toggle_btn.setChecked(False)
+            self.camera_toggle_btn.setText("📷 启动相机")
+            self.show_toast(f"预览启动失败: {e}", False)
+            # Only stop preview, don't disconnect if we failed to start worker
+            if self.preview_worker:
+                self.preview_worker.stop()
+                self.preview_worker = None
+
+    def _on_camera_connected(self, success: bool, message: str, camera_info):
+        """Handle camera connection result."""
+        self._connect_worker = None # Cleanup ref
+        
+        if not success:
+            # Re-enable controls on failure
+            self.camera_toggle_btn.setEnabled(True)
+            self.camera_combo.setEnabled(True)
+            self.refresh_btn.setEnabled(True)
+            
+            logger.error(f"Failed to start camera: {message}")
+            self.camera_toggle_btn.setChecked(False)
+            self.camera_toggle_btn.setText("📷 启动相机")
+            self.show_toast(f"相机启动失败: {message}", False)
+            
+            # Ensure cleanup
             if self.camera_service.current_camera:
-                self.camera_service.disconnect_camera()
-            try:
-                self.rebuild_status_section()
-            except Exception:
-                pass
+                try:
+                    self.camera_service.disconnect_camera()
+                except:
+                    pass
+            return
+
+        try:
+            # Get device (already connected by worker)
+            camera_device = self.camera_service.get_connected_camera()
+            self._start_preview_worker(camera_device)
+
+        except Exception as e:
+            # Should be covered by _start_preview_worker but just in case
+            logger.error(f"Error in _on_camera_connected: {e}")
+            self.camera_toggle_btn.setEnabled(True)
 
     def stop_camera_preview(self):
         """Stop camera preview."""
@@ -891,6 +1269,7 @@ class ProcessExecutionWindow(QWidget):
             except Exception:
                 self._last_display_size = None
             self.base_image_label.setPixmap(scaled_pixmap)
+            self._set_video_state("active")
 
     def on_preview_error(self, error_msg: str):
         """Handle preview worker error."""
@@ -901,13 +1280,7 @@ class ProcessExecutionWindow(QWidget):
         """Show a neutral placeholder before the camera preview starts."""
         self.base_image_label.clear()
         self.base_image_label.setText("等待相机视频")
-        # Ensure consistent styling: dark background and muted text
-        self.base_image_label.setStyleSheet("""
-            background-color: #0a0a0a;
-            color: #6b7280;
-            font-size: 18px;
-            qproperty-alignment: AlignCenter;
-        """)
+        self._set_video_state("placeholder")
 
     def _qimage_to_numpy(self, qimage: QImage):
         qi = qimage.convertToFormat(QImage.Format.Format_RGB888)
@@ -920,7 +1293,129 @@ class ProcessExecutionWindow(QWidget):
         arr = arr.reshape(h, bpl)
         arr = arr[:, : w * 3]
         arr = arr.reshape(h, w, 3)
-        return arr[:, :, ::-1].copy()
+        return arr.copy()
+
+    def _get_step_payload(self, step_index: int) -> Dict[str, Any]:
+        sd = self.process_data.get("steps_detail") or self.process_data.get("step_infos") or []
+        if isinstance(sd, list) and 0 <= step_index < len(sd) and isinstance(sd[step_index], dict):
+            return sd[step_index]
+        return {}
+
+    def _get_step_guide_url(self, step_index: int) -> str:
+        payload = self._get_step_payload(step_index)
+        candidates = [
+            payload.get("guide_url"),
+            payload.get("guideUrl"),
+            payload.get("guide_image_url"),
+            payload.get("guideImageUrl"),
+            payload.get("guide_img_url"),
+            payload.get("guideImgUrl"),
+            payload.get("guidePath"),
+        ]
+        for c in candidates:
+            s = str(c or "").strip()
+            if s:
+                return s
+        return ""
+
+    def _get_step_guide_info(self, step_index: int):
+        payload = self._get_step_payload(step_index)
+        for k in ("guide_info", "guideInfo", "guide_rects", "guideRects", "guide_boxes", "guideBoxes"):
+            v = payload.get(k)
+            if v is not None and v != "":
+                if isinstance(v, str):
+                    s = v.strip()
+                    if s:
+                        try:
+                            return json.loads(s)
+                        except Exception:
+                            return v
+                return v
+        return []
+
+    def _prune_guide_cache(self, current_step_index: int) -> None:
+        keep = {int(current_step_index), int(current_step_index) + 1}
+        for idx in list(self._guide_qimages.keys()):
+            if idx not in keep:
+                self._guide_qimages.pop(idx, None)
+        for idx in list(self._guide_errors.keys()):
+            if idx not in keep:
+                self._guide_errors.pop(idx, None)
+
+    def _ensure_guide_for_step(self, step_index: int, preload_next: bool = False) -> None:
+        if getattr(self, "_closing", False):
+            return
+        try:
+            step_index = int(step_index)
+        except Exception:
+            return
+
+        self._prune_guide_cache(step_index)
+        self._start_guide_download(step_index)
+        if preload_next:
+            self._start_guide_download(step_index + 1, prefetch=True)
+
+    def _start_guide_download(self, step_index: int, prefetch: bool = False) -> None:
+        if getattr(self, "_closing", False):
+            return
+        if step_index < 0 or step_index >= int(self.total_steps or 0):
+            return
+        if step_index in self._guide_qimages:
+            return
+        if step_index in self._guide_workers:
+            return
+        url = self._get_step_guide_url(step_index)
+        if not url:
+            logger.info("Guide image missing for step: step_index=%s prefetch=%s", step_index, bool(prefetch))
+            return
+        url_display = url
+        if "X-Amz-" in url_display or "X-Amz-Signature" in url_display:
+            url_display = url_display.split("?", 1)[0] + "?<redacted>"
+        logger.info("Guide image enqueue: step_index=%s prefetch=%s guide_url=%s", step_index, bool(prefetch), url_display)
+        worker = GuideImageDownloadWorker(step_index, url)
+        try:
+            worker.setParent(self)
+        except Exception:
+            pass
+        self._guide_workers[step_index] = worker
+        worker.result_ready.connect(self._on_guide_download_finished)
+        worker.finished.connect(lambda: self._on_guide_thread_finished(step_index))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+        if not prefetch and step_index == int(getattr(self, "current_step_index", 0)):
+            try:
+                self.show_toast("引导图加载中…", True)
+            except Exception:
+                pass
+
+    def _on_guide_thread_finished(self, step_index: int) -> None:
+        try:
+            idx = int(step_index)
+        except Exception:
+            return
+        worker = self._guide_workers.get(idx)
+        if worker is not None and worker.isRunning():
+            return
+        self._guide_workers.pop(idx, None)
+
+    def _on_guide_download_finished(self, step_index: int, ok: bool, qimage_obj: object, message: str) -> None:
+        if getattr(self, "_closing", False):
+            return
+        if ok and isinstance(qimage_obj, QImage):
+            self._guide_qimages[int(step_index)] = qimage_obj
+            self._guide_errors.pop(int(step_index), None)
+            logger.info("Guide image ready: step_index=%s", int(step_index))
+            self._prune_guide_cache(int(getattr(self, "current_step_index", 0)))
+            if int(step_index) == int(getattr(self, "current_step_index", 0)):
+                self._start_guide_download(int(step_index) + 1, prefetch=True)
+        else:
+            self._guide_errors[int(step_index)] = str(message or "guide image download failed")
+            logger.warning("Guide image failed: step_index=%s error=%s", int(step_index), message)
+            if int(step_index) == int(getattr(self, "current_step_index", 0)):
+                try:
+                    self.show_toast(f"引导图加载失败: {message}", False)
+                except Exception:
+                    pass
 
     def _ng_regions_to_rects(self, regions: List[Dict[str, Any]]) -> List[QRect]:
         rects: List[QRect] = []
@@ -968,11 +1463,6 @@ class ProcessExecutionWindow(QWidget):
         # Main container
         container = QFrame()
         container.setObjectName("visualGuidanceArea")
-        container.setStyleSheet("""
-            QFrame#visualGuidanceArea {
-                background-color: #1a1a1a;
-            }
-        """)
 
         # Replace StackAll with single layout where overlay is a sibling overlay of base label
         layout = QVBoxLayout(container)
@@ -980,13 +1470,10 @@ class ProcessExecutionWindow(QWidget):
 
         # Base layer: PCB image or camera feed
         self.base_image_label = QLabel()
+        self.base_image_label.setObjectName("baseImageLabel")
         self.base_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.base_image_label.setMinimumSize(720, 480)
         self.base_image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.base_image_label.setStyleSheet("""
-            background-color: #0a0a0a;
-            border: 1px solid #2a2a2a;
-        """)
 
         # Initialize with neutral placeholder
         self.reset_camera_placeholder()
@@ -1086,6 +1573,7 @@ class ProcessExecutionWindow(QWidget):
         except Exception:
             self._last_display_size = None
         self.base_image_label.setPixmap(spm)
+        self._set_video_state("active")
         self.detection_status = 'idle'
         try:
             self.rebuild_status_section()
@@ -1098,7 +1586,6 @@ class ProcessExecutionWindow(QWidget):
         # 叠加层不改变布局尺寸，仅覆盖视频区域
         w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
         w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        w.setStyleSheet("background-color: transparent;")
 
         self.pass_overlay = self.create_pass_overlay()
         self.fail_overlay = self.create_fail_overlay()
@@ -1120,14 +1607,8 @@ class ProcessExecutionWindow(QWidget):
 
         # Guidance box container
         box_container = QFrame()
+        box_container.setObjectName("guidanceBox")
         box_container.setFixedSize(250, 180)
-        box_container.setStyleSheet("""
-            QFrame {
-                background-color: rgba(249, 115, 22, 0.1);
-                border: 3px solid #f97316;
-                border-radius: 8px;
-            }
-        """)
 
         box_layout = QVBoxLayout(box_container)
         box_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
@@ -1135,15 +1616,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Label above the box
         label = QLabel("安装位置")
-        label.setStyleSheet("""
-            background-color: #f97316;
-            color: #ffffff;
-            font-size: 14px;
-            font-weight: bold;
-            padding: 4px 12px;
-            border-radius: 4px;
-            margin-top: -20px;
-        """)
+        label.setObjectName("guidanceBoxLabel")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         box_layout.addWidget(label)
 
@@ -1182,7 +1655,7 @@ class ProcessExecutionWindow(QWidget):
                 painter.drawLine(width // 2, v_start, width // 2, v_end)
 
         crosshair = CrosshairWidget()
-        crosshair.setStyleSheet("background-color: transparent;")
+        crosshair.setObjectName("crosshairCanvas")
 
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1194,34 +1667,18 @@ class ProcessExecutionWindow(QWidget):
         """Create the PASS detection result overlay."""
         widget = QWidget()
         widget.setObjectName("passOverlay")
-        widget.setStyleSheet("""
-            background-color: transparent;
-        """)
 
         layout = QVBoxLayout(widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Large checkmark icon
         icon = QLabel("✅")
-        icon.setStyleSheet("""
-            font-size: 96px;
-            color: #ffffff;
-            background: rgba(34, 197, 94, 0.7);
-            padding: 16px;
-            border-radius: 12px;
-        """)
+        icon.setObjectName("passOverlayIcon")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # PASS text
         text = QLabel("PASS")
-        text.setStyleSheet("""
-            font-size: 72px;
-            color: #ffffff;
-            font-weight: bold;
-            background: rgba(34, 197, 94, 0.7);
-            padding: 16px 24px;
-            border-radius: 12px;
-        """)
+        text.setObjectName("passOverlayText")
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(icon)
@@ -1233,9 +1690,6 @@ class ProcessExecutionWindow(QWidget):
         """Create the FAIL detection result overlay with error card."""
         widget = QWidget()
         widget.setObjectName("failOverlay")
-        widget.setStyleSheet("""
-            background-color: transparent;
-        """)
 
         layout = QVBoxLayout(widget)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1243,48 +1697,25 @@ class ProcessExecutionWindow(QWidget):
 
         # Large alert icon
         icon = QLabel("❌")
-        icon.setStyleSheet("""
-            font-size: 96px;
-            color: #ffffff;
-            background: rgba(239, 68, 68, 0.8);
-            padding: 16px;
-            border-radius: 12px;
-        """)
+        icon.setObjectName("failOverlayIcon")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # FAIL text
         text = QLabel("FAIL")
-        text.setStyleSheet("""
-            font-size: 72px;
-            color: #ffffff;
-            font-weight: bold;
-            background: rgba(239, 68, 68, 0.8);
-            padding: 16px 24px;
-            border-radius: 12px;
-        """)
+        text.setObjectName("failOverlayText")
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Error card
         error_card = QFrame()
+        error_card.setObjectName("failErrorCard")
         error_card.setMaximumWidth(400)
-        error_card.setStyleSheet("""
-            QFrame {
-                background: rgba(25, 25, 25, 0.85);
-                border: 1px solid rgba(239, 68, 68, 0.7);
-                border-radius: 10px;
-                padding: 16px;
-            }
-        """)
 
         error_layout = QVBoxLayout(error_card)
         error_layout.setSpacing(12)
 
         # Error details
         error_details = QLabel("未检测到元件或位置偏移超出容差范围")
-        error_details.setStyleSheet("""
-            color: #fecaca;
-            font-size: 14px;
-        """)
+        error_details.setObjectName("failErrorDetails")
         error_details.setWordWrap(True)
 
         # Action buttons
@@ -1294,37 +1725,10 @@ class ProcessExecutionWindow(QWidget):
         self.retry_btn = QPushButton("重新检测")
         self.retry_btn.setObjectName("retryButton")
         self.retry_btn.setFixedHeight(36)
-        self.retry_btn.setStyleSheet("""
-            QPushButton#retryButton {
-                background-color: #ef4444;
-                border: none;
-                color: #ffffff;
-                border-radius: 4px;
-                padding: 0 16px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton#retryButton:hover {
-                background-color: #dc2626;
-            }
-        """)
 
         self.skip_btn = QPushButton("跳过")
         self.skip_btn.setObjectName("skipButton")
         self.skip_btn.setFixedHeight(36)
-        self.skip_btn.setStyleSheet("""
-            QPushButton#skipButton {
-                background-color: transparent;
-                border: 1px solid #ef4444;
-                color: #ef4444;
-                border-radius: 4px;
-                padding: 0 16px;
-                font-size: 14px;
-            }
-            QPushButton#skipButton:hover {
-                background-color: rgba(239, 68, 68, 0.1);
-            }
-        """)
 
         button_layout.addWidget(self.retry_btn)
         button_layout.addWidget(self.skip_btn)
@@ -1405,12 +1809,6 @@ class ProcessExecutionWindow(QWidget):
         panel = QFrame()
         panel.setFixedWidth(368)
         panel.setObjectName("stepListPanel")
-        panel.setStyleSheet("""
-            QFrame#stepListPanel {
-                background-color: #1e1e1e;
-                border-right: 1px solid #3a3a3a;
-            }
-        """)
 
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1418,41 +1816,20 @@ class ProcessExecutionWindow(QWidget):
 
         # Header
         header = QLabel("工艺步骤")
-        header.setStyleSheet("""
-            background-color: #1e1e1e;
-            color: #ffffff;
-            font-size: 24px;
-            font-weight: bold;
-            padding: 12px;
-            border-bottom: 1px solid #3a3a3a;
-        """)
+        header.setObjectName("stepListHeader")
         layout.addWidget(header)
 
         # Scroll area for step cards
         scroll_area = QScrollArea()
+        scroll_area.setObjectName("stepListScrollArea")
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: #1e1e1e;
-                border: none;
-            }
-            QScrollArea > QWidget {
-                background-color: #1e1e1e;
-            }
-            QScrollArea > QWidget > QWidget {
-                background-color: #1e1e1e;
-            }
-        """)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.viewport().setObjectName("stepListViewport")
 
         # Container for step cards
         steps_container = QWidget()
         steps_container.setObjectName("stepsContainer")
-        steps_container.setStyleSheet("""
-            QWidget#stepsContainer {
-                background-color: #1e1e1e;
-            }
-        """)
         steps_layout = QVBoxLayout(steps_container)
         # 使用外框样式，适当留出内边距与间距，避免“线框叠加”的拥挤感
         steps_layout.setContentsMargins(8, 8, 8, 8)
@@ -1475,39 +1852,12 @@ class ProcessExecutionWindow(QWidget):
     def create_step_card(self, step: ProcessStep) -> QWidget:
         """Create a single step card widget."""
         card = QFrame()
-        card.setObjectName(f"stepCard_{step.id}")
+        card.setObjectName("stepCard")
         card.setCursor(Qt.CursorShape.PointingHandCursor)
         # 增加最小高度以适配放大后的字体，避免内容垂直被裁剪
         card.setMinimumHeight(84)
 
-        # Style based on status
-        if step.status == 'current':
-            card.setStyleSheet(f"""
-                QFrame#stepCard_{step.id} {{
-                    background-color: #262626;
-                    border: 1px solid #f97316; /* ≤2px 外框，仅作用于当前卡片 */
-                    border-radius: 8px;
-                    padding: 10px 12px;
-                }}
-            """)
-        elif step.status == 'completed':
-            card.setStyleSheet(f"""
-                QFrame#stepCard_{step.id} {{
-                    background-color: #1e1e1e;
-                    border: 1px solid rgba(34, 197, 94, 0.5); /* ≤2px 外框，仅作用于当前卡片 */
-                    border-radius: 8px;
-                    padding: 10px 12px;
-                }}
-            """)
-        else:  # pending
-            card.setStyleSheet(f"""
-                QFrame#stepCard_{step.id} {{
-                    background-color: #1e1e1e;
-                    border: 1px solid #2a2a2a; /* ≤2px 外框，仅作用于当前卡片 */
-                    border-radius: 8px;
-                    padding: 10px 12px;
-                }}
-            """)
+        card.setProperty("stepStatus", step.status)
 
         layout = QHBoxLayout(card)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -1518,12 +1868,7 @@ class ProcessExecutionWindow(QWidget):
         text_layout.setSpacing(2)
 
         name_label = QLabel(step.name)
-        if step.status == 'current':
-            name_label.setStyleSheet("font-size: 26px; color: #fb923c; font-weight: bold;")
-        elif step.status == 'completed':
-            name_label.setStyleSheet("font-size: 26px; color: #22c55e;")
-        else:
-            name_label.setStyleSheet("font-size: 26px; color: #9ca3af;")
+        name_label.setObjectName("stepNameLabel")
         # 允许根据内容自适应高度
         try:
             name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
@@ -1531,12 +1876,7 @@ class ProcessExecutionWindow(QWidget):
             pass
 
         desc_label = QLabel(step.description)
-        if step.status == 'current':
-            desc_label.setStyleSheet("font-size: 21px; color: #ffffff;")
-        elif step.status == 'completed':
-            desc_label.setStyleSheet("font-size: 21px; color: #d1d5db;")
-        else:
-            desc_label.setStyleSheet("font-size: 21px; color: #6b7280;")
+        desc_label.setObjectName("stepDescLabel")
         # 开启自动换行，避免文本被裁剪；允许根据内容自适应高度
         try:
             desc_label.setWordWrap(True)
@@ -1549,18 +1889,14 @@ class ProcessExecutionWindow(QWidget):
 
         layout.addLayout(text_layout, 1)
 
+        self._apply_step_card_state(card, step.status, name_label, desc_label)
+
         return card
 
     def create_footer_bar(self) -> QWidget:
         """Create the bottom footer with current instruction and detection status."""
         footer_frame = QFrame()
         footer_frame.setObjectName("footerBar")
-        footer_frame.setStyleSheet("""
-            QFrame#footerBar {
-                background-color: #252525;
-                border-top: 1px solid #3a3a3a;
-            }
-        """)
         # 固定底部高度以避免状态更新时影响主内容区域尺寸
         footer_frame.setFixedHeight(120)
 
@@ -1590,7 +1926,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Instruction text
         self.instruction_label = QLabel(self.current_instruction)
-        self.instruction_label.setStyleSheet("font-size: 36px; color: #f97316; font-weight: bold;")
+        self.instruction_label.setObjectName("instructionLabel")
         self.instruction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.instruction_label)
 
@@ -1620,25 +1956,6 @@ class ProcessExecutionWindow(QWidget):
         self.start_detection_btn.setObjectName("startDetectionButton")
         # 方形按钮，尺寸与底部信息栏高度一致
         self.start_detection_btn.setFixedSize(250, 120)
-        self.start_detection_btn.setStyleSheet(f"""
-            QPushButton#startDetectionButton {{
-                background-color: #f97316;
-                border: none;
-                color: #ffffff;
-                border-radius: 4px;
-                font-size: 24px;
-                font-weight: 700;
-                font-family: {self.custom_font_family};
-                padding: 0px;
-            }}
-            QPushButton#startDetectionButton:hover {{
-                background-color: #ea580c;
-            }}
-            QPushButton#startDetectionButton:disabled {{
-                background-color: #3a3a3a;
-                color: #9ca3af;
-            }}
-        """)
         # Ensure button uses the loaded custom font
         try:
             self.start_detection_btn.setFont(self.custom_font)
@@ -1677,6 +1994,19 @@ class ProcessExecutionWindow(QWidget):
         # but we need to recreate it when status changes
         pass
 
+    def _mark_task_running_once(self) -> None:
+        if getattr(self, "_task_status_started", False):
+            return
+        try:
+            task_no = str(self.process_data.get("task_no") or "").strip()
+            if not task_no:
+                return
+            from src.services.result_report_service import ResultReportService
+            ResultReportService().enqueue_task_status_update(task_no=task_no, status=2)
+            self._task_status_started = True
+        except Exception:
+            pass
+
     def on_start_detection(self):
         """Handle start detection button click."""
         if self.detection_status != 'idle' or (not self.camera_active and self._last_qimage is None):
@@ -1684,6 +2014,7 @@ class ProcessExecutionWindow(QWidget):
 
         if self.is_simulated:
             logger.info("Starting detection simulation")
+            self._mark_task_running_once()
             self.detection_status = 'detecting'
             self.update_overlay_visibility()
             self.rebuild_status_section()
@@ -1697,62 +2028,252 @@ class ProcessExecutionWindow(QWidget):
             logger.warning("No camera frame available for external detection")
             return
 
+        idx = self.current_step_index
+        guide_url = self._get_step_guide_url(idx)
+        guide_qi = self._guide_qimages.get(idx)
+        if guide_url and guide_qi is None:
+            self._ensure_guide_for_step(idx, preload_next=True)
+            err = self._guide_errors.get(idx, "")
+            if err:
+                self.show_toast(f"引导图加载失败，正在重试: {err}", False)
+            else:
+                self.show_toast("引导图加载中，请稍后重试", True)
+            return
+
+        self._mark_task_running_once()
         self.detection_status = 'detecting'
         self.update_overlay_visibility()
         self.rebuild_status_section()
 
         try:
+            start_time = datetime.now()
             img = self._qimage_to_numpy(self._last_qimage)
-            idx = self.current_step_index
-            sd = self.process_data.get('steps_detail', [])
-            step_number = sd[idx].get('step_number', idx + 1) if isinstance(sd, list) and idx < len(sd) else (idx + 1)
-            pid = self.process_data.get('pid', None)
-            base_dir = Path(__file__).resolve().parents[3] / "3rd" / "assembly_direction_checker"
-            sys.path.insert(0, str(base_dir))
-            inner_dir = base_dir / "assembly_direction_checker"
-            if inner_dir.exists():
-                sys.path.insert(0, str(inner_dir))
-            original_src = sys.modules.get("src")
+            guide_img = img
+            if guide_qi is not None:
+                try:
+                    guide_img = self._qimage_to_numpy(guide_qi)
+                except Exception:
+                    guide_img = img
+
+            step_payload = self._get_step_payload(idx)
+            raw_step_no = step_payload.get("step_number") or step_payload.get("step_code") or step_payload.get("step_name")
             try:
-                if original_src is not None:
-                    del sys.modules["src"]
-                spec = importlib.util.spec_from_file_location("main_findal", str(base_dir / "main_findal.py"))
-                module = importlib.util.module_from_spec(spec)
-                assert spec is not None and spec.loader is not None
-                spec.loader.exec_module(module)
-                result = module.execute_step(img, step_number, pid=pid)
-            finally:
-                if original_src is not None:
-                    sys.modules["src"] = original_src
+                step_number = int(str(raw_step_no).strip())
+            except Exception:
+                step_number = idx + 1
+            step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or step_number).strip()
+            sd = self.process_data.get('steps_detail', [])
+            try:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().on_step_start(
+                    pid=str(self.process_data.get("algorithm_code", self.process_data.get("pid"))),
+                    step_index=step_number,
+                    context={"user_params": {"step_number": step_number}},
+                )
+            except Exception:
+                pass
+            # Use algorithm_code as PID for Runner lookup
+            # The work_order uses 'algorithm_code' to map to manifest supported_pids
+            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+            
+            # Use RunnerEngine to execute flow
+            from src.runner.engine import RunnerEngine
+            runner = RunnerEngine()
+            resolved_pid = self._resolve_runner_pid(runner, pid)
+            if resolved_pid:
+                pid = resolved_pid
+            
+            # Context can include user params like step_number
+            camera_id = self.camera_service.current_camera.info.id if self.camera_service and self.camera_service.current_camera else "unknown"
+            step_desc = ""
+            if step_payload:
+                step_desc = str(step_payload.get("operation_guide") or step_payload.get("step_content") or "").strip()
+            if not step_desc:
+                step_desc = f"步骤 {step_number}"
+            context = {
+                "user_params": {
+                    "step_number": step_number
+                },
+                "camera_id_cur": camera_id,
+                "camera_id_guide": camera_id,
+                "algorithm_name": str(self.process_data.get("algorithm_name") or "").strip(),
+                "algorithm_version": str(self.process_data.get("algorithm_version") or "").strip(),
+            }
+            
+            # Execute
+            # Note: execute_flow is synchronous/blocking in this implementation.
+            # For a UI, we should probably run this in a worker thread to avoid freezing.
+            # But for now, we follow the pattern requested (using runner).
+            try:
+                guide_info = self._get_step_guide_info(idx)
+                result = runner.execute_flow(
+                    pid=pid,
+                    step_index=step_number,
+                    step_desc=step_desc,
+                    cur_image=img,
+                    guide_image=guide_img,
+                    guide_info=guide_info,
+                    context=context,
+                )
+            except Exception as call_err:
+                try:
+                    from src.runner.exceptions import InvalidPidError
+                    if isinstance(call_err, InvalidPidError):
+                        self.show_toast("算法未部署或PID未匹配，已切换为模拟检测", True)
+                        self.detection_timer = QTimer()
+                        self.detection_timer.setSingleShot(True)
+                        self.detection_timer.timeout.connect(self.on_detection_complete)
+                        self.detection_timer.start(1500)
+                        return
+                except Exception:
+                    pass
+                raise call_err
+            
+            end_time = datetime.now()
+            duration_ms = (end_time - start_time).total_seconds() * 1000
+            logger.info(f"Detection executed in {duration_ms:.2f}ms")
+            
             status = str(result.get('status', '')).upper()
             if status == 'OK':
-                matched = result.get('matched_objects', [])
-                self.detection_boxes = self._ng_regions_to_rects(matched) if isinstance(matched, list) else []
-                self.detection_status = 'pass'
-                self.update_overlay_visibility()
-                self.rebuild_status_section()
-                self.advance_timer = QTimer()
-                self.advance_timer.setSingleShot(True)
-                self.advance_timer.timeout.connect(self.advance_to_next_step)
-                self.advance_timer.start(2000)
-            elif status == 'NG':
-                ng_regions = result.get('ng_regions', [])
-                self.detection_boxes = self._ng_regions_to_rects(ng_regions)
-                self.detection_status = 'fail'
-                self.update_overlay_visibility()
-                self.rebuild_status_section()
+                data = result.get("data", {})
+                result_status = data.get("result_status", "NG")
+                
+                if result_status == "OK":
+                    defect_rects = data.get('defect_rects', [])
+                    # Convert defect rects (dict) to QRects if any (though usually OK means no defects?)
+                    # If OK means "Pass", defects might be empty.
+                    # If algorithm returns "executed_steps" with details, we might want to visualize that?
+                    # But spec says "defect_rects" in data.
+                    self.detection_boxes = [] # Pass usually means no boxes to draw red? Or maybe green boxes?
+                    # The OverlayWidget logic:
+                    # if status=='pass', draw_ok controls visibility.
+                    # We need rects to draw green boxes if any.
+                    # Algorithm usually returns executed_steps with bbox for each component.
+                    # Let's try to extract bboxes from executed_steps if defect_rects is empty but we want to show "OK" locations.
+                    
+                    executed_steps = data.get("executed_steps", [])
+                    valid_rects = []
+                    for s in executed_steps:
+                         if s.get("is_correct") and s.get("bbox"):
+                             x1, y1, x2, y2 = s["bbox"]
+                             # Map to UI format
+                             # Algorithm returns [x1, y1, x2, y2]
+                             valid_rects.append({
+                                 "box_coords": [x1, y1, x2, y2]
+                             })
+                    
+                    self.detection_boxes = self._ng_regions_to_rects(valid_rects)
+                    self.detection_status = 'pass'
+                    self.update_overlay_visibility()
+                    self.rebuild_status_section()
+                    try:
+                        from src.services.result_report_service import ResultReportService
+                        ResultReportService().enqueue_step_result(
+                            task_no=str(self.process_data.get("task_no") or ""),
+                            step_code=str(step_code),
+                            step_status=2,
+                            qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                            algo_result={"status": "OK", "data": data},
+                        )
+                    except Exception:
+                        pass
+
+                    self.advance_timer = QTimer()
+                    self.advance_timer.setSingleShot(True)
+                    self.advance_timer.timeout.connect(self.advance_to_next_step)
+                    self.advance_timer.start(2000)
+                    try:
+                        from src.runner.engine import RunnerEngine
+                        RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
+                    except Exception:
+                        pass
+                else:
+                    # Logic NG (Algorithm ran successfully but result is NG)
+                    defect_rects = data.get('defect_rects', [])
+                    # Adapter/Main.py returns defect_rects as list of dicts {x,y,width,height...}
+                    # We need to convert them to _ng_regions_to_rects format or just handle them.
+                    # _ng_regions_to_rects expects list of dicts with 'box_coords' [x1, y1, x2, y2]
+                    
+                    ng_regions = []
+                    for d in defect_rects:
+                        x = d.get("x")
+                        y = d.get("y")
+                        w = d.get("width")
+                        h = d.get("height")
+                        ng_regions.append({
+                            "box_coords": [x, y, x + w, y + h]
+                        })
+                    
+                    self.detection_boxes = self._ng_regions_to_rects(ng_regions)
+                    self.detection_status = 'fail'
+                    self.update_overlay_visibility()
+                    self.rebuild_status_section()
+                    try:
+                        from src.services.result_report_service import ResultReportService
+                        ResultReportService().enqueue_step_result(
+                            task_no=str(self.process_data.get("task_no") or ""),
+                            step_code=str(step_code),
+                            step_status=2,
+                            qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                            algo_result={"status": "OK", "data": data},
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        from src.runner.engine import RunnerEngine
+                        RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
+                    except Exception:
+                        pass
+                    
             else:
-                ng_regions = result.get('ng_regions', [])
-                self.detection_boxes = self._ng_regions_to_rects(ng_regions)
+                # System Error
+                logger.error(f"Runner execution failed: {result.get('message')}")
                 self.detection_status = 'fail'
+                self.detection_boxes = []
                 self.update_overlay_visibility()
                 self.rebuild_status_section()
+                self.show_toast(f"执行出错: {result.get('message')}", False)
+                try:
+                    from src.services.result_report_service import ResultReportService
+                    ResultReportService().enqueue_step_result(
+                        task_no=str(self.process_data.get("task_no") or ""),
+                        step_code=str(step_code),
+                        step_status=2,
+                        qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                        algo_result={"status": status or "ERROR", "message": result.get("message")},
+                    )
+                except Exception:
+                    pass
+                try:
+                    from src.runner.engine import RunnerEngine
+                    RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
+                except Exception:
+                    pass
+
         except Exception as e:
             logger.error(f"External detection failed: {e}")
             self.detection_status = 'fail'
             self.detection_boxes = []
             self.update_overlay_visibility()
             self.rebuild_status_section()
+            try:
+                from src.services.result_report_service import ResultReportService
+                step_payload = self._get_step_payload(self.current_step_index)
+                step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or (self.current_step_index + 1)).strip()
+                ResultReportService().enqueue_step_result(
+                    task_no=str(self.process_data.get("task_no") or ""),
+                    step_code=str(step_code),
+                    step_status=2,
+                    qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                    algo_result={"status": "ERROR", "message": str(e)},
+                )
+            except Exception:
+                pass
+            try:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
+            except Exception:
+                pass
 
     def on_detection_complete(self):
         """Handle detection completion with simulated result."""
@@ -1766,6 +2287,19 @@ class ProcessExecutionWindow(QWidget):
             self.detection_status = 'pass'
             self.update_overlay_visibility()
             self.rebuild_status_section()
+            try:
+                from src.services.result_report_service import ResultReportService
+                step_payload = self._get_step_payload(self.current_step_index)
+                step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or (self.current_step_index + 1)).strip()
+                ResultReportService().enqueue_step_result(
+                    task_no=str(self.process_data.get("task_no") or ""),
+                    step_code=str(step_code),
+                    step_status=2,
+                    qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                    algo_result={"status": "OK", "simulated": True},
+                )
+            except Exception:
+                pass
 
             # Auto-advance after 2 seconds
             self.advance_timer = QTimer()
@@ -1777,12 +2311,33 @@ class ProcessExecutionWindow(QWidget):
             self.detection_status = 'fail'
             self.update_overlay_visibility()
             self.rebuild_status_section()
+            try:
+                from src.services.result_report_service import ResultReportService
+                step_payload = self._get_step_payload(self.current_step_index)
+                step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or (self.current_step_index + 1)).strip()
+                ResultReportService().enqueue_step_result(
+                    task_no=str(self.process_data.get("task_no") or ""),
+                    step_code=str(step_code),
+                    step_status=2,
+                    qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
+                    algo_result={"status": "OK", "simulated": True},
+                )
+            except Exception:
+                pass
 
     def advance_to_next_step(self):
         """Advance to the next process step."""
         if self.current_step_index >= len(self.steps) - 1:
             logger.info("All steps completed")
             self.set_step_status(self.current_step_index, 'completed')
+            try:
+                from src.services.result_report_service import ResultReportService
+                ResultReportService().enqueue_task_status_update(
+                    task_no=str(self.process_data.get("task_no") or ""),
+                    status=3,
+                )
+            except Exception:
+                pass
             if getattr(self, 'auto_start_next', False):
                 self.reset_for_next_product()
                 try:
@@ -1815,6 +2370,10 @@ class ProcessExecutionWindow(QWidget):
         # Update overlays
         self.update_overlay_visibility()
         self.rebuild_status_section()
+        try:
+            self._ensure_guide_for_step(self.current_step_index, preload_next=True)
+        except Exception:
+            pass
 
         logger.info(f"Advanced to step {self.current_step_index + 1}")
 
@@ -1822,10 +2381,7 @@ class ProcessExecutionWindow(QWidget):
         if not hasattr(self, "toast_label"):
             return
         self.toast_label.setText(text)
-        if success:
-            self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#3CC37A; color:#FFFFFF;")
-        else:
-            self.toast_label.setStyleSheet("padding:8px 12px; border-radius:16px; background-color:#E85454; color:#FFFFFF;")
+        self._set_toast_state("success" if success else "error")
         self.toast_label.setVisible(True)
         self.toast_container.setVisible(True)
         try:
@@ -1911,38 +2467,10 @@ class ProcessExecutionWindow(QWidget):
 
     def rebuild_step_cards(self):
         """Rebuild step cards to reflect updated statuses."""
-        # This is a simplified version - in production you'd update existing widgets
-        # For now, just update the card styles by recreating them
-        for i, (step, card_widget) in enumerate(zip(self.steps, self.step_card_widgets)):
-            # Update styling based on new status
-            obj_name = card_widget.objectName()
-            if step.status == 'current':
-                card_widget.setStyleSheet(f"""
-                    QFrame#{obj_name} {{
-                        background-color: #262626;
-                        border: 1px solid #f97316; /* ≤2px 外框，仅作用于该卡片 */
-                        border-radius: 8px;
-                        padding: 10px 12px;
-                    }}
-                """)
-            elif step.status == 'completed':
-                card_widget.setStyleSheet(f"""
-                    QFrame#{obj_name} {{
-                        background-color: #1e1e1e;
-                        border: 1px solid rgba(34, 197, 94, 0.5); /* ≤2px 外框，仅作用于该卡片 */
-                        border-radius: 8px;
-                        padding: 10px 12px;
-                    }}
-                """)
-            else:
-                card_widget.setStyleSheet(f"""
-                    QFrame#{obj_name} {{
-                        background-color: #1e1e1e;
-                        border: 1px solid #2a2a2a; /* ≤2px 外框，仅作用于该卡片 */
-                        border-radius: 8px;
-                        padding: 10px 12px;
-                    }}
-                """)
+        for step, card_widget in zip(self.steps, self.step_card_widgets):
+            name_label = card_widget.findChild(QLabel, "stepNameLabel")
+            desc_label = card_widget.findChild(QLabel, "stepDescLabel")
+            self._apply_step_card_state(card_widget, step.status, name_label, desc_label)
 
     def rebuild_status_section(self):
         """Rebuild the status section in footer based on current detection status."""
@@ -1963,28 +2491,9 @@ class ProcessExecutionWindow(QWidget):
         from PySide6.QtWidgets import QDialog, QDialogButtonBox
 
         dialog = QDialog(self)
+        dialog.setObjectName("completionDialog")
         dialog.setWindowTitle("任务完成")
         dialog.setFixedSize(520, 360)
-        dialog.setStyleSheet("""
-            QDialog {
-                background-color: #252525;
-            }
-            QLabel {
-                color: #ffffff;
-                font-size: 16px;
-            }
-            QPushButton {
-                background-color: #22c55e;
-                color: #ffffff;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #16a34a;
-            }
-        """)
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(24, 16, 24, 16)
@@ -1992,7 +2501,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Success icon and message
         icon = QLabel("✅")
-        icon.setStyleSheet("font-size: 64px;")
+        icon.setObjectName("completionDialogIcon")
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         message = QLabel("所有工艺步骤已完成!")
@@ -2003,7 +2512,7 @@ class ProcessExecutionWindow(QWidget):
         message.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         summary = QLabel(f"工艺: {self.process_data.get('name')}\n完成步骤: {self.total_steps}/{self.total_steps}")
-        summary.setStyleSheet("color: #9ca3af; font-size: 14px;")
+        summary.setObjectName("completionDialogSummary")
         try:
             summary.setWordWrap(True)
         except Exception:
@@ -2060,14 +2569,62 @@ class ProcessExecutionWindow(QWidget):
         self.rebuild_step_cards()
         self.update_overlay_visibility()
         self.rebuild_status_section()
+        try:
+            self._guide_qimages = {}
+            self._guide_errors = {}
+            self._ensure_guide_for_step(self.current_step_index, preload_next=True)
+        except Exception:
+            pass
 
         logger.info("Reset for next product")
+        try:
+            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+            if pid:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().reset_algorithm(str(pid))
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         """Handle window close event."""
-        # Stop camera if active
-        if self.camera_active:
-            self.stop_camera_preview()
+        self._closing = True
+        # Stop preview worker only, keep camera connection alive
+        if self.preview_worker:
+            self.preview_worker.stop()
+            self.preview_worker.wait(1000)
+            self.preview_worker = None
+
+        try:
+            workers = list(getattr(self, "_guide_workers", {}).values())
+            for w in workers:
+                try:
+                    w.requestInterruption()
+                except Exception:
+                    pass
+            for w in workers:
+                try:
+                    if w.isRunning():
+                        w.wait(1000)
+                except Exception:
+                    pass
+            for w in workers:
+                try:
+                    if w.isRunning():
+                        w.terminate()
+                        w.wait(200)
+                except Exception:
+                    pass
+            try:
+                self._guide_workers = {}
+            except Exception:
+                pass
+        except Exception:
+            pass
+        
+        # Note: We do NOT call self.stop_camera_preview() here anymore.
+        # This allows the camera connection and stream to persist across window sessions,
+        # avoiding the overhead of re-discovery and re-connection.
+        # The CameraService (singleton/global) maintains the active device.
 
         # Clean up timers
         if self.detection_timer:
@@ -2075,9 +2632,16 @@ class ProcessExecutionWindow(QWidget):
         if self.advance_timer:
             self.advance_timer.stop()
 
-        logger.info("ProcessExecutionWindow closing")
+        logger.info("ProcessExecutionWindow closing (camera connection preserved if active)")
         self.closed.emit()
         super().closeEvent(event)
+        try:
+            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
+            if pid:
+                from src.runner.engine import RunnerEngine
+                RunnerEngine().teardown_algorithm(str(pid))
+        except Exception:
+            pass
 
     def show_centered(self):
         """Show the window maximized by default, centering as fallback."""

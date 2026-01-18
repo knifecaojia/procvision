@@ -1,7 +1,7 @@
 {
   "server": {
-    "address": "192.168.1.100",
-    "port": 8080
+    "address": "39.104.202.123",
+    "port": 18880
   },
   "storage": {
     "image": {
@@ -14,9 +14,10 @@
     }
   },
   "general": {
-    "auto_start_next": true,
+    "auto_start_next": false,
     "result_prompt_position": "top_right",
     "draw_boxes_ok": true,
-    "draw_boxes_ng": true
+    "draw_boxes_ng": true,
+    "theme": "dark"
   }
 }

@@ -8,7 +8,7 @@ from typing import Optional
 
  
 from PySide6.QtCore import Qt, QSize, Slot, QTimer
-from PySide6.QtGui import QIcon, QPixmap, QImage
+from PySide6.QtGui import QIcon, QPixmap, QImage, QPainter
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QComboBox, QPushButton, QGridLayout, QSizePolicy,
@@ -16,6 +16,8 @@ from PySide6.QtWidgets import (
     QListWidget, QListWidgetItem, QSpinBox, QDoubleSpinBox,
     QGroupBox, QProgressBar, QLayout
 )
+
+from PySide6.QtSvg import QSvgRenderer
 
 from src.camera.camera_service import CameraService
 from src.camera.types import CameraInfo
@@ -27,6 +29,7 @@ from src.camera.calibration import (
 )
 from src.ui.components import SliderField, PreviewWorker
 from .camera_calibration_panel import CameraCalibrationPanel
+from ..styles import refresh_widget_styles
 
 logger = logging.getLogger("camera.ui")
 
@@ -34,7 +37,7 @@ logger = logging.getLogger("camera.ui")
 class CameraPage(QFrame):
     """Camera settings page with live preview and parameter controls."""
 
-    def __init__(self, camera_service: Optional[CameraService], parent=None):
+    def __init__(self, camera_service: Optional[CameraService], parent=None, initial_theme: str = "dark"):
         super().__init__(parent)
         self.setObjectName("cameraPage")
         self.camera_service = camera_service
@@ -68,6 +71,10 @@ class CameraPage(QFrame):
         self.start_preview_btn: Optional[QToolButton] = None
         self.stop_preview_btn: Optional[QToolButton] = None
         self.screenshot_btn: Optional[QToolButton] = None
+
+        self.current_theme = initial_theme if initial_theme in {"dark", "light"} else "dark"
+        self._control_buttons: list[tuple[QToolButton, str]] = []
+        self._icon_cache: dict[tuple[str, str], QIcon] = {}
 
         self.init_ui()
         self.update_connection_state()
@@ -154,7 +161,7 @@ class CameraPage(QFrame):
 
         if self.status_value_label:
             self.status_value_label.setText("服务不可用")
-            self.status_value_label.setStyleSheet("color: #8C92A0;")
+            self._update_status_label_state("unavailable")
 
         if self.temp_value_label:
             self.temp_value_label.setText("--")
@@ -170,6 +177,11 @@ class CameraPage(QFrame):
         if not visible:
             self._hide_calibration_panel()
 
+    def _update_status_label_state(self, state: str) -> None:
+        if self.status_value_label:
+            self.status_value_label.setProperty("connectionState", state)
+            refresh_widget_styles(self.status_value_label)
+
     def _clear_layout(self, layout: QLayout):
         """Remove all child widgets/layouts from the given layout."""
         while layout.count():
@@ -180,6 +192,60 @@ class CameraPage(QFrame):
                 widget.deleteLater()
             if child_layout:
                 self._clear_layout(child_layout)
+
+    def apply_theme(self, theme: str) -> None:
+        if theme not in {"dark", "light"}:
+            return
+        if theme == self.current_theme:
+            return
+        self.current_theme = theme
+        self._icon_cache.clear()
+        self._refresh_control_icons()
+
+    def _refresh_control_icons(self) -> None:
+        for button, icon_name in self._control_buttons:
+            self._set_button_icon(button, icon_name, force=True)
+
+    def _set_button_icon(self, button: QToolButton, icon_name: str, force: bool = False) -> bool:
+        if force:
+            self._icon_cache.pop((icon_name, self.current_theme), None)
+        icon = self._get_svg_icon(icon_name)
+        if not icon:
+            return False
+        button.setIcon(icon)
+        button.setIconSize(QSize(20, 20))
+        button.setProperty("iconFallback", False)
+        refresh_widget_styles(button)
+        return True
+
+    def _get_svg_icon(self, icon_name: str) -> Optional[QIcon]:
+        key = (icon_name, self.current_theme)
+        if key in self._icon_cache:
+            return self._icon_cache[key]
+        icon_path = self.assets_dir / icon_name
+        if not icon_path.exists():
+            return None
+        try:
+            svg_data = icon_path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        color = self._icon_color_for_theme()
+        svg_colored = svg_data.replace("currentColor", color)
+        renderer = QSvgRenderer(bytearray(svg_colored, "utf-8"))
+        if not renderer.isValid():
+            return None
+        size = QSize(20, 20)
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        renderer.render(painter)
+        painter.end()
+        icon = QIcon(pixmap)
+        self._icon_cache[key] = icon
+        return icon
+
+    def _icon_color_for_theme(self) -> str:
+        return "#F7F9FC" if self.current_theme == "dark" else "#1F2933"
 
     def _ensure_calibration_panel(self) -> Optional[CameraCalibrationPanel]:
         """Create calibration panel widget if needed."""
@@ -272,12 +338,12 @@ class CameraPage(QFrame):
             button.clicked.connect(callback)
 
             icon_path = self.assets_dir / icon_name
-            if icon_path.exists():
-                button.setIcon(QIcon(str(icon_path)))
-                button.setIconSize(QSize(20, 20))
+            if icon_path.exists() and self._set_button_icon(button, icon_name):
+                self._control_buttons.append((button, icon_name))
             else:
                 button.setText(fallback_symbol)
-                button.setStyleSheet("font-size: 24px;")
+                button.setProperty("iconFallback", "true")
+                refresh_widget_styles(button)
 
             controls_layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
 
@@ -331,31 +397,12 @@ class CameraPage(QFrame):
         scroll_area.setWidgetResizable(True)
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background: transparent;
-            }
-            QScrollBar:vertical {
-                background: #1F232B;
-                width: 10px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #8C92A0;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #FF8C32;
-            }
-        """)
         scroll_area.setFrameShape(QFrame.NoFrame)
-        scroll_area.viewport().setStyleSheet("background: transparent;")
+        scroll_area.viewport().setObjectName("paramsScrollViewport")
         scroll_area.viewport().setAutoFillBackground(False)
 
         self.params_container = QFrame()
         self.params_container.setObjectName("paramsContainer")
-        self.params_container.setStyleSheet("background: transparent;")
         self.params_container.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         container_layout = QVBoxLayout(self.params_container)
         container_layout.setContentsMargins(0, 0, 0, 10)
@@ -414,6 +461,7 @@ class CameraPage(QFrame):
         self.status_value_label = QLabel("未连接")
         self.status_value_label.setObjectName("paramValue")
         self.status_value_label.setMinimumWidth(80)
+        self.status_value_label.setProperty("connectionState", "disconnected")
 
         cam_temp_label = QLabel("温度:")
         cam_temp_label.setObjectName("paramLabel")
@@ -834,12 +882,12 @@ class CameraPage(QFrame):
         if is_connected:
             self.model_value_label.setText(camera.info.model_name or "未知")
             self.status_value_label.setText("已连接")
-            self.status_value_label.setStyleSheet("color: #3CC37A;")
+            self._update_status_label_state("connected")
             self._set_params_panel_visible(True)
         else:
             self.model_value_label.setText("未连接")
             self.status_value_label.setText("未连接")
-            self.status_value_label.setStyleSheet("color: #8C92A0;")
+            self._update_status_label_state("disconnected")
             self._set_params_panel_visible(False)
 
     def cleanup(self):

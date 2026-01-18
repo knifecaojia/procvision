@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtGui import QFont, QColor, QPalette
 
+from ..styles import refresh_widget_styles
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,68 +56,20 @@ class _DarkPaletteMixin:
         self.color_status_conditional_text = "#fb923c"
 
 
-class _BadgeLabel(QLabel):
-    """Reusable badge label that keeps custom colors even after style resets."""
+class BadgeLabel(QLabel):
+    """Reusable badge label styled via QSS."""
 
-    def __init__(self, text_color: str, bg_color: str, border_color: str, parent=None):
+    def __init__(self, role: str, parent=None):
         super().__init__(parent)
-        self._text_color = text_color
-        self._bg_color = bg_color
-        self._border_color = border_color
-        self._style_applying = False
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setAutoFillBackground(True)
-        self._apply_style()
+        self.setObjectName("recordsBadge")
+        self.setProperty("badgeRole", role)
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumHeight(28)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
-    def update_colors(self, text_color: str, bg_color: str, border_color: str):
-        self._text_color = text_color
-        self._bg_color = bg_color
-        self._border_color = border_color
-        self._apply_style()
-
-    def _apply_style(self):
-        if getattr(self, "_style_applying", False):
-            return
-        self._style_applying = True
-        palette = self.palette()
-        palette.setColor(QPalette.WindowText, self._to_qcolor(self._text_color))
-        palette.setColor(QPalette.Window, self._to_qcolor(self._bg_color))
-        palette.setColor(QPalette.Base, self._to_qcolor(self._bg_color))
-        palette.setColor(QPalette.Text, self._to_qcolor(self._text_color))
-        self.setPalette(palette)
-        self.setStyleSheet(
-            "QLabel {{"
-            f"color: {self._text_color};"
-            f"background-color: {self._bg_color};"
-            f"border: 1px solid {self._border_color};"
-            "border-radius: 14px;"
-            "padding: 0 16px;"
-            "font-weight: 700;"
-            "letter-spacing: 0.5px;"
-            "}}"
-        )
-        self._style_applying = False
-
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if event.type() in (QEvent.Type.StyleChange, QEvent.Type.PaletteChange):
-            self._apply_style()
-
-    @staticmethod
-    def _to_qcolor(value: str) -> QColor:
-        if value.startswith("#"):
-            return QColor(value)
-        if value.startswith("rgba"):
-            components = value[value.find("(") + 1:value.find(")")].split(",")
-            parts = [c.strip() for c in components]
-            r, g, b = [float(parts[i]) for i in range(3)]
-            a = float(parts[3])
-            if a <= 1:
-                alpha = int(a * 255)
-            else:
-                alpha = int(a)
-            return QColor(int(r), int(g), int(b), alpha)
-        return QColor(value)
+    def set_role(self, role: str) -> None:
+        self.setProperty("badgeRole", role)
+        refresh_widget_styles(self)
 
 
 class RecordsTable(QTableWidget, _DarkPaletteMixin):
@@ -127,21 +81,15 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
     STATUS_STYLES = {
         "ok": {
             "label": "OK",
-            "badge_bg_attr": "color_badge_green_bg",
-            "badge_text_attr": "color_badge_green_text",
-            "badge_border_attr": "color_badge_green_border",
+            "badge_role": "status-ok",
         },
         "ng": {
             "label": "NG",
-            "badge_bg_attr": "color_badge_red_bg",
-            "badge_text_attr": "color_badge_red_text",
-            "badge_border_attr": "color_badge_red_border",
+            "badge_role": "status-ng",
         },
         "conditional": {
             "label": "条件通过",
-            "badge_bg_attr": "color_badge_orange_bg",
-            "badge_text_attr": "color_badge_orange_text",
-            "badge_border_attr": "color_badge_orange_border",
+            "badge_role": "status-conditional",
         },
     }
 
@@ -170,7 +118,6 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
         self.setFocusPolicy(Qt.NoFocus)
         self.setShowGrid(False)
         self.setWordWrap(False)
-        self.setStyleSheet(self._build_table_stylesheet())
         self._apply_palette()
 
         header = self.horizontalHeader()
@@ -243,43 +190,6 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
             self.setCellWidget(row, 6, self._create_status_cell(record))
             self.setCellWidget(row, 7, self._create_action_button(record.get("id", row)))
 
-    def _build_table_stylesheet(self):
-        """Builds the stylesheet for the table widget."""
-        return f"""
-        QTableWidget#recordsTable,
-        QTableView#recordsTable {{
-            background-color: {self.color_surface};
-            border: none;
-            color: {self.color_text_primary};
-            gridline-color: {self.color_border_subtle};
-            font-size: 14px;
-        }}
-        QHeaderView::section {{
-            background-color: {self.color_surface_dark};
-            color: {self.color_text_muted};
-            border: none;
-            border-right: 1px solid {self.color_border_subtle};
-            padding: 12px 10px;
-            font-size: 13px;
-            font-weight: 600;
-        }}
-        QTableWidget::item,
-        QTableView::item {{
-            border-bottom: 1px solid {self.color_border_subtle};
-            padding: 16px 10px;
-            color: {self.color_text_primary};
-            background-color: transparent;
-        }}
-        QTableWidget::item:selected,
-        QTableView::item:selected {{
-            background-color: {self.color_surface_dark}cc;
-            color: {self.color_text_primary};
-        }}
-        QTableWidget::item:focus {{
-            outline: none;
-        }}
-        """
-
     def _set_text_item(self, row, column, text, monospace=False, bold=False):
         """Helper to set a styled QTableWidgetItem."""
         item = QTableWidgetItem(text)
@@ -302,10 +212,10 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
         layout.setSpacing(4)
 
         title_label = QLabel(record.get("process_title", ""))
-        title_label.setStyleSheet(f"color: {self.color_text_primary}; font-size: 14px; font-weight: 600;")
+        title_label.setObjectName("recordsProcessTitle")
 
         code_label = QLabel(record.get("process_name", ""))
-        code_label.setStyleSheet(f"color: {self.color_text_muted}; font-size: 12px;")
+        code_label.setObjectName("recordsProcessCode")
 
         layout.addWidget(title_label)
         layout.addWidget(code_label)
@@ -313,15 +223,8 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
 
     def _create_workstation_badge(self, workstation):
         """Create workstation badge similar to specs."""
-        badge = _BadgeLabel(
-            text_color=self.color_badge_orange_text,
-            bg_color=self.color_badge_orange_bg,
-            border_color=self.color_badge_orange_border,
-        )
+        badge = BadgeLabel("workstation")
         badge.setText(workstation or "-")
-        badge.setAlignment(Qt.AlignCenter)
-        badge.setMinimumHeight(28)
-        badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         wrapper = QWidget()
         wrapper.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         layout = QHBoxLayout(wrapper)
@@ -340,15 +243,8 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
         status = record.get("status", "ok")
         status_style = self.STATUS_STYLES.get(status, self.STATUS_STYLES["ok"])
         label_text = record.get("status_label") or status_style["label"]
-        badge = _BadgeLabel(
-            text_color=getattr(self, status_style["badge_text_attr"]),
-            bg_color=getattr(self, status_style["badge_bg_attr"]),
-            border_color=getattr(self, status_style["badge_border_attr"]),
-        )
+        badge = BadgeLabel(status_style["badge_role"])
         badge.setText(label_text)
-        badge.setAlignment(Qt.AlignCenter)
-        badge.setMinimumHeight(28)
-        badge.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
 
         layout.addWidget(badge, alignment=Qt.AlignLeft)
 
@@ -356,7 +252,7 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
         if defects:
             defects_label = QLabel(", ".join(defects))
             defects_label.setWordWrap(False)  # keep NG reason on a single line so rows don't clip
-            defects_label.setStyleSheet("color: #f87171; font-size: 12px;")
+            defects_label.setObjectName("recordsDefectsLabel")
             layout.addWidget(defects_label, alignment=Qt.AlignLeft)
 
         return container
@@ -364,21 +260,9 @@ class RecordsTable(QTableWidget, _DarkPaletteMixin):
     def _create_action_button(self, record_id):
         """Create the 'view detail' button per spec."""
         btn = QPushButton("查看详情")
+        btn.setObjectName("recordsActionButton")
         btn.setCursor(Qt.PointingHandCursor)
         btn.setFixedHeight(32)
-        btn.setStyleSheet(
-            "QPushButton {"
-            "background-color: transparent;"
-            f"border: 1px solid {self.color_border_subtle};"
-            f"color: {self.color_text_muted};"
-            "border-radius: 6px;"
-            "font-weight: 600;"
-            "}"
-            "QPushButton:hover {"
-            f"background-color: {self.color_surface_dark};"
-            f"color: {self.color_text_primary};"
-            "}"
-        )
         btn.clicked.connect(lambda: self.view_detail.emit(record_id))
 
         container = QWidget()
@@ -418,13 +302,6 @@ class RecordsTableWidget(QFrame, _DarkPaletteMixin):
 
         container = QFrame()
         container.setObjectName("recordsTableContainer")
-        container.setStyleSheet(
-            "QFrame#recordsTableContainer {"
-            f"background-color: {self.color_surface};"
-            f"border: 1px solid {self.color_border_subtle};"
-            "border-radius: 12px;"
-            "}"
-        )
 
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)

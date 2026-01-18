@@ -1,0 +1,206 @@
+QMainWindow {
+    background-color: @deep_graphite;
+    border-radius: 10px;
+    font-family: "@font_family";
+}
+
+#centralWidget {
+    background-color: @deep_graphite;
+    border-radius: 10px;
+    font-family: "@font_family";
+}
+
+#mainSplitter {
+    background-color: @deep_graphite;
+    font-family: "@font_family";
+}
+
+#mainSplitter::handle {
+    background-color: transparent;
+}
+
+#titleBar {
+    background-color: @title_bar_dark;
+    border-bottom: 1px solid @dark_border;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+#titleBarLabel {
+    color: @arctic_white;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    font-family: "@font_family";
+}
+
+#titleVersion {
+    color: @cool_grey;
+    font-size: 12px;
+    text-transform: uppercase;
+    font-family: "@font_family";
+}
+
+#windowButton,
+#closeButton {
+    background-color: transparent;
+    border: 1px solid @dark_border;
+    color: @arctic_white;
+    font-weight: bold;
+    border-radius: 3px;
+    font-family: "@font_family";
+}
+
+#windowButton:hover {
+    border: 1px solid @hover_orange;
+    color: @hover_orange;
+}
+
+#closeButton:hover {
+    background-color: @error_red;
+    border: 1px solid @error_red;
+}
+
+#leftFrame {
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+    border-right: none;
+}
+
+#leftImage {
+    border-radius: 10px 0 0 10px;
+}
+
+#leftImage[contentState="placeholder"] {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 20px;
+    letter-spacing: 4px;
+}
+
+#rightFrame {
+    background-color: @steel_grey;
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+    border-left: 1px solid @dark_border;
+}
+
+#brandTitle {
+    color: @arctic_white;
+    font-size: 30px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    font-family: "@font_family";
+}
+
+#loginTitle {
+    color: @cool_grey;
+    font-size: 16px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-family: "@font_family";
+}
+
+#fieldLabel {
+    color: @cool_grey;
+    font-size: 14px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-family: "@font_family";
+}
+
+#inputField {
+    background-color: @deep_graphite;
+    border: 1px solid @dark_border;
+    color: @arctic_white;
+    font-size: 14px;
+    padding: 0 18px;
+    border-radius: 6px;
+    font-family: "@font_family";
+}
+
+#inputField:focus {
+    border: 1px solid @hover_orange;
+}
+
+#inputField[inputState="error"] {
+    border: 1px solid @error_red;
+}
+
+#comboBox {
+    background-color: @deep_graphite;
+    border: 1px solid @dark_border;
+    color: @arctic_white;
+    font-size: 14px;
+    padding: 0 14px;
+    border-radius: 6px;
+    font-family: "@font_family";
+}
+
+#comboBox:focus {
+    border: 1px solid @hover_orange;
+}
+
+#comboBox QAbstractItemView {
+    background-color: @steel_grey;
+    border: 1px solid @dark_border;
+    color: @arctic_white;
+    selection-background-color: @hover_orange;
+    font-family: "@font_family";
+}
+
+#checkBox {
+    color: @arctic_white;
+    font-size: 12px;
+    text-transform: uppercase;
+    font-family: "@font_family";
+}
+
+#checkBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid @dark_border;
+    background-color: @deep_graphite;
+    border-radius: 2px;
+}
+
+#checkBox::indicator:checked {
+    background-color: @hover_orange;
+    border: 1px solid @hover_orange;
+}
+
+#loginButton {
+    background-color: @hover_orange;
+    color: @arctic_white;
+    border: none;
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    font-family: "@font_family";
+}
+
+#loginButton:hover {
+    background-color: @amber;
+}
+
+#loginButton:disabled {
+    background-color: @dark_border;
+    color: @cool_grey;
+}
+
+#statusLabel {
+    color: @cool_grey;
+    font-size: 12px;
+    font-weight: bold;
+    font-family: "@font_family";
+}
+
+#statusLabel[statusState="error"] {
+    color: @error_red;
+}
+
+#statusLabel[statusState="success"] {
+    color: @success_green;
+}

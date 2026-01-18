@@ -1,0 +1,7 @@
+{
+  "python_version": "3.13",
+  "implementation": "cp",
+  "abi": "cp313",
+  "wheels_platform": "win_amd64",
+  "auto_freeze": true
+}

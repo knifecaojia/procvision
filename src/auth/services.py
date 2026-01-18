@@ -13,6 +13,7 @@ from typing import Optional, Tuple, Dict, Any
 
 from .models import User, AuthSession, AuthState
 from .storage import UserStorage, SessionStorage
+from ..services.network_service import NetworkService
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class AuthService:
         self.user_storage = UserStorage(db_path)
         self.session_storage = SessionStorage(db_path)
         self.auth_state = AuthState()
+        self.network_service = NetworkService()
 
         # Security configuration
         self.bcrypt_cost = 12
@@ -51,15 +53,52 @@ class AuthService:
             if not username or not password:
                 return False, "Username and password are required"
 
-            # Retrieve user from storage
+            # Try network login
+            network_success = False
+            try:
+                login_data = self.network_service.login(username, password)
+                if login_data.get("code") == 200:
+                    network_success = True
+                    # Login successful
+                    # Ensure user exists in local DB for preferences etc.
+                    user_data = self.user_storage.get_user_by_username(username)
+                    if not user_data:
+                        # Create local user
+                        # Use a dummy hash since we rely on network auth
+                        dummy_hash = self._hash_password(password)
+                        self.user_storage.create_user(username, dummy_hash)
+                        user_data = self.user_storage.get_user_by_username(username)
+                    
+                    if user_data:
+                         self.user_storage.update_last_login(user_data['id'])
+
+                    logger.info(f"User authenticated successfully via network: {username}")
+                    return True, None
+            except Exception as e:
+                 logger.warning(f"Network login failed: {e}")
+                 # Continue to local fallback
+
+            # Fallback to local storage if network fails or user not found on network
+            # This allows offline login or dev/mock usage
+            logger.info(f"Attempting local fallback login for: {username}")
+            
+            # Special handling for dev/admin in case it doesn't exist locally yet
+            # and we are in a "first run" scenario where network is down.
             user_data = self.user_storage.get_user_by_username(username)
+            
+            # Auto-seed admin user for development convenience if not exists
+            if not user_data and username == "admin" and password == "admin123":
+                 logger.info("Seeding default admin user for local fallback")
+                 password_hash = self._hash_password(password)
+                 self.user_storage.create_user(username, password_hash)
+                 user_data = self.user_storage.get_user_by_username(username)
+
             if not user_data:
-                logger.warning(f"Authentication failed: User not found - {username}")
-                return False, "Invalid username or password"
+                logger.warning(f"Authentication failed: User not found locally - {username}")
+                return False, "Invalid username or password (Network unavailable)"
 
             password_hash = user_data.get('password_hash')
             if not password_hash:
-                logger.error(f"Authentication failed: Missing password hash for user {username}")
                 return False, "Authentication service unavailable"
 
             # Verify password using bcrypt
@@ -71,13 +110,12 @@ class AuthService:
 
             # Check if user account is active
             if not user.is_active:
-                logger.warning(f"Authentication failed: Account inactive - {username}")
                 return False, "Account is inactive"
 
             # Update last login timestamp
             self.user_storage.update_last_login(user.id)
 
-            logger.info(f"User authenticated successfully: {username}")
+            logger.info(f"User authenticated successfully (Local): {username}")
             return True, None
 
         except Exception as e:

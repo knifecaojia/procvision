@@ -39,6 +39,8 @@ from src.camera.calibration import (
     draw_corners,
 )
 
+from ..styles import refresh_widget_styles
+
 logger = logging.getLogger("camera.ui.calibration_panel")
 
 
@@ -66,42 +68,6 @@ class CameraCalibrationPanel(QFrame):
 
         self.setObjectName("cameraCalibrationPanel")
         self.setFrameShape(QFrame.NoFrame)
-        self.setStyleSheet("""
-            #cameraCalibrationPanel QLabel,
-            #cameraCalibrationPanel QGroupBox,
-            #cameraCalibrationPanel QListWidget,
-            #cameraCalibrationPanel QPushButton,
-            #cameraCalibrationPanel QSpinBox,
-            #cameraCalibrationPanel QDoubleSpinBox,
-            #cameraCalibrationPanel QCheckBox {
-                color: #E6EAF3;
-            }
-
-            #cameraCalibrationPanel QListWidget#calibrationImageList {
-                border: 1px solid #2F3744;
-                border-radius: 8px;
-                background-color: rgba(255, 255, 255, 0.03);
-                padding: 6px;
-            }
-
-            #cameraCalibrationPanel QPushButton#calibrationActionButton {
-                background-color: #2F3A4D;
-                border: 1px solid #3F4B61;
-                border-radius: 6px;
-                color: #E6EAF3;
-                padding: 8px 12px;
-            }
-
-            #cameraCalibrationPanel QPushButton#calibrationActionButton:hover:enabled {
-                background-color: #3C4961;
-            }
-
-            #cameraCalibrationPanel QPushButton#calibrationActionButton:disabled {
-                background-color: #1F2633;
-                border-color: #2B3345;
-                color: #6A7284;
-            }
-        """)
 
         self._init_ui()
         self.setVisible(False)
@@ -199,6 +165,7 @@ class CameraCalibrationPanel(QFrame):
         self.status_label = QLabel("请调整棋盘格位置，点击【采集图像】")
         self.status_label.setObjectName("paramLabel")
         self.status_label.setWordWrap(True)
+        self.status_label.setProperty("statusLevel", "info")
         layout.addWidget(self.status_label)
 
     def activate(self):
@@ -233,7 +200,7 @@ class CameraCalibrationPanel(QFrame):
         
         self._update_image_list()
         self._update_progress()
-        self._set_status("请调整棋盘格位置，点击【采集图像】", "#8C92A0")
+        self._set_status("请调整棋盘格位置，点击【采集图像】", "info")
         self.setVisible(True)
         return True
 
@@ -247,7 +214,7 @@ class CameraCalibrationPanel(QFrame):
             self.calibration_service.reset()
         self._update_image_list()
         self._update_progress()
-        self._set_status("已清除所有采集的图像", "#8C92A0")
+        self._set_status("已清除所有采集的图像", "info")
 
     @Slot()
     def _on_board_params_changed(self):
@@ -275,28 +242,28 @@ class CameraCalibrationPanel(QFrame):
             if not self.camera_service.is_streaming():
                 started = self.camera_service.start_preview()
                 if not started:
-                    self._set_status("✗ 预览未启动，请先开始预览", "#E85454")
+                    self._set_status("✗ 预览未启动，请先开始预览", "error")
                     QMessageBox.warning(self, "错误", "预览未启动，请点击开始预览后再采集")
                     return
         except Exception as exc:
             logger.error("Failed to start preview before capture: %s", exc, exc_info=True)
-            self._set_status(f"✗ 启动预览失败: {exc}", "#E85454")
+            self._set_status(f"✗ 启动预览失败: {exc}", "error")
             QMessageBox.critical(self, "错误", f"启动预览失败:\n{exc}")
             return
 
-        self._set_status("正在采集图像...", "#FF8C32")
+        self._set_status("正在采集图像...", "warning")
 
         try:
             success = self.calibration_service.capture_calibration_image(self.board_config)
             if success:
                 self._update_image_list()
                 self._update_progress()
-                self._set_status("✓ 采集成功", "#3CC37A")
+                self._set_status("✓ 采集成功", "success")
             else:
-                self._set_status("✗ 未检测到棋盘格，请调整位置", "#E85454")
+                self._set_status("✗ 未检测到棋盘格，请调整位置", "error")
         except Exception as exc:
             logger.error("Failed to capture image: %s", exc, exc_info=True)
-            self._set_status(f"✗ 采集失败: {exc}", "#E85454")
+            self._set_status(f"✗ 采集失败: {exc}", "error")
             QMessageBox.critical(self, "错误", f"图像采集失败:\n{exc}")
 
     
@@ -324,7 +291,7 @@ class CameraCalibrationPanel(QFrame):
 
         self._show_progress(True)
         self._set_controls_enabled(False)
-        self._set_status("正在执行标定计算...", "#FF8C32")
+        self._set_status("正在执行标定计算...", "warning")
 
         QTimer.singleShot(100, self._execute_calibration)
 
@@ -343,10 +310,10 @@ class CameraCalibrationPanel(QFrame):
                 storage.cleanup_old_calibrations(camera_model, max_files=30)
 
             self._show_calibration_result(result, file_path)
-            self._set_status("✓ 标定完成", "#3CC37A")
+            self._set_status("✓ 标定完成", "success")
         except Exception as exc:
             logger.error("Calibration failed: %s", exc, exc_info=True)
-            self._set_status(f"✗ 标定失败: {exc}", "#E85454")
+            self._set_status(f"✗ 标定失败: {exc}", "error")
             QMessageBox.critical(self, "标定失败", f"标定计算失败:\n{exc}")
         finally:
             self._show_progress(False)
@@ -455,7 +422,7 @@ class CameraCalibrationPanel(QFrame):
         ready = captured >= required
         self.calibrate_btn.setEnabled(ready)
         if ready and captured == required:
-            self._set_status("✓ 已采集足够图像，可以开始标定", "#3CC37A")
+            self._set_status("✓ 已采集足够图像，可以开始标定", "success")
 
     @Slot(object)
     def _on_image_double_clicked(self, index):
@@ -474,7 +441,7 @@ class CameraCalibrationPanel(QFrame):
             if self.calibration_service.remove_image(idx):
                 self._update_image_list()
                 self._update_progress()
-                self._set_status(f"已删除图像 {idx + 1}", "#FF8C32")
+                self._set_status(f"已删除图像 {idx + 1}", "warning")
 
     def _show_progress(self, show: bool):
         """Display or hide spinner style progress."""
@@ -494,8 +461,9 @@ class CameraCalibrationPanel(QFrame):
         else:
             self.calibrate_btn.setEnabled(False)
 
-    def _set_status(self, message: str, color: str):
+    def _set_status(self, message: str, level: str):
         """Update status banner text."""
         if self.status_label:
             self.status_label.setText(message)
-            self.status_label.setStyleSheet(f"color: {color}; padding: 6px;")
+            self.status_label.setProperty("statusLevel", level)
+            refresh_widget_styles(self.status_label)

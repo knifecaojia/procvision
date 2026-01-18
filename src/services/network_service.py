@@ -157,6 +157,28 @@ class NetworkService:
             logger.error(f"Get algorithms error: {e}")
             raise
 
+    def get_record_list(self, page_num: int = 1, page_size: int = 10, status: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Fetch work records from the server.
+
+        Endpoint:
+            GET /client/getRecordList
+        """
+        self._require_token()
+        url = f"{self.base_url}/client/getRecordList"
+        params: Dict[str, Any] = {"pageNum": int(page_num), "pageSize": int(page_size)}
+        if status is not None:
+            params["status"] = int(status)
+
+        logger.debug("Fetching record list: %s", params)
+        try:
+            response = self.session.get(url, params=params, timeout=self.timeout)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            logger.error("Get record list error: %s", e)
+            raise
+
     def health_check(self) -> Dict[str, Any]:
         logger.debug("Performing health check")
         self._require_token()

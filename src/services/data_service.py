@@ -122,6 +122,53 @@ class DataService:
             logger.error(f"Failed to load algorithms: {e}")
             return []
 
+    def get_record_list_online(self, page: int = 1, page_size: int = 10, status: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Fetch work records from network.
+
+        Expected response:
+            {code, msg, total, rows: [...]}
+        """
+        try:
+            status_int = int(status) if status is not None and str(status).strip() != "" else None
+        except Exception:
+            status_int = None
+
+        try:
+            response = self.network_service.get_record_list(page_num=page, page_size=page_size, status=status_int)
+            if response.get("code") != 200:
+                return {
+                    "items": [],
+                    "total": 0,
+                    "page": max(1, int(page)),
+                    "page_size": int(page_size),
+                    "total_pages": 1,
+                    "error": response.get("msg") or "Network request failed",
+                }
+
+            rows = response.get("rows")
+            total = response.get("total", 0)
+            if not isinstance(rows, list):
+                rows = []
+            total_int = int(total or 0)
+            total_pages = (total_int + int(page_size) - 1) // int(page_size) if total_int else 1
+            return {
+                "items": rows,
+                "total": total_int,
+                "page": max(1, int(page)),
+                "page_size": int(page_size),
+                "total_pages": total_pages,
+            }
+        except Exception as e:
+            return {
+                "items": [],
+                "total": 0,
+                "page": max(1, int(page)),
+                "page_size": int(page_size),
+                "total_pages": 1,
+                "error": str(e),
+            }
+
     def get_work_orders(self, page: int = 1, page_size: int = 10, status: Optional[str] = None) -> Dict[str, Any]:
         """
         Fetch work orders with pagination and filtering.

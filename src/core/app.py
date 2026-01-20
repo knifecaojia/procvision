@@ -6,6 +6,7 @@ session state, and window management for the industrial vision application.
 """
 
 import sys
+import os
 import logging
 from pathlib import Path
 
@@ -52,6 +53,10 @@ class IndustrialVisionApp:
 
         # Initialize PySide6 application
         try:
+            if os.name == "nt" and os.environ.get("QT_QPA_PLATFORM") in {"offscreen", "minimal"}:
+                self.logger.warning("QT_QPA_PLATFORM=%s, forcing GUI platform plugin", os.environ.get("QT_QPA_PLATFORM"))
+                os.environ.pop("QT_QPA_PLATFORM", None)
+
             from PySide6.QtWidgets import QApplication
             self.app = QApplication(sys.argv)
             self.app.setStyle("Fusion")

@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QSpacerItem, QSizePolicy,
-    QFileDialog, QCheckBox, QComboBox
+    QFileDialog, QCheckBox, QComboBox, QScrollArea, QWidget
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 
@@ -35,6 +35,19 @@ class SystemPage(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(30, 30, 30, 30)
         layout.setSpacing(20)
+
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName("systemScrollArea")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll_area.setFrameShape(QFrame.NoFrame)
+        scroll_area.viewport().setObjectName("systemScrollViewport")
+
+        scroll_content = QWidget()
+        scroll_content.setObjectName("systemScrollContent")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(20)
         
         # Header section
         header_frame = QFrame()
@@ -48,7 +61,7 @@ class SystemPage(QFrame):
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         
-        layout.addWidget(header_frame)
+        scroll_layout.addWidget(header_frame)
 
         general_frame = QFrame()
         general_frame.setObjectName("generalFrame")
@@ -119,7 +132,7 @@ class SystemPage(QFrame):
         general_layout.addLayout(pos_layout)
         general_layout.addLayout(boxopt_layout)
 
-        layout.addWidget(general_frame)
+        scroll_layout.addWidget(general_frame)
         
         # Server configuration
         server_frame = QFrame()
@@ -154,7 +167,7 @@ class SystemPage(QFrame):
         server_layout.addLayout(addr_layout)
         server_layout.addLayout(port_layout)
         
-        layout.addWidget(server_frame)
+        scroll_layout.addWidget(server_frame)
         
         # Image storage configuration
         image_frame = QFrame()
@@ -195,7 +208,7 @@ class SystemPage(QFrame):
         image_layout.addLayout(img_path_layout)
         image_layout.addLayout(img_retention_layout)
         
-        layout.addWidget(image_frame)
+        scroll_layout.addWidget(image_frame)
         
         # Log storage configuration
         log_frame = QFrame()
@@ -236,7 +249,7 @@ class SystemPage(QFrame):
         log_layout.addLayout(log_path_layout)
         log_layout.addLayout(log_retention_layout)
         
-        layout.addWidget(log_frame)
+        scroll_layout.addWidget(log_frame)
         
         # Save button - moved to bottom and adjusted width
         save_btn_layout = QHBoxLayout()
@@ -248,8 +261,12 @@ class SystemPage(QFrame):
         save_btn_layout.addWidget(self.save_btn)
         save_btn_layout.addStretch()
         
-        layout.addLayout(save_btn_layout)
-        layout.addStretch()
+        scroll_layout.addLayout(save_btn_layout)
+        scroll_layout.addStretch()
+
+        scroll_area.setWidget(scroll_content)
+        layout.addWidget(scroll_area, 1)
+
         self.toast_container = QFrame()
         self.toast_container.setObjectName("toastContainer")
         toast_layout = QHBoxLayout(self.toast_container)

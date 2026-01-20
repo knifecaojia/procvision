@@ -109,6 +109,9 @@ architecture.md
 BS/
 algorithms/
 .trae/
+.trae/*
+.trae/** 
+.trae/documents/
 image/
 pv_sample/
 scripts/

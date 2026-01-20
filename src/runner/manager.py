@@ -279,6 +279,7 @@ class PackageManager:
         env_config = manifest.get("_env_config")
         
         key = f"{name}:{version}"
+        env_dir_name = "_env"
 
         if key in self.registry and not force:
             logger.info(f"Package {key} already installed.")
@@ -322,7 +323,7 @@ class PackageManager:
                                 shutil.copyfileobj(source, target)
 
             # 2. Create venv or conda env
-            venv_dir = os.path.join(install_dir, "venv")
+            venv_dir = os.path.join(install_dir, env_dir_name)
             python_rel_path = ""
             
             # Priority 1: Use Bundled Python Interpreter if available
@@ -387,11 +388,11 @@ class PackageManager:
                              if os.name == 'nt':
                                  python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
                                  pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
-                                 python_rel_path = "venv/Scripts/python.exe"
+                                 python_rel_path = f"{env_dir_name}/Scripts/python.exe"
                              else:
                                  python_cmd = os.path.join(venv_dir, "bin", "python")
                                  pip_cmd = os.path.join(venv_dir, "bin", "pip")
-                                 python_rel_path = "venv/bin/python"
+                                 python_rel_path = f"{env_dir_name}/bin/python"
                              
                              # Skip Conda logic
                              target_py_version = None 
@@ -503,24 +504,48 @@ class PackageManager:
                 elif use_conda:
                     logger.info(f"Creating Conda env at {venv_dir} with python={target_py_version}...")
                     try:
-                        if os.name == "nt":
-                            cmd = f'\"{conda_cmd}\" create -p \"{venv_dir}\" python={target_py_version} -y'
-                            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, shell=True)
-                        else:
-                            cmd = [conda_cmd, "create", "-p", venv_dir, f"python={target_py_version}", "-y"]
-                            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-                    except subprocess.CalledProcessError as e:
-                        logger.error("Conda create failed. Check internet connection or conda config.")
+                        def _run_conda(args: list[str]) -> subprocess.CompletedProcess:
+                            conda_path = conda_cmd
+                            conda_path_l = str(conda_path or "").lower()
+                            if os.name == "nt" and conda_path_l.endswith((".bat", ".cmd")):
+                                joined = " ".join([f"\"{a}\"" if (" " in a or "\t" in a) else a for a in args])
+                                return subprocess.run(
+                                    ["cmd.exe", "/d", "/s", "/c", f'call "{conda_path}" {joined}'],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    text=True,
+                                    encoding="utf-8",
+                                    errors="replace",
+                                )
+                            return subprocess.run(
+                                [conda_path, *args],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                encoding="utf-8",
+                                errors="replace",
+                            )
+
+                        r = _run_conda(["create", "-p", venv_dir, f"python={target_py_version}", "-y"])
+                        if r.returncode != 0:
+                            raise InstallFailedError(
+                                f"Conda create failed (rc={r.returncode}): {(r.stderr or r.stdout).strip()}"
+                            )
+                    except InstallFailedError:
+                        logger.error("Conda create failed. Check conda config / permissions / existing prefix.")
+                        raise
+                    except Exception as e:
+                        logger.error("Conda create failed. Check conda config / permissions / existing prefix.")
                         raise InstallFailedError(f"Conda create failed: {e}")
                     
                     # Resolve paths for Conda (Windows)
                     # In prefix env: python.exe is at root, pip is in Scripts
                     if os.name == 'nt':
                         python_cmd = os.path.join(venv_dir, "python.exe")
-                        python_rel_path = "venv/python.exe"
+                        python_rel_path = f"{env_dir_name}/python.exe"
                     else:
                         python_cmd = os.path.join(venv_dir, "bin", "python")
-                        python_rel_path = "venv/bin/python"
+                        python_rel_path = f"{env_dir_name}/bin/python"
 
                 else:
                     logger.info(f"Creating venv at {venv_dir}...")
@@ -536,11 +561,17 @@ class PackageManager:
                                 try:
                                     if os.name == "nt":
                                         cmd = f'\"{conda_cmd}\" create -p \"{venv_dir}\" python={target_py_version or current_py} -y'
-                                        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, shell=True)
+                                        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", shell=True)
+                                        if r.returncode != 0:
+                                            raise InstallFailedError(f"Conda create failed: {r.stderr.strip() or r.stdout.strip()}")
                                     else:
                                         cmd = [conda_cmd, "create", "-p", venv_dir, f"python={target_py_version or current_py}", "-y"]
-                                        subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-                                except subprocess.CalledProcessError as e2:
+                                        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
+                                        if r.returncode != 0:
+                                            raise InstallFailedError(f"Conda create failed: {r.stderr.strip() or r.stdout.strip()}")
+                                except InstallFailedError:
+                                    raise
+                                except Exception as e2:
                                     raise InstallFailedError(f"Conda create failed: {e2}")
                             else:
                                 raise InstallFailedError(f"Python runtime not found. Include python_runtime in package or install Python: {e}")
@@ -549,10 +580,10 @@ class PackageManager:
                     
                     if os.name == 'nt':
                         python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
-                        python_rel_path = "venv/Scripts/python.exe"
+                        python_rel_path = f"{env_dir_name}/Scripts/python.exe"
                     else:
                         python_cmd = os.path.join(venv_dir, "bin", "python")
-                        python_rel_path = "venv/bin/python"
+                        python_rel_path = f"{env_dir_name}/bin/python"
 
             # 3. Install dependencies
             # Determine pip path in venv
@@ -604,8 +635,21 @@ class PackageManager:
                         if 'use_conda' in locals() and use_conda:
                             logger.info("Installing pip into conda prefix environment...")
                             if os.name == "nt":
-                                ccmd = f'\"{conda_cmd}\" install -p \"{venv_dir}\" pip -y'
-                                subprocess.check_call(ccmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, shell=True)
+                                conda_path = conda_cmd
+                                conda_path_l = str(conda_path or "").lower()
+                                if conda_path_l.endswith((".bat", ".cmd")):
+                                    ccmd = f'call "{conda_path}" install -p "{venv_dir}" pip -y'
+                                    subprocess.check_call(
+                                        ["cmd.exe", "/d", "/s", "/c", ccmd],
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.PIPE,
+                                    )
+                                else:
+                                    subprocess.check_call(
+                                        [conda_path, "install", "-p", venv_dir, "pip", "-y"],
+                                        stdout=subprocess.DEVNULL,
+                                        stderr=subprocess.PIPE,
+                                    )
                             else:
                                 ccmd = [conda_cmd, "install", "-p", venv_dir, "pip", "-y"]
                                 subprocess.check_call(ccmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)

@@ -3,6 +3,8 @@ Camera settings page for the industrial vision system with Hikvision camera inte
 """
 
 import logging
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -47,6 +49,7 @@ class CameraPage(QFrame):
         self.current_username = "admin"  # TODO: Get from session
         self.params_frame: Optional[QFrame] = None
         self.assets_dir = Path(__file__).resolve().parents[2] / "assets"
+        self._latest_preview_frame: Optional[QImage] = None
 
         # UI references
         self.preview_label: Optional[QLabel] = None
@@ -671,8 +674,26 @@ class CameraPage(QFrame):
         if not self.camera_service or not self.camera_service.is_streaming():
             QMessageBox.information(self, "提示", "截图仅在预览进行时可用，请先开始预览。")
             return
-        # TODO: Implement screenshot functionality
-        QMessageBox.information(self, "提示", "截图功能开发中")
+        if self._latest_preview_frame is None or self._latest_preview_frame.isNull():
+            QMessageBox.information(self, "提示", "当前没有可用画面，请稍后再试。")
+            return
+
+        save_dir = self._resolve_image_save_dir()
+        try:
+            save_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as exc:
+            logger.error("Failed to create image directory '%s': %s", save_dir, exc, exc_info=True)
+            QMessageBox.warning(self, "错误", f"无法创建图像保存目录:\n{save_dir}")
+            return
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        save_path = save_dir / f"{timestamp}.jpg"
+        ok = self._latest_preview_frame.save(str(save_path), "JPEG", 85)
+        if not ok:
+            QMessageBox.warning(self, "错误", "截图保存失败")
+            return
+
+        QMessageBox.information(self, "成功", f"截图已保存:\n{save_path}")
 
     @Slot()
     def on_calibrate_camera(self):
@@ -724,6 +745,7 @@ class CameraPage(QFrame):
         """Handle new frame from preview worker."""
         if not self.preview_label:
             return
+        self._latest_preview_frame = image
 
         scaled_pixmap = QPixmap.fromImage(image).scaled(
             self.preview_label.size(),
@@ -731,6 +753,22 @@ class CameraPage(QFrame):
             Qt.TransformationMode.SmoothTransformation
         )
         self.preview_label.setPixmap(scaled_pixmap)
+
+    def _resolve_image_save_dir(self) -> Path:
+        default_dir = Path(r"C:\VisionData\Images")
+        cfg_path = Path(__file__).resolve().parents[3] / "config.json"
+        try:
+            if not cfg_path.exists():
+                return default_dir
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            image_cfg = cfg.get("storage", {}).get("image", {})
+            path_value = str(image_cfg.get("path") or "").strip()
+            if path_value:
+                return Path(path_value)
+        except Exception as exc:
+            logger.warning("Failed to load image storage path from %s: %s", cfg_path, exc)
+        return default_dir
 
     @Slot(dict)
     def on_stats_updated(self, stats):

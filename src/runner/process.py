@@ -52,18 +52,29 @@ class AlgorithmProcess:
             else:
                 # Fallback to standard venv structure
                 if os.name == 'nt':
-                    python_exe = os.path.join(self.install_path, "venv", "Scripts", "python.exe")
+                    python_exe = os.path.join(self.install_path, "_env", "Scripts", "python.exe")
                 else:
-                    python_exe = os.path.join(self.install_path, "venv", "bin", "python")
+                    python_exe = os.path.join(self.install_path, "_env", "bin", "python")
 
             if not os.path.exists(python_exe):
                 # Try fallback for Windows Conda (if python_rel_path wasn't set but it is conda)
                 # Conda on Windows puts python.exe in root of env
-                python_exe_conda = os.path.join(self.install_path, "venv", "python.exe")
+                python_exe_conda = os.path.join(self.install_path, "_env", "python.exe")
                 if os.path.exists(python_exe_conda):
                      python_exe = python_exe_conda
                 else:
-                     raise RunnerError(f"Python interpreter not found at {python_exe}", "2003")
+                     if os.name == 'nt':
+                         python_exe_legacy = os.path.join(self.install_path, "venv", "Scripts", "python.exe")
+                         python_exe_conda_legacy = os.path.join(self.install_path, "venv", "python.exe")
+                     else:
+                         python_exe_legacy = os.path.join(self.install_path, "venv", "bin", "python")
+                         python_exe_conda_legacy = os.path.join(self.install_path, "venv", "bin", "python")
+                     if os.path.exists(python_exe_legacy):
+                         python_exe = python_exe_legacy
+                     elif os.path.exists(python_exe_conda_legacy):
+                         python_exe = python_exe_conda_legacy
+                     else:
+                         raise RunnerError(f"Python interpreter not found at {python_exe}", "2003")
 
             env = os.environ.copy()
             env["PROC_ENV"] = "prod"

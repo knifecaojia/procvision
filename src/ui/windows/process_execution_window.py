@@ -416,10 +416,7 @@ class ProcessExecutionWindow(QWidget):
         # Align overlay geometry with base video label once widget tree is ready
         QTimer.singleShot(0, self._align_overlay_geometry)
         try:
-            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
-            if pid:
-                from src.runner.engine import RunnerEngine
-                RunnerEngine().setup_algorithm(str(pid))
+            pass
         except Exception:
             pass
 
@@ -461,11 +458,10 @@ class ProcessExecutionWindow(QWidget):
     def _initialize_steps_from_algorithm(self) -> List[ProcessStep]:
         """Fetch process steps directly from the algorithm package."""
         from src.runner.engine import RunnerEngine
-        
-        # Determine PID (prefer algorithm_code, not work order id)
         runner = RunnerEngine()
-        pid = self._resolve_runner_pid(runner, self.process_data.get("algorithm_code", self.process_data.get("pid")))
-        if not pid:
+        algo_name = str(self.process_data.get("algorithm_name") or "").strip()
+        algo_ver = str(self.process_data.get("algorithm_version") or "").strip()
+        if not algo_name or not algo_ver:
             return []
              
         # Use RunnerEngine to get info
@@ -479,9 +475,9 @@ class ProcessExecutionWindow(QWidget):
         info_start = datetime.now()
         info = {}
         try:
-            info = runner.get_algorithm_info(pid)
+            info = runner.get_algorithm_info(algo_name, algo_ver)
         except Exception as e:
-            logger.warning(f"Primary info fetch failed for pid={pid}: {e}")
+            logger.warning(f"Primary info fetch failed: {e}")
         info_time = (datetime.now() - info_start).total_seconds() * 1000
         logger.info(f"get_algorithm_info took {info_time:.2f}ms")
         
@@ -518,31 +514,6 @@ class ProcessExecutionWindow(QWidget):
         return steps
 
     def _resolve_runner_pid(self, runner, preferred_pid) -> Optional[str]:
-        pid = str(preferred_pid).strip() if preferred_pid is not None else ""
-        if pid:
-            try:
-                if runner.package_manager.get_active_package(pid):
-                    return pid
-            except Exception:
-                pass
-            try:
-                for entry in (runner.package_manager.registry or {}).values():
-                    if pid in (entry.get("supported_pids") or []):
-                        return pid
-            except Exception:
-                pass
-
-        algo_name = str(self.process_data.get("algorithm_name", "")).strip()
-        algo_ver = str(self.process_data.get("algorithm_version", "")).strip()
-        if algo_name and algo_ver:
-            try:
-                for entry in (runner.package_manager.registry or {}).values():
-                    if entry.get("name") == algo_name and entry.get("version") == algo_ver:
-                        spids = entry.get("supported_pids") or []
-                        if spids:
-                            return str(spids[0])
-            except Exception:
-                pass
         return None
 
     def _initialize_steps_from_task(self, task_steps: List[Dict[str, Any]]) -> List[ProcessStep]:
@@ -2064,24 +2035,15 @@ class ProcessExecutionWindow(QWidget):
             step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or step_number).strip()
             sd = self.process_data.get('steps_detail', [])
             try:
-                from src.runner.engine import RunnerEngine
-                RunnerEngine().on_step_start(
-                    pid=str(self.process_data.get("algorithm_code", self.process_data.get("pid"))),
-                    step_index=step_number,
-                    context={"user_params": {"step_number": step_number}},
-                )
+                pass
             except Exception:
                 pass
             # Use algorithm_code as PID for Runner lookup
             # The work_order uses 'algorithm_code' to map to manifest supported_pids
-            pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
-            
-            # Use RunnerEngine to execute flow
+            algo_name = str(self.process_data.get("algorithm_name") or "").strip()
+            algo_ver = str(self.process_data.get("algorithm_version") or "").strip()
             from src.runner.engine import RunnerEngine
             runner = RunnerEngine()
-            resolved_pid = self._resolve_runner_pid(runner, pid)
-            if resolved_pid:
-                pid = resolved_pid
             
             # Context can include user params like step_number
             camera_id = self.camera_service.current_camera.info.id if self.camera_service and self.camera_service.current_camera else "unknown"
@@ -2107,7 +2069,8 @@ class ProcessExecutionWindow(QWidget):
             try:
                 guide_info = self._get_step_guide_info(idx)
                 result = runner.execute_flow(
-                    pid=pid,
+                    name=algo_name,
+                    version=algo_ver,
                     step_index=step_number,
                     step_desc=step_desc,
                     cur_image=img,

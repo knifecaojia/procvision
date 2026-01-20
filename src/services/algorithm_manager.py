@@ -328,12 +328,11 @@ class AlgorithmManager:
     def delete_package(self, name: str, version: str):
         self.package_manager.delete_zip(name, version)
 
-    def check_deployment_status(self, name: str, version: str, pid: str) -> Dict[str, Any]:
+    def check_deployment_status(self, name: str, version: str) -> Dict[str, Any]:
         """
-        Check if an algorithm is deployed and supports the given PID.
+        Check if an algorithm is deployed.
         """
         key = f"{name}:{version}"
-        logger.info(f"Checking deployment status for {key} with PID {pid}")
 
         deployed_dir_new = os.path.join(self.runner_config.deployed_dir, f"{name}-{version}")
         deployed_dir_old = os.path.join(self.runner_config.deployed_dir, name, version)

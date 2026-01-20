@@ -850,6 +850,17 @@ QWidget#cardsContainer {
     border: 1px solid #1f232b;
 }
 
+/* System page */
+QScrollArea#systemScrollArea {
+    border: none;
+    background: transparent;
+}
+
+QWidget#systemScrollViewport,
+QWidget#systemScrollContent {
+    background: transparent;
+}
+
 /* Camera page */
 QScrollArea#paramsScrollArea {
     border: none;

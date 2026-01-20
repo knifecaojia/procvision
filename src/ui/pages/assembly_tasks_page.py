@@ -179,7 +179,7 @@ class AssemblyTasksPage(QFrame):
             algo_name = process_data.get("algorithm_name", "")
             algo_version = process_data.get("algorithm_version", "")
 
-            deploy_status = self.algorithm_manager.check_deployment_status(algo_name, algo_version, algo_code)
+            deploy_status = self.algorithm_manager.check_deployment_status(algo_name, algo_version)
             process_data["deployment_status"] = deploy_status
 
             work_order_code = str(process_data.get("work_order_code", "")).strip()

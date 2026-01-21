@@ -26,6 +26,81 @@ class PackageManager:
         self._ensure_dirs()
         self.registry: Dict[str, RegistryEntry] = self._load_registry()
 
+    def _extract_zip_with_progress(
+        self,
+        zip_path: str,
+        install_dir: str,
+        needs_fix: bool,
+        progress_callback=None,
+        start_percent: int = 0,
+        end_percent: int = 70,
+    ) -> None:
+        start_percent = int(start_percent)
+        end_percent = int(end_percent)
+        start_percent = max(0, min(100, start_percent))
+        end_percent = max(0, min(100, end_percent))
+        if end_percent < start_percent:
+            start_percent, end_percent = end_percent, start_percent
+
+        def emit(value: int) -> None:
+            if not progress_callback:
+                return
+            progress_callback.emit(max(0, min(100, int(value))))
+
+        emit(start_percent)
+        with zipfile.ZipFile(zip_path, "r") as z:
+            infos = [info for info in z.infolist() if not info.is_dir()]
+            total_bytes = sum(int(getattr(info, "file_size", 0) or 0) for info in infos)
+            total_files = len(infos)
+            done_bytes = 0
+            done_files = 0
+            last_percent = start_percent
+
+            for info in z.infolist():
+                filename = info.filename
+                if needs_fix and not (info.flag_bits & 0x800):
+                    try:
+                        filename = filename.encode("cp437").decode("gbk")
+                    except Exception:
+                        pass
+
+                if filename.startswith("/") or ".." in filename:
+                    continue
+
+                target_path = os.path.join(install_dir, filename)
+                if info.is_dir():
+                    os.makedirs(target_path, exist_ok=True)
+                    continue
+
+                os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                with z.open(info) as source, open(target_path, "wb") as target:
+                    while True:
+                        chunk = source.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+                        done_bytes += len(chunk)
+                        if not progress_callback:
+                            continue
+                        if total_bytes > 0:
+                            ratio = min(1.0, done_bytes / total_bytes)
+                        else:
+                            ratio = min(1.0, done_files / max(1, total_files))
+                        percent = start_percent + int(ratio * (end_percent - start_percent))
+                        if percent != last_percent:
+                            last_percent = percent
+                            emit(percent)
+
+                done_files += 1
+                if progress_callback and total_bytes <= 0:
+                    ratio = min(1.0, done_files / max(1, total_files))
+                    percent = start_percent + int(ratio * (end_percent - start_percent))
+                    if percent != last_percent:
+                        last_percent = percent
+                        emit(percent)
+
+        emit(end_percent)
+
     def _detect_python_version(self, wheels_path: str) -> Optional[str]:
         """Detects Python version from wheel filenames (e.g., cp310, cp312)."""
         if not os.path.exists(wheels_path):
@@ -267,8 +342,10 @@ class PackageManager:
         except Exception as e:
             raise InvalidZipError(f"Validation failed: {str(e)}")
 
-    def install_package(self, zip_path: str, force: bool = False) -> RegistryEntry:
+    def install_package(self, zip_path: str, force: bool = False, progress_callback=None) -> RegistryEntry:
         """Installs a package from a zip file."""
+        if progress_callback:
+            progress_callback.emit(0)
         manifest = self.validate_package(zip_path)
         name = manifest["name"]
         version = manifest["version"]
@@ -295,34 +372,18 @@ class PackageManager:
         try:
             # 1. Unzip with encoding fix
             os.makedirs(install_dir, exist_ok=True)
-            with zipfile.ZipFile(zip_path, 'r') as z:
-                if not needs_fix:
-                     z.extractall(install_dir)
-                else:
-                    # Manually extract and rename
-                    for info in z.infolist():
-                        # Logic to fix name
-                        filename = info.filename
-                        if not (info.flag_bits & 0x800):
-                            try:
-                                filename = filename.encode('cp437').decode('gbk')
-                            except:
-                                pass
-                        
-                        # Prevent path traversal
-                        if filename.startswith("/") or ".." in filename:
-                            continue
-                            
-                        target_path = os.path.join(install_dir, filename)
-                        
-                        if info.is_dir():
-                            os.makedirs(target_path, exist_ok=True)
-                        else:
-                            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                            with z.open(info) as source, open(target_path, "wb") as target:
-                                shutil.copyfileobj(source, target)
+            self._extract_zip_with_progress(
+                zip_path,
+                install_dir,
+                bool(needs_fix),
+                progress_callback=progress_callback,
+                start_percent=0,
+                end_percent=70,
+            )
 
             # 2. Create venv or conda env
+            if progress_callback:
+                progress_callback.emit(72)
             venv_dir = os.path.join(install_dir, env_dir_name)
             python_rel_path = ""
             
@@ -587,6 +648,8 @@ class PackageManager:
 
             # 3. Install dependencies
             # Determine pip path in venv
+            if progress_callback:
+                progress_callback.emit(86)
 
             # Resolve actual paths on disk
             wheels_dir = os.path.join(install_dir, wheels_internal_path)
@@ -672,6 +735,8 @@ class PackageManager:
                     raise InstallFailedError(f"Conda pip install failed: {e2}")
 
             # 4. Register
+            if progress_callback:
+                progress_callback.emit(98)
             entry: RegistryEntry = {
                 "name": name,
                 "version": version,
@@ -686,6 +751,8 @@ class PackageManager:
             self.registry[key] = entry
             self._save_registry()
             logger.info(f"Package {key} installed successfully.")
+            if progress_callback:
+                progress_callback.emit(100)
             return entry
 
         except subprocess.CalledProcessError as e:

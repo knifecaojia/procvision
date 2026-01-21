@@ -287,11 +287,8 @@ class AlgorithmManager:
         if not os.path.exists(zip_path):
             raise Exception(f"Zip file not found for {name} {version}")
 
-        progress_callback.emit(10)
-        # Call Manager (Blocking)
-        # We wrap it to emit progress (fake progress for the blocking call)
-        self.package_manager.install_package(zip_path, force=True)
-        progress_callback.emit(100)
+        progress_callback.emit(0)
+        self.package_manager.install_package(zip_path, force=True, progress_callback=progress_callback)
 
     def import_local_algorithm(self, src_path: str):
         """Import local zip."""

@@ -1401,8 +1401,50 @@ class ProcessExecutionWindow(QWidget):
             sy = dh / float(oh) if oh else 1.0
             ox = int((lw - dw) / 2)
             oy = int((lh - dh) / 2)
+
+            def _to_float(v: Any) -> Optional[float]:
+                if v is None:
+                    return None
+                if isinstance(v, (int, float)):
+                    return float(v)
+                if isinstance(v, str):
+                    s = v.strip()
+                    if not s or s.lower() == "none":
+                        return None
+                    try:
+                        return float(s)
+                    except Exception:
+                        return None
+                return None
+
             for r in regions:
-                x1, y1, x2, y2 = r.get('box_coords', [0, 0, 0, 0])
+                coords = r.get("box_coords")
+                x1 = y1 = x2 = y2 = None
+                if isinstance(coords, (list, tuple)) and len(coords) >= 4:
+                    x1 = _to_float(coords[0])
+                    y1 = _to_float(coords[1])
+                    x2 = _to_float(coords[2])
+                    y2 = _to_float(coords[3])
+                else:
+                    rx = _to_float(r.get("x"))
+                    ry = _to_float(r.get("y"))
+                    rw = _to_float(r.get("width"))
+                    rh = _to_float(r.get("height"))
+                    if rx is not None and ry is not None and rw is not None and rh is not None:
+                        x1, y1, x2, y2 = rx, ry, rx + rw, ry + rh
+
+                if x1 is None or y1 is None or x2 is None or y2 is None:
+                    continue
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                x1 = max(0.0, min(float(ow), x1))
+                y1 = max(0.0, min(float(oh), y1))
+                x2 = max(0.0, min(float(ow), x2))
+                y2 = max(0.0, min(float(oh), y2))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
                 x = ox + int(x1 * sx)
                 y = oy + int(y1 * sy)
                 w = int((x2 - x1) * sx)
@@ -2015,6 +2057,10 @@ class ProcessExecutionWindow(QWidget):
         self.detection_status = 'detecting'
         self.update_overlay_visibility()
         self.rebuild_status_section()
+        try:
+            self.instruction_label.setText("检测中…")
+        except Exception:
+            pass
 
         try:
             start_time = datetime.now()
@@ -2127,6 +2173,10 @@ class ProcessExecutionWindow(QWidget):
                     
                     self.detection_boxes = self._ng_regions_to_rects(valid_rects)
                     self.detection_status = 'pass'
+                    try:
+                        self.instruction_label.setText("执行成功")
+                    except Exception:
+                        pass
                     self.update_overlay_visibility()
                     self.rebuild_status_section()
                     try:
@@ -2153,22 +2203,16 @@ class ProcessExecutionWindow(QWidget):
                 else:
                     # Logic NG (Algorithm ran successfully but result is NG)
                     defect_rects = data.get('defect_rects', [])
-                    # Adapter/Main.py returns defect_rects as list of dicts {x,y,width,height...}
-                    # We need to convert them to _ng_regions_to_rects format or just handle them.
-                    # _ng_regions_to_rects expects list of dicts with 'box_coords' [x1, y1, x2, y2]
-                    
-                    ng_regions = []
-                    for d in defect_rects:
-                        x = d.get("x")
-                        y = d.get("y")
-                        w = d.get("width")
-                        h = d.get("height")
-                        ng_regions.append({
-                            "box_coords": [x, y, x + w, y + h]
-                        })
-                    
-                    self.detection_boxes = self._ng_regions_to_rects(ng_regions)
+                    self.detection_boxes = self._ng_regions_to_rects(defect_rects)
                     self.detection_status = 'fail'
+                    try:
+                        ng_reason = str(data.get("ng_reason") or "").strip()
+                        if ng_reason:
+                            self.instruction_label.setText(f"NG原因: {ng_reason}")
+                        else:
+                            self.instruction_label.setText("执行失败")
+                    except Exception:
+                        pass
                     self.update_overlay_visibility()
                     self.rebuild_status_section()
                     try:
@@ -2193,6 +2237,14 @@ class ProcessExecutionWindow(QWidget):
                 logger.error(f"Runner execution failed: {result.get('message')}")
                 self.detection_status = 'fail'
                 self.detection_boxes = []
+                try:
+                    msg = str(result.get("message") or "").strip()
+                    if msg:
+                        self.instruction_label.setText(f"执行失败: {msg}")
+                    else:
+                        self.instruction_label.setText("执行失败")
+                except Exception:
+                    pass
                 self.update_overlay_visibility()
                 self.rebuild_status_section()
                 self.show_toast(f"执行出错: {result.get('message')}", False)
@@ -2217,6 +2269,14 @@ class ProcessExecutionWindow(QWidget):
             logger.error(f"External detection failed: {e}")
             self.detection_status = 'fail'
             self.detection_boxes = []
+            try:
+                msg = str(e).strip()
+                if msg:
+                    self.instruction_label.setText(f"执行失败: {msg}")
+                else:
+                    self.instruction_label.setText("执行失败")
+            except Exception:
+                pass
             self.update_overlay_visibility()
             self.rebuild_status_section()
             try:

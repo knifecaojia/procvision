@@ -182,8 +182,18 @@ class ModelPage(QFrame):
         worker.start()
 
     def _handle_undeploy(self, data):
+        name = data["name"]
+        version = data["version"]
+        reply = QMessageBox.question(
+            self,
+            "确认卸载部署",
+            f"确定要卸载部署算法包 {name} ({version}) 吗？\n\n卸载将删除已部署文件，但不会删除已下载的 zip 包。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
         try:
-            self.algorithm_manager.undeploy_algorithm(data["name"], data["version"])
+            self.algorithm_manager.undeploy_algorithm(name, version)
             self.load_data()
             QMessageBox.information(self, "成功", "已卸载部署")
         except Exception as e:

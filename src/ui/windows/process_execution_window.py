@@ -11,10 +11,10 @@ from pathlib import Path
 from dataclasses import dataclass
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QProgressBar,
-    QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy, QFileDialog
+    QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy, QFileDialog, QTextEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent, QThread
-from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont
+from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont, QTextCursor
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtSvgWidgets import QSvgWidget
 from datetime import datetime
@@ -1929,6 +1929,30 @@ class ProcessExecutionWindow(QWidget):
 
         return footer_frame
 
+    def _set_instruction_text(self, text: str) -> None:
+        try:
+            w = getattr(self, "instruction_label", None)
+            if w is None:
+                return
+            if isinstance(w, QTextEdit):
+                try:
+                    opt = w.document().defaultTextOption()
+                    opt.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    w.document().setDefaultTextOption(opt)
+                except Exception:
+                    pass
+                w.setPlainText(str(text or ""))
+                try:
+                    w.selectAll()
+                    w.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    w.moveCursor(QTextCursor.MoveOperation.Start)
+                except Exception:
+                    pass
+                return
+            w.setText(str(text or ""))
+        except Exception:
+            pass
+
     def create_instruction_section(self) -> QWidget:
         """Create the left section with current operation instruction."""
         section = QWidget()
@@ -1937,10 +1961,19 @@ class ProcessExecutionWindow(QWidget):
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Instruction text
-        self.instruction_label = QLabel(self.current_instruction)
+        self.instruction_label = QTextEdit()
         self.instruction_label.setObjectName("instructionLabel")
-        self.instruction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        try:
+            self.instruction_label.setReadOnly(True)
+            self.instruction_label.setAcceptRichText(False)
+            self.instruction_label.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.instruction_label.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.instruction_label.setFrameShape(QFrame.Shape.NoFrame)
+            self.instruction_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.instruction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        except Exception:
+            pass
+        self._set_instruction_text(self.current_instruction)
         layout.addWidget(self.instruction_label)
 
         return section
@@ -2058,7 +2091,7 @@ class ProcessExecutionWindow(QWidget):
         self.update_overlay_visibility()
         self.rebuild_status_section()
         try:
-            self.instruction_label.setText("检测中…")
+            self._set_instruction_text("检测中…")
         except Exception:
             pass
 
@@ -2174,7 +2207,7 @@ class ProcessExecutionWindow(QWidget):
                     self.detection_boxes = self._ng_regions_to_rects(valid_rects)
                     self.detection_status = 'pass'
                     try:
-                        self.instruction_label.setText("执行成功")
+                        self._set_instruction_text("执行成功")
                     except Exception:
                         pass
                     self.update_overlay_visibility()
@@ -2208,9 +2241,9 @@ class ProcessExecutionWindow(QWidget):
                     try:
                         ng_reason = str(data.get("ng_reason") or "").strip()
                         if ng_reason:
-                            self.instruction_label.setText(f"NG原因: {ng_reason}")
+                            self._set_instruction_text(f"NG原因: {ng_reason}")
                         else:
-                            self.instruction_label.setText("执行失败")
+                            self._set_instruction_text("执行失败")
                     except Exception:
                         pass
                     self.update_overlay_visibility()
@@ -2240,9 +2273,9 @@ class ProcessExecutionWindow(QWidget):
                 try:
                     msg = str(result.get("message") or "").strip()
                     if msg:
-                        self.instruction_label.setText(f"执行失败: {msg}")
+                        self._set_instruction_text(f"执行失败: {msg}")
                     else:
-                        self.instruction_label.setText("执行失败")
+                        self._set_instruction_text("执行失败")
                 except Exception:
                     pass
                 self.update_overlay_visibility()
@@ -2272,9 +2305,9 @@ class ProcessExecutionWindow(QWidget):
             try:
                 msg = str(e).strip()
                 if msg:
-                    self.instruction_label.setText(f"执行失败: {msg}")
+                    self._set_instruction_text(f"执行失败: {msg}")
                 else:
-                    self.instruction_label.setText("执行失败")
+                    self._set_instruction_text("执行失败")
             except Exception:
                 pass
             self.update_overlay_visibility()
@@ -2380,7 +2413,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Update UI
         self.current_instruction = self.steps[self.current_step_index].description
-        self.instruction_label.setText(self.current_instruction)
+        self._set_instruction_text(self.current_instruction)
         self.detection_status = 'idle'
 
         # Update progress
@@ -2584,7 +2617,7 @@ class ProcessExecutionWindow(QWidget):
         self.current_instruction = self.steps[0].description
 
         # Update UI
-        self.instruction_label.setText(self.current_instruction)
+        self._set_instruction_text(self.current_instruction)
         self.progress_label.setText(f"步骤: 1 / {self.total_steps}")
         self.progress_bar.setValue(1)
 

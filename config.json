@@ -15,7 +15,7 @@
   },
   "general": {
     "auto_start_next": false,
-    "result_prompt_position": "center",
+    "result_prompt_position": "top_right",
     "draw_boxes_ok": true,
     "draw_boxes_ng": true,
     "theme": "dark"

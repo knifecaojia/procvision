@@ -26,10 +26,28 @@ if getattr(sys, "frozen", False):
                 if src.exists():
                     shutil.copy2(src, target_config)
                     break
+        target_app_cfg = exe_dir / "config" / "app_config.json"
+        if not target_app_cfg.exists():
+            try:
+                target_app_cfg.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+            candidates = [
+                exe_dir / "_internal" / "config" / "app_config.json",
+            ]
+            for src in candidates:
+                if src.exists():
+                    shutil.copy2(src, target_app_cfg)
+                    break
     except Exception:
         pass
 
 current_dir = Path(__file__).parent
+try:
+    if not getattr(sys, "frozen", False):
+        os.chdir(str(current_dir.resolve()))
+except Exception:
+    pass
 sys.path.insert(0, str(current_dir))
 
 # Setup environment

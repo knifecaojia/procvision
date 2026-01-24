@@ -756,7 +756,7 @@ class CameraPage(QFrame):
 
     def _resolve_image_save_dir(self) -> Path:
         default_dir = Path(r"C:\VisionData\Images")
-        cfg_path = Path(__file__).resolve().parents[3] / "config.json"
+        cfg_path = Path.cwd() / "config.json"
         try:
             if not cfg_path.exists():
                 return default_dir

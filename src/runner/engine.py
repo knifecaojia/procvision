@@ -105,14 +105,25 @@ class RunnerEngine:
             self.processes[key] = proc
             return proc
 
+    def _get_registry_entry(self, name: str, version: str) -> RegistryEntry:
+        key = f"{str(name).strip()}:{str(version).strip()}"
+        entry = self.package_manager.registry.get(key)
+        if entry:
+            return entry
+        try:
+            self.package_manager.reload_registry()
+        except Exception:
+            pass
+        entry = self.package_manager.registry.get(key)
+        if not entry:
+            raise RunnerError(f"Algorithm {key} not installed", "2005")
+        return entry
+
     def get_algorithm_info(self, name: str, version: str) -> Dict[str, Any]:
         """
         Calls the 'info' phase of the algorithm to get process details (steps, etc.).
         """
-        key = f"{str(name).strip()}:{str(version).strip()}"
-        pkg_entry = self.package_manager.registry.get(key)
-        if not pkg_entry:
-            raise RunnerError(f"Algorithm {key} not installed", "2005")
+        pkg_entry = self._get_registry_entry(name, version)
 
         # 2. Get Process
         proc = self._get_or_create_process(pkg_entry)
@@ -132,8 +143,8 @@ class RunnerEngine:
         if res.get("status") == "OK":
             return res.get("data", {})
         else:
-             logger.warning(f"Failed to get info for PID {pid}: {res.get('message')}")
-             return {}
+            logger.warning("Failed to get info for %s:%s: %s", name, version, res.get("message"))
+            return {}
 
     def execute_flow(self, name: str, version: str, 
                      step_index: int, 
@@ -145,10 +156,7 @@ class RunnerEngine:
         """
         Executes the detection flow (Single Execute Phase).
         """
-        key = f"{str(name).strip()}:{str(version).strip()}"
-        pkg_entry = self.package_manager.registry.get(key)
-        if not pkg_entry:
-            raise RunnerError(f"Algorithm {key} not installed", "2005")
+        pkg_entry = self._get_registry_entry(name, version)
 
         # 2. Prepare Resources
         req_id = str(uuid.uuid4())

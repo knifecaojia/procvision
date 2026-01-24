@@ -355,10 +355,14 @@ QFrame#stepCard[stepStatus="completed"] {
     border-top: 1px solid #B5C3DC;
 }
 
-#instructionLabel {
+#instructionLabel,
+QTextEdit#instructionLabel,
+QTextEdit#instructionLabel::viewport {
     font-size: 36px;
     color: #2563EB;
     font-weight: bold;
+    background: transparent;
+    border: none;
 }
 
 QPushButton#startDetectionButton {

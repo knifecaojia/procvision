@@ -11,10 +11,10 @@ from pathlib import Path
 from dataclasses import dataclass
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QProgressBar,
-    QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy, QFileDialog
+    QScrollArea, QGraphicsOpacityEffect, QComboBox, QSizePolicy, QFileDialog, QTextEdit
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPropertyAnimation, QObject, QEvent, QThread
-from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont
+from PySide6.QtGui import QPixmap, QPainter, QColor, QPen, QImage, QResizeEvent, QPainterPath, QFontDatabase, QFont, QTextCursor
 from PySide6.QtCore import QRect, QSize
 from PySide6.QtSvgWidgets import QSvgWidget
 from datetime import datetime
@@ -1401,8 +1401,50 @@ class ProcessExecutionWindow(QWidget):
             sy = dh / float(oh) if oh else 1.0
             ox = int((lw - dw) / 2)
             oy = int((lh - dh) / 2)
+
+            def _to_float(v: Any) -> Optional[float]:
+                if v is None:
+                    return None
+                if isinstance(v, (int, float)):
+                    return float(v)
+                if isinstance(v, str):
+                    s = v.strip()
+                    if not s or s.lower() == "none":
+                        return None
+                    try:
+                        return float(s)
+                    except Exception:
+                        return None
+                return None
+
             for r in regions:
-                x1, y1, x2, y2 = r.get('box_coords', [0, 0, 0, 0])
+                coords = r.get("box_coords")
+                x1 = y1 = x2 = y2 = None
+                if isinstance(coords, (list, tuple)) and len(coords) >= 4:
+                    x1 = _to_float(coords[0])
+                    y1 = _to_float(coords[1])
+                    x2 = _to_float(coords[2])
+                    y2 = _to_float(coords[3])
+                else:
+                    rx = _to_float(r.get("x"))
+                    ry = _to_float(r.get("y"))
+                    rw = _to_float(r.get("width"))
+                    rh = _to_float(r.get("height"))
+                    if rx is not None and ry is not None and rw is not None and rh is not None:
+                        x1, y1, x2, y2 = rx, ry, rx + rw, ry + rh
+
+                if x1 is None or y1 is None or x2 is None or y2 is None:
+                    continue
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                x1 = max(0.0, min(float(ow), x1))
+                y1 = max(0.0, min(float(oh), y1))
+                x2 = max(0.0, min(float(ow), x2))
+                y2 = max(0.0, min(float(oh), y2))
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
                 x = ox + int(x1 * sx)
                 y = oy + int(y1 * sy)
                 w = int((x2 - x1) * sx)
@@ -1887,6 +1929,30 @@ class ProcessExecutionWindow(QWidget):
 
         return footer_frame
 
+    def _set_instruction_text(self, text: str) -> None:
+        try:
+            w = getattr(self, "instruction_label", None)
+            if w is None:
+                return
+            if isinstance(w, QTextEdit):
+                try:
+                    opt = w.document().defaultTextOption()
+                    opt.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    w.document().setDefaultTextOption(opt)
+                except Exception:
+                    pass
+                w.setPlainText(str(text or ""))
+                try:
+                    w.selectAll()
+                    w.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    w.moveCursor(QTextCursor.MoveOperation.Start)
+                except Exception:
+                    pass
+                return
+            w.setText(str(text or ""))
+        except Exception:
+            pass
+
     def create_instruction_section(self) -> QWidget:
         """Create the left section with current operation instruction."""
         section = QWidget()
@@ -1895,10 +1961,19 @@ class ProcessExecutionWindow(QWidget):
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Instruction text
-        self.instruction_label = QLabel(self.current_instruction)
+        self.instruction_label = QTextEdit()
         self.instruction_label.setObjectName("instructionLabel")
-        self.instruction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        try:
+            self.instruction_label.setReadOnly(True)
+            self.instruction_label.setAcceptRichText(False)
+            self.instruction_label.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.instruction_label.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.instruction_label.setFrameShape(QFrame.Shape.NoFrame)
+            self.instruction_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self.instruction_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        except Exception:
+            pass
+        self._set_instruction_text(self.current_instruction)
         layout.addWidget(self.instruction_label)
 
         return section
@@ -2015,6 +2090,10 @@ class ProcessExecutionWindow(QWidget):
         self.detection_status = 'detecting'
         self.update_overlay_visibility()
         self.rebuild_status_section()
+        try:
+            self._set_instruction_text("检测中…")
+        except Exception:
+            pass
 
         try:
             start_time = datetime.now()
@@ -2127,6 +2206,10 @@ class ProcessExecutionWindow(QWidget):
                     
                     self.detection_boxes = self._ng_regions_to_rects(valid_rects)
                     self.detection_status = 'pass'
+                    try:
+                        self._set_instruction_text("执行成功")
+                    except Exception:
+                        pass
                     self.update_overlay_visibility()
                     self.rebuild_status_section()
                     try:
@@ -2153,22 +2236,16 @@ class ProcessExecutionWindow(QWidget):
                 else:
                     # Logic NG (Algorithm ran successfully but result is NG)
                     defect_rects = data.get('defect_rects', [])
-                    # Adapter/Main.py returns defect_rects as list of dicts {x,y,width,height...}
-                    # We need to convert them to _ng_regions_to_rects format or just handle them.
-                    # _ng_regions_to_rects expects list of dicts with 'box_coords' [x1, y1, x2, y2]
-                    
-                    ng_regions = []
-                    for d in defect_rects:
-                        x = d.get("x")
-                        y = d.get("y")
-                        w = d.get("width")
-                        h = d.get("height")
-                        ng_regions.append({
-                            "box_coords": [x, y, x + w, y + h]
-                        })
-                    
-                    self.detection_boxes = self._ng_regions_to_rects(ng_regions)
+                    self.detection_boxes = self._ng_regions_to_rects(defect_rects)
                     self.detection_status = 'fail'
+                    try:
+                        ng_reason = str(data.get("ng_reason") or "").strip()
+                        if ng_reason:
+                            self._set_instruction_text(f"NG原因: {ng_reason}")
+                        else:
+                            self._set_instruction_text("执行失败")
+                    except Exception:
+                        pass
                     self.update_overlay_visibility()
                     self.rebuild_status_section()
                     try:
@@ -2193,6 +2270,14 @@ class ProcessExecutionWindow(QWidget):
                 logger.error(f"Runner execution failed: {result.get('message')}")
                 self.detection_status = 'fail'
                 self.detection_boxes = []
+                try:
+                    msg = str(result.get("message") or "").strip()
+                    if msg:
+                        self._set_instruction_text(f"执行失败: {msg}")
+                    else:
+                        self._set_instruction_text("执行失败")
+                except Exception:
+                    pass
                 self.update_overlay_visibility()
                 self.rebuild_status_section()
                 self.show_toast(f"执行出错: {result.get('message')}", False)
@@ -2217,6 +2302,14 @@ class ProcessExecutionWindow(QWidget):
             logger.error(f"External detection failed: {e}")
             self.detection_status = 'fail'
             self.detection_boxes = []
+            try:
+                msg = str(e).strip()
+                if msg:
+                    self._set_instruction_text(f"执行失败: {msg}")
+                else:
+                    self._set_instruction_text("执行失败")
+            except Exception:
+                pass
             self.update_overlay_visibility()
             self.rebuild_status_section()
             try:
@@ -2320,7 +2413,7 @@ class ProcessExecutionWindow(QWidget):
 
         # Update UI
         self.current_instruction = self.steps[self.current_step_index].description
-        self.instruction_label.setText(self.current_instruction)
+        self._set_instruction_text(self.current_instruction)
         self.detection_status = 'idle'
 
         # Update progress
@@ -2524,7 +2617,7 @@ class ProcessExecutionWindow(QWidget):
         self.current_instruction = self.steps[0].description
 
         # Update UI
-        self.instruction_label.setText(self.current_instruction)
+        self._set_instruction_text(self.current_instruction)
         self.progress_label.setText(f"步骤: 1 / {self.total_steps}")
         self.progress_bar.setValue(1)
 

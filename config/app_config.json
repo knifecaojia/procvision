@@ -1,0 +1,82 @@
+{
+  "auth": {
+    "bcrypt_cost_factor": 12,
+    "session_timeout_hours": 8,
+    "max_failed_attempts": 5,
+    "lockout_duration_minutes": 15,
+    "database_path": "data/auth.db",
+    "backup_enabled": true,
+    "backup_interval_hours": 24,
+    "default_language": "中",
+    "supported_languages": [
+      "中",
+      "English"
+    ],
+    "remember_username_default": false,
+    "max_sessions_per_user": 3,
+    "session_cleanup_interval_minutes": 30
+  },
+  "database": {
+    "database_path": "data/auth.db",
+    "connection_timeout": 30,
+    "enable_wal_mode": true,
+    "foreign_keys_enabled": true,
+    "auto_backup": true,
+    "backup_directory": "data/backups",
+    "backup_retention_days": 30
+  },
+  "ui": {
+    "window_width": 1050,
+    "window_height": 700,
+    "window_resizable": false,
+    "frameless_window": true,
+    "colors": {
+      "deep_graphite": "#1A1D23",
+      "steel_grey": "#1F232B",
+      "dark_border": "#242831",
+      "arctic_white": "#F2F4F8",
+      "cool_grey": "#8C92A0",
+      "hover_orange": "#FF8C32",
+      "amber": "#FFAC54",
+      "icon_neutral": "#D7DCE6",
+      "success_green": "#3CC37A",
+      "error_red": "#E85454",
+      "warning_yellow": "#FFB347",
+      "title_bar_dark": "#15181E"
+    },
+    "font_family": "Arial",
+    "base_font_size": 12,
+    "title_font_size": 24,
+    "small_font_size": 10,
+    "enable_animations": true,
+    "animation_duration_ms": 200
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file_enabled": true,
+    "file_path": "logs/app.log",
+    "file_max_size_mb": 10,
+    "file_backup_count": 5,
+    "console_enabled": true
+  },
+  "camera": {
+    "sdk_path": null,
+    "enable_preview": true,
+    "preview_fps_limit": 30,
+    "auto_connect": false,
+    "connection_timeout_ms": 5000,
+    "presets_directory": "data/camera_presets"
+  },
+  "network": {
+    "base_url": "http://127.0.0.1:80",
+    "timeout": 10,
+    "retry_count": 3,
+    "verify_ssl": false
+  },
+  "app_name": "Procvision",
+  "app_version": "1.0.0",
+  "app_title": "Industrial Vision System",
+  "debug_mode": false,
+  "dev_mode": false
+}

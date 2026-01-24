@@ -356,7 +356,7 @@ class PackageManager:
         env_config = manifest.get("_env_config")
         
         key = f"{name}:{version}"
-        env_dir_name = "_env"
+        env_dir_name = "__procvision_env"
 
         if key in self.registry and not force:
             logger.info(f"Package {key} already installed.")
@@ -384,6 +384,13 @@ class PackageManager:
             # 2. Create venv or conda env
             if progress_callback:
                 progress_callback.emit(72)
+            try:
+                for candidate in ("__procvision_env", "_env", "venv"):
+                    p = os.path.join(install_dir, candidate)
+                    if os.path.exists(p):
+                        shutil.rmtree(p, ignore_errors=True)
+            except Exception:
+                pass
             venv_dir = os.path.join(install_dir, env_dir_name)
             python_rel_path = ""
             
@@ -553,10 +560,32 @@ class PackageManager:
                                 packaged_python_exe = p
                                 break
                         if packaged_python_exe:
-                            logger.info(f"Using app-bundled python runtime: {packaged_python_exe}")
-                            python_cmd = packaged_python_exe
-                            # Store absolute path so process can use it
-                            python_rel_path = os.path.abspath(packaged_python_exe).replace("\\", "/")
+                            runtime_ver = None
+                            try:
+                                r = subprocess.run(
+                                    [packaged_python_exe, "-c", "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    text=True,
+                                    encoding="utf-8",
+                                    errors="replace",
+                                )
+                                if r.returncode == 0:
+                                    runtime_ver = (r.stdout or "").strip()
+                            except Exception:
+                                runtime_ver = None
+                            if target_py_version and runtime_ver and runtime_ver != str(target_py_version).strip():
+                                logger.info(
+                                    "App-bundled python version mismatch (runtime=%s target=%s), skipping.",
+                                    runtime_ver,
+                                    target_py_version,
+                                )
+                                packaged_python_exe = None
+                            else:
+                                logger.info(f"Using app-bundled python runtime: {packaged_python_exe}")
+                                python_cmd = packaged_python_exe
+                                # Store absolute path so process can use it
+                                python_rel_path = os.path.abspath(packaged_python_exe).replace("\\", "/")
                 except Exception:
                     packaged_python_exe = None
                 
@@ -659,6 +688,12 @@ class PackageManager:
             logger.info(f"Wheels dir: {wheels_dir}")
             logger.info(f"Requirements: {requirements_path}")
             
+            subprocess_env = os.environ.copy()
+            for k in ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE"):
+                subprocess_env.pop(k, None)
+            subprocess_env["PYTHONNOUSERSITE"] = "1"
+            subprocess_env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+
             if python_cmd:
                 try:
                     subprocess.run(
@@ -669,6 +704,8 @@ class PackageManager:
                         text=True,
                         encoding="utf-8",
                         errors="replace",
+                        env=subprocess_env,
+                        cwd=venv_dir,
                     )
                 except Exception:
                     pass
@@ -687,7 +724,9 @@ class PackageManager:
                     stderr=subprocess.PIPE,
                     text=True,
                     encoding='utf-8',
-                    errors='replace'
+                    errors='replace',
+                    env=subprocess_env,
+                    cwd=venv_dir,
                 )
             except subprocess.CalledProcessError as e:
                 logger.error(f"Pip install stdout: {e.stdout}")
@@ -723,7 +762,9 @@ class PackageManager:
                                 stderr=subprocess.PIPE,
                                 text=True,
                                 encoding='utf-8',
-                                errors='replace'
+                                errors='replace',
+                                env=subprocess_env,
+                                cwd=venv_dir,
                             )
                             logger.info("Pip install succeeded after installing pip via conda.")
                         else:

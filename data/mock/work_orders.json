@@ -1,0 +1,328 @@
+[
+  {
+    "work_order_code": "1000023451-01",
+    "craft_code": "JZ2.940.10287GY-TX02",
+    "craft_version": "N.1",
+    "process_code": "30",
+    "process_name": "装配",
+    "start_time": "2025-12-09T08:30:00",
+    "end_time": "2025-12-09T12:00:00",
+    "worker_code": "07488",
+    "worker_name": "张三",
+    "status": "1",
+    "algorithm_code": "10287",
+    "algorithm_name": "Object Detection YOLOv8",
+    "algorithm_version": "v2.0.1",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "按表格准备零部件和辅料。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "检查连接器状态，确认一致后装配。"
+      },
+      {
+        "step_code": "3",
+        "step_name": "3",
+        "guide_url": "",
+        "step_content": "按工序简图所示将连接器装配到腔体上(注意连接器的安装方向)，螺钉紧固前在螺纹根部涂适量乐泰243，按对称交叉分步拧紧，在连接器与腔体接触出面涂抹一圈南大704硅胶。溢出的胶液用脱脂棉蘸无水乙醇清理干净。"
+      },
+      {
+        "step_code": "4",
+        "step_name": "4",
+        "guide_url": "",
+        "step_content": "按照简图所示安装接地柱，螺母螺纹涂乐泰272螺纹紧固剂。注意接地柱各个零部件安装位置。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023452-02",
+    "craft_code": "JZ2.940.10288GY-TX03",
+    "craft_version": "N.2",
+    "process_code": "31",
+    "process_name": "测试",
+    "start_time": "2025-12-10T09:00:00",
+    "end_time": "2025-12-10T14:00:00",
+    "worker_code": "07489",
+    "worker_name": "李四",
+    "status": "2",
+    "algorithm_code": "ALGO-002",
+    "algorithm_name": "Face Recognition ArcFace",
+    "algorithm_version": "2.1.0",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "连接测试设备。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "运行自动化测试脚本。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023453-03",
+    "craft_code": "JZ2.940.10289GY-TX04",
+    "craft_version": "N.3",
+    "process_code": "32",
+    "process_name": "包装",
+    "start_time": "2025-12-11T10:30:00",
+    "end_time": "2025-12-11T16:00:00",
+    "worker_code": "07490",
+    "worker_name": "王五",
+    "status": "3",
+    "algorithm_code": "ALGO-003",
+    "algorithm_name": "Text Classification BERT",
+    "algorithm_version": "1.2.5",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "准备包装材料。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "放入缓冲泡沫。"
+      },
+      {
+        "step_code": "3",
+        "step_name": "3",
+        "guide_url": "",
+        "step_content": "封箱并粘贴标签。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023454-04",
+    "craft_code": "JZ2.940.10290GY-TX05",
+    "craft_version": "N.4",
+    "process_code": "33",
+    "process_name": "焊接",
+    "start_time": "2025-12-12T08:00:00",
+    "end_time": "2025-12-12T11:00:00",
+    "worker_code": "07491",
+    "worker_name": "赵六",
+    "status": "1",
+    "algorithm_code": "ALGO-004",
+    "algorithm_name": "Image Segmentation MaskRCNN",
+    "algorithm_version": "3.0.1",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "预热焊接设备。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "进行点焊作业。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023455-05",
+    "craft_code": "JZ2.940.10291GY-TX06",
+    "craft_version": "N.5",
+    "process_code": "34",
+    "process_name": "质检",
+    "start_time": "2025-12-13T13:00:00",
+    "end_time": "2025-12-13T17:00:00",
+    "worker_code": "07492",
+    "worker_name": "孙七",
+    "status": "2",
+    "algorithm_code": "ALGO-005",
+    "algorithm_name": "Speech to Text Whisper",
+    "algorithm_version": "0.9.8",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "外观检查。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "功能性抽检。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023456-06",
+    "craft_code": "JZ2.940.10292GY-TX07",
+    "craft_version": "N.6",
+    "process_code": "35",
+    "process_name": "喷涂",
+    "start_time": "2025-12-14T09:30:00",
+    "end_time": "2025-12-14T15:00:00",
+    "worker_code": "07493",
+    "worker_name": "周八",
+    "status": "3",
+    "algorithm_code": "ALGO-006",
+    "algorithm_name": "Anomaly Detection AutoEncoder",
+    "algorithm_version": "1.1.2",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "表面清洁处理。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "喷涂底漆。"
+      },
+      {
+        "step_code": "3",
+        "step_name": "3",
+        "guide_url": "",
+        "step_content": "烘干固化。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023457-07",
+    "craft_code": "JZ2.940.10293GY-TX08",
+    "craft_version": "N.7",
+    "process_code": "36",
+    "process_name": "调试",
+    "start_time": "2025-12-15T08:45:00",
+    "end_time": "2025-12-15T12:30:00",
+    "worker_code": "07494",
+    "worker_name": "吴九",
+    "status": "1",
+    "algorithm_code": "ALGO-007",
+    "algorithm_name": "Recommendation System NeuralCF",
+    "algorithm_version": "2.0.0",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "参数初始化。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "负载测试与调整。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023458-08",
+    "craft_code": "JZ2.940.10294GY-TX09",
+    "craft_version": "N.8",
+    "process_code": "37",
+    "process_name": "入库",
+    "start_time": "2025-12-16T14:00:00",
+    "end_time": "2025-12-16T18:00:00",
+    "worker_code": "07495",
+    "worker_name": "郑十",
+    "status": "2",
+    "algorithm_code": "ALGO-008",
+    "algorithm_name": "Time Series Forecasting LSTM",
+    "algorithm_version": "1.5.3",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "清点数量。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "扫码登记入库。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023459-09",
+    "craft_code": "JZ2.940.10295GY-TX10",
+    "craft_version": "N.9",
+    "process_code": "38",
+    "process_name": "维护",
+    "start_time": "2025-12-17T10:00:00",
+    "end_time": "2025-12-17T14:30:00",
+    "worker_code": "07496",
+    "worker_name": "钱十一",
+    "status": "3",
+    "algorithm_code": "ALGO-009",
+    "algorithm_name": "Sentiment Analysis RoBERTa",
+    "algorithm_version": "1.0.4",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "设备除尘。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "更换易损件。"
+      },
+      {
+        "step_code": "3",
+        "step_name": "3",
+        "guide_url": "",
+        "step_content": "运行自检程序。"
+      }
+    ]
+  },
+  {
+    "work_order_code": "1000023460-10",
+    "craft_code": "JZ2.940.10296GY-TX11",
+    "craft_version": "N.10",
+    "process_code": "39",
+    "process_name": "返修",
+    "start_time": "2025-12-18T09:00:00",
+    "end_time": "2025-12-18T13:00:00",
+    "worker_code": "07497",
+    "worker_name": "陈十二",
+    "status": "1",
+    "algorithm_code": "ALGO-010",
+    "algorithm_name": "Pose Estimation OpenPose",
+    "algorithm_version": "1.3.0",
+    "step_infos": [
+      {
+        "step_code": "1",
+        "step_name": "1",
+        "guide_url": "",
+        "step_content": "故障诊断。"
+      },
+      {
+        "step_code": "2",
+        "step_name": "2",
+        "guide_url": "",
+        "step_content": "拆解问题部件。"
+      },
+      {
+        "step_code": "3",
+        "step_name": "3",
+        "guide_url": "",
+        "step_content": "更换并重新组装。"
+      }
+    ]
+  }
+]

@@ -1,0 +1,82 @@
+[
+  {
+    "code": "ALGO-001",
+    "name": "Object Detection YOLOv8",
+    "version": "1.0.0",
+    "url": "https://example.com/models/yolov8_v1.0.0.zip",
+    "size": "45MB",
+    "create_time": "2024-01-15 10:00:00"
+  },
+  {
+    "code": "ALGO-002",
+    "name": "Face Recognition ArcFace",
+    "version": "2.1.0",
+    "url": "https://example.com/models/arcface_v2.1.0.tar.gz",
+    "size": "120MB",
+    "create_time": "2024-02-20 14:30:00"
+  },
+  {
+    "code": "ALGO-003",
+    "name": "Text Classification BERT",
+    "version": "1.2.5",
+    "url": "https://example.com/models/bert_text_v1.2.5.zip",
+    "size": "350MB",
+    "create_time": "2024-03-05 09:15:00"
+  },
+  {
+    "code": "ALGO-004",
+    "name": "Image Segmentation MaskRCNN",
+    "version": "3.0.1",
+    "url": "https://example.com/models/maskrcnn_v3.0.1.h5",
+    "size": "210MB",
+    "create_time": "2024-03-12 16:45:00"
+  },
+  {
+    "code": "ALGO-005",
+    "name": "Speech to Text Whisper",
+    "version": "0.9.8",
+    "url": "https://example.com/models/whisper_v0.9.8.bin",
+    "size": "1.5GB",
+    "create_time": "2024-04-01 11:20:00"
+  },
+  {
+    "code": "ALGO-006",
+    "name": "Anomaly Detection AutoEncoder",
+    "version": "1.1.2",
+    "url": "https://example.com/models/anomaly_ae_v1.1.2.zip",
+    "size": "15MB",
+    "create_time": "2024-04-18 13:10:00"
+  },
+  {
+    "code": "ALGO-007",
+    "name": "Recommendation System NeuralCF",
+    "version": "2.0.0",
+    "url": "https://example.com/models/ncf_v2.0.0.pkl",
+    "size": "68MB",
+    "create_time": "2024-05-05 15:55:00"
+  },
+  {
+    "code": "ALGO-008",
+    "name": "Time Series Forecasting LSTM",
+    "version": "1.5.3",
+    "url": "https://example.com/models/lstm_forecast_v1.5.3.h5",
+    "size": "32MB",
+    "create_time": "2024-05-22 08:40:00"
+  },
+  {
+    "code": "ALGO-009",
+    "name": "Sentiment Analysis RoBERTa",
+    "version": "1.0.4",
+    "url": "https://example.com/models/roberta_sentiment_v1.0.4.zip",
+    "size": "420MB",
+    "create_time": "2024-06-10 17:05:00"
+  },
+  {
+    "code": "ALGO-010",
+    "name": "Pose Estimation OpenPose",
+    "version": "1.3.0",
+    "url": "https://example.com/models/openpose_v1.3.0.pb",
+    "size": "180MB",
+    "create_time": "2024-06-25 12:25:00"
+  }
+]

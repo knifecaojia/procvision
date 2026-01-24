@@ -536,7 +536,14 @@ class MainWindow(QMainWindow):
         """Prepare placeholder replacements for theme files."""
         font_family = getattr(self, "custom_font_family", "Arial") or "Arial"
         theme_colors = resolve_theme_colors(getattr(self, "current_theme", "dark"), self.colors)
-        return build_theme_variables(theme_colors, font_family)
+        assets_dir = Path(__file__).resolve().parent.parent / "assets"
+        checkbox_check_light = (assets_dir / "checkbox_check_blue.svg").resolve()
+        checkbox_check_dark = (assets_dir / "checkbox_check_dark.svg").resolve()
+        extra = {
+            "checkbox_check_light": str(checkbox_check_light).replace("\\", "/"),
+            "checkbox_check_dark": str(checkbox_check_dark).replace("\\", "/"),
+        }
+        return build_theme_variables(theme_colors, font_family, extra=extra)
 
     def _register_stylesheet_watcher(self):
         """Watch the stylesheet for changes to enable live reload."""

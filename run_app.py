@@ -8,9 +8,27 @@ correctly for running the industrial vision application.
 
 import sys
 import os
+import shutil
 from pathlib import Path
 
 # Add current directory to Python path
+if getattr(sys, "frozen", False):
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        os.chdir(str(exe_dir))
+        target_config = exe_dir / "config.json"
+        if not target_config.exists():
+            candidates = [
+                exe_dir / "_internal" / "config.json",
+                exe_dir / "_internal" / "config" / "config.json",
+            ]
+            for src in candidates:
+                if src.exists():
+                    shutil.copy2(src, target_config)
+                    break
+    except Exception:
+        pass
+
 current_dir = Path(__file__).parent
 sys.path.insert(0, str(current_dir))
 

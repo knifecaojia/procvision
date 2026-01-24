@@ -225,6 +225,40 @@ QMainWindow {
             #paramInput:focus {
                 border: 1px solid @hover_orange;
             }
+
+            QCheckBox#paramCheckBox::indicator, QCheckBox#themeSwitch::indicator {
+                width: 18px;
+                height: 18px;
+                border: 1px solid @dark_border;
+                border-radius: 3px;
+                background-color: @deep_graphite;
+            }
+
+            QCheckBox#paramCheckBox::indicator:checked, QCheckBox#themeSwitch::indicator:checked {
+                border: 1px solid @hover_orange;
+                background-color: @deep_graphite;
+                image: url("@checkbox_check_light");
+            }
+
+            QComboBox#paramInput {
+                padding-right: 26px;
+            }
+
+            QComboBox#paramInput::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 22px;
+                border-left: 1px solid @dark_border;
+            }
+
+            QComboBox#paramInput QAbstractItemView {
+                background-color: @steel_grey;
+                border: 1px solid @dark_border;
+                color: @arctic_white;
+                selection-background-color: @hover_orange;
+                selection-color: @steel_grey;
+                outline: 0;
+            }
             
             #cameraParamControl {
                 background-color: @steel_grey;

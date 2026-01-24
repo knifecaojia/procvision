@@ -9,6 +9,7 @@ import queue
 import logging
 import uuid
 from typing import Optional, Dict, Any, List
+from collections import deque
 
 from .config import RunnerConfig
 from .types import ProcessState
@@ -33,6 +34,7 @@ class AlgorithmProcess:
         self.last_pong_time = 0.0
         
         self._threads: List[threading.Thread] = []
+        self._stderr_tail = deque(maxlen=200)
 
     def start(self):
         if self.process and self.process.poll() is None:
@@ -52,24 +54,32 @@ class AlgorithmProcess:
             else:
                 # Fallback to standard venv structure
                 if os.name == 'nt':
-                    python_exe = os.path.join(self.install_path, "_env", "Scripts", "python.exe")
+                    python_exe = os.path.join(self.install_path, "__procvision_env", "Scripts", "python.exe")
                 else:
-                    python_exe = os.path.join(self.install_path, "_env", "bin", "python")
+                    python_exe = os.path.join(self.install_path, "__procvision_env", "bin", "python")
 
             if not os.path.exists(python_exe):
                 # Try fallback for Windows Conda (if python_rel_path wasn't set but it is conda)
                 # Conda on Windows puts python.exe in root of env
-                python_exe_conda = os.path.join(self.install_path, "_env", "python.exe")
+                python_exe_conda = os.path.join(self.install_path, "__procvision_env", "python.exe")
                 if os.path.exists(python_exe_conda):
                      python_exe = python_exe_conda
                 else:
                      if os.name == 'nt':
+                         python_exe_env = os.path.join(self.install_path, "_env", "Scripts", "python.exe")
+                         python_exe_env_conda = os.path.join(self.install_path, "_env", "python.exe")
                          python_exe_legacy = os.path.join(self.install_path, "venv", "Scripts", "python.exe")
                          python_exe_conda_legacy = os.path.join(self.install_path, "venv", "python.exe")
                      else:
+                         python_exe_env = os.path.join(self.install_path, "_env", "bin", "python")
+                         python_exe_env_conda = os.path.join(self.install_path, "_env", "bin", "python")
                          python_exe_legacy = os.path.join(self.install_path, "venv", "bin", "python")
                          python_exe_conda_legacy = os.path.join(self.install_path, "venv", "bin", "python")
-                     if os.path.exists(python_exe_legacy):
+                     if os.path.exists(python_exe_env):
+                         python_exe = python_exe_env
+                     elif os.path.exists(python_exe_env_conda):
+                         python_exe = python_exe_env_conda
+                     elif os.path.exists(python_exe_legacy):
                          python_exe = python_exe_legacy
                      elif os.path.exists(python_exe_conda_legacy):
                          python_exe = python_exe_conda_legacy
@@ -79,6 +89,9 @@ class AlgorithmProcess:
             env = os.environ.copy()
             env["PROC_ENV"] = "prod"
             env["PYTHONUNBUFFERED"] = "1"
+            for k in ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE"):
+                env.pop(k, None)
+            env["PYTHONNOUSERSITE"] = "1"
             
             # Determine Working Directory (CWD)
             cwd = self.working_dir if self.working_dir else self.install_path
@@ -100,6 +113,9 @@ class AlgorithmProcess:
             ]
 
             logger.info(f"Starting process: {' '.join(cmd)} in {cwd}")
+            popen_kwargs = {}
+            if os.name == "nt":
+                popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
             self.process = subprocess.Popen(
                 cmd,
                 stdin=subprocess.PIPE,
@@ -107,7 +123,8 @@ class AlgorithmProcess:
                 stderr=subprocess.PIPE,
                 cwd=cwd, # Use the detected CWD
                 env=env,
-                bufsize=0 # Unbuffered
+                bufsize=0, # Unbuffered
+                **popen_kwargs,
             )
 
             # Start IO threads
@@ -120,19 +137,40 @@ class AlgorithmProcess:
                 t.start()
                 
             # Wait for Hello
-            try:
-                msg = self.msg_queue.get(timeout=5)
-                if msg.get("type") == "hello":
-                    self.state = ProcessState.RUNNING
-                    self.last_pong_time = time.time()
-                    self._send_hello_response()
-                    logger.info("Handshake successful")
-                else:
+            timeout_ms = int(getattr(self.config, "pre_execute_timeout_ms", 30000) or 30000)
+            deadline = time.time() + (timeout_ms / 1000.0)
+            last_msg = None
+            while time.time() < deadline:
+                if not self.is_alive():
+                    rc = None
+                    try:
+                        rc = self.process.poll() if self.process else None
+                    except Exception:
+                        rc = None
+                    tail = "\n".join(list(self._stderr_tail)[-50:])
                     self.stop()
-                    raise RunnerError(f"Unexpected handshake message: {msg}")
-            except queue.Empty:
-                self.stop()
-                raise RunnerError("Handshake timeout", "1005")
+                    raise RunnerError(f"Handshake failed: process exited (code={rc}).\n{tail}".strip(), "1005")
+                try:
+                    msg = self.msg_queue.get(timeout=0.2)
+                    last_msg = msg
+                    if msg.get("type") == "hello":
+                        self.state = ProcessState.RUNNING
+                        self.last_pong_time = time.time()
+                        self._send_hello_response()
+                        logger.info("Handshake successful")
+                        return
+                    if msg.get("type") == "error":
+                        tail = "\n".join(list(self._stderr_tail)[-50:])
+                        self.stop()
+                        raise RunnerError(f"Handshake failed: {msg.get('message')}\n{tail}".strip(), msg.get("error_code", "1005"))
+                except queue.Empty:
+                    continue
+                except Exception:
+                    break
+            tail = "\n".join(list(self._stderr_tail)[-50:])
+            self.stop()
+            extra = f" last_msg={last_msg}" if last_msg else ""
+            raise RunnerError(f"Handshake timeout after {timeout_ms}ms.{extra}\n{tail}".strip(), "1005")
 
     def stop(self):
         self._stop_event.set()
@@ -295,6 +333,10 @@ class AlgorithmProcess:
                 line_str = line.decode("utf-8", errors="replace").strip()
                 if not line_str:
                     continue
+                try:
+                    self._stderr_tail.append(line_str)
+                except Exception:
+                    pass
                 try:
                     log_entry = json.loads(line_str)
                     # TODO: Forward to structured logging system

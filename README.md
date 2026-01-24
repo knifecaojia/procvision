@@ -16,6 +16,19 @@
   - `source venv/bin/activate`
   - `pip install -r requirements.txt`
 
+### 打包为 Windows EXE（PyInstaller，单目录输出到 dist）
+
+- 安装 PyInstaller：
+  - `pip install pyinstaller`
+
+- 使用 spec 构建（推荐，资源与依赖收集更稳定）：
+  - `python -m PyInstaller --clean -y --workpath build --distpath dist build.spec`
+
+- 产物位置：
+  - `dist/SouthwestUI/SouthwestUI.exe`
+
+- 可选：如项目根目录存在 `runtime/`，打包时会一并收集到发布包中（用于随包 Python/venv 等运行时资产）。
+
 ### 启动完整应用
 
 - `python run_app.py`

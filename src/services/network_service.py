@@ -25,7 +25,6 @@ class NetworkService:
         
         self.config = get_config().network
         self.base_url = self.config.base_url
-        self._project_root = Path(__file__).resolve().parents[2]
         self._load_server_config()
         self.timeout = self.config.timeout
         self.session = requests.Session()
@@ -38,7 +37,7 @@ class NetworkService:
         Load server address and port from external config.json if available.
         """
         try:
-            cfg_path = self._project_root / "config.json"
+            cfg_path = Path.cwd() / "config.json"
             if cfg_path.exists():
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)

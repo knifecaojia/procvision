@@ -7,7 +7,9 @@ import time
 import glob
 import logging
 import sys
-from typing import List, Dict, Optional, Tuple
+import tempfile
+import threading
+from typing import List, Dict, Optional, Tuple, Any
 
 from .config import RunnerConfig
 from .types import PackageState, RegistryEntry, ActiveMapping, Manifest
@@ -23,8 +25,13 @@ logger = logging.getLogger(__name__)
 class PackageManager:
     def __init__(self, config: RunnerConfig):
         self.config = config
+        self._registry_lock = threading.Lock()
         self._ensure_dirs()
         self.registry: Dict[str, RegistryEntry] = self._load_registry()
+        try:
+            self._reconcile_registry_with_deployed()
+        except Exception:
+            pass
 
     def _extract_zip_with_progress(
         self,
@@ -176,12 +183,158 @@ class PackageManager:
             logger.error(f"Failed to load registry: {e}")
             return {}
 
+    def reload_registry(self) -> None:
+        self.registry = self._load_registry()
+
     def _save_registry(self):
-        try:
-            with open(self.config.registry_path, "w", encoding="utf-8") as f:
-                json.dump(list(self.registry.values()), f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save registry: {e}")
+        registry_path = self.config.registry_path
+        parent = os.path.dirname(registry_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp_fd = None
+        tmp_path = None
+        with self._registry_lock:
+            try:
+                tmp_fd, tmp_path = tempfile.mkstemp(prefix="registry.", suffix=".tmp", dir=parent or None, text=True)
+                with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+                    tmp_fd = None
+                    json.dump(list(self.registry.values()), f, indent=2)
+                os.replace(tmp_path, registry_path)
+                tmp_path = None
+            except Exception as e:
+                raise RunnerError(f"Failed to save registry: {e}", "2005")
+            finally:
+                try:
+                    if tmp_fd is not None:
+                        os.close(tmp_fd)
+                except Exception:
+                    pass
+                try:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+
+    def _reconcile_registry_with_deployed(self) -> None:
+        changed = False
+        deployed_dir = self.config.deployed_dir
+        if not os.path.isdir(deployed_dir):
+            return
+
+        def _read_manifest(path: str) -> Dict[str, Any]:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f) or {}
+            except UnicodeDecodeError:
+                pass
+            try:
+                with open(path, "r", encoding="utf-8-sig") as f:
+                    return json.load(f) or {}
+            except Exception:
+                pass
+            try:
+                with open(path, "r", encoding="gbk") as f:
+                    return json.load(f) or {}
+            except Exception:
+                pass
+            with open(path, "rb") as f:
+                raw = f.read()
+            try:
+                return json.loads(raw.decode("utf-8", errors="ignore")) or {}
+            except Exception:
+                return json.loads(raw.decode("latin-1")) or {}
+
+        for child in os.listdir(deployed_dir):
+            install_path = os.path.join(deployed_dir, child)
+            if not os.path.isdir(install_path):
+                continue
+
+            manifest_path = None
+            working_dir = install_path
+            try:
+                for root, dirs, files in os.walk(install_path):
+                    dirs[:] = [d for d in dirs if d not in {"__pycache__", ".git"}]
+                    if "manifest.json" in files:
+                        manifest_path = os.path.join(root, "manifest.json")
+                        working_dir = root
+                        break
+            except Exception:
+                manifest_path = None
+
+            if not manifest_path:
+                continue
+
+            try:
+                mf = _read_manifest(manifest_path)
+            except Exception:
+                continue
+
+            name = str(mf.get("name") or "").strip()
+            version = str(mf.get("version") or "").strip()
+            if not name or not version:
+                if "-" in child:
+                    n, v = child.rsplit("-", 1)
+                    name = name or n
+                    version = version or v
+            if not name or not version:
+                continue
+
+            key = f"{name}:{version}"
+            if key in self.registry:
+                continue
+
+            python_rel = ""
+            if os.name == "nt":
+                candidates = [
+                    os.path.join(install_path, "__procvision_env", "Scripts", "python.exe"),
+                    os.path.join(install_path, "_env", "Scripts", "python.exe"),
+                    os.path.join(install_path, "venv", "Scripts", "python.exe"),
+                ]
+            else:
+                candidates = [
+                    os.path.join(install_path, "__procvision_env", "bin", "python"),
+                    os.path.join(install_path, "_env", "bin", "python"),
+                    os.path.join(install_path, "venv", "bin", "python"),
+                ]
+            for c in candidates:
+                if os.path.exists(c):
+                    python_rel = os.path.relpath(c, install_path).replace("\\", "/")
+                    break
+
+            spids = mf.get("supported_pids", []) or []
+            supported_pids = [str(p).strip() for p in spids if str(p).strip()]
+            try:
+                created_at = float(os.path.getmtime(install_path))
+            except Exception:
+                created_at = time.time()
+
+            entry: RegistryEntry = {
+                "name": name,
+                "version": version,
+                "supported_pids": supported_pids,
+                "state": PackageState.INSTALLED,
+                "created_at": created_at,
+                "install_path": install_path,
+                "working_dir": working_dir.replace("\\", "/"),
+                "python_rel_path": python_rel,
+            }
+            self.registry[key] = entry
+            changed = True
+
+        for key, entry in list(self.registry.items()):
+            try:
+                install_path = entry.get("install_path")
+            except Exception:
+                install_path = None
+            if not install_path or not os.path.isdir(str(install_path)):
+                try:
+                    del self.registry[key]
+                    changed = True
+                except Exception:
+                    pass
+
+        if changed:
+            self._save_registry()
 
     def scan_zips(self) -> List[str]:
         """Scans the zips directory for new packages."""
@@ -265,32 +418,41 @@ class PackageManager:
                 if not env_config_data:
                      logger.info(".procvision_env.json not found in zip.")
 
-                # Heuristic 1: Explicit 'python_runtime' directory (Preferred)
-                has_python_runtime = False
-                for name in namelist:
-                    if name.startswith("python_runtime/") or "python_runtime/" in name:
-                        has_python_runtime = True
-                        break
-                
-                if has_python_runtime:
-                    for name in namelist:
-                        if "python_runtime" in name:
-                            if name.lower().endswith("/python.exe") or name.lower() == "python.exe":
-                                 internal_python_path = os.path.dirname(name)
-                                 break
-                            if name.endswith("/bin/python"):
-                                 internal_python_path = os.path.dirname(os.path.dirname(name))
-                                 break
-                
-                # Heuristic 2: Scan for any python executable
-                if not internal_python_path:
-                    for name in namelist:
-                        if name.lower().endswith("/python.exe") or name.lower() == "python.exe":
-                             internal_python_path = os.path.dirname(name)
-                             break
-                        if name.endswith("/bin/python"):
-                             internal_python_path = os.path.dirname(os.path.dirname(name))
-                             break
+                # Prefer python_runtime by directly locating python executable inside it.
+                def _find_python_runtime_root() -> Optional[str]:
+                    best_root = None
+                    best_score = None
+                    for n in namelist:
+                        nl = str(n).replace("\\", "/").lower()
+                        if "python_runtime/" not in nl:
+                            continue
+                        if not (nl.endswith("/python.exe") or nl.endswith("/scripts/python.exe") or nl.endswith("/bin/python")):
+                            continue
+                        parts = str(n).replace("\\", "/").split("/")
+                        try:
+                            idx = parts.index("python_runtime")
+                        except ValueError:
+                            try:
+                                idx = [p.lower() for p in parts].index("python_runtime")
+                            except ValueError:
+                                continue
+                        root = "/".join(parts[: idx + 1]).strip("/")
+                        if not root:
+                            continue
+                        if nl.endswith("/python_runtime/python.exe"):
+                            score = 0
+                        elif nl.endswith("/python_runtime/scripts/python.exe"):
+                            score = 1
+                        else:
+                            score = 2
+                        if best_score is None or score < best_score or (score == best_score and len(root) < len(best_root or "")):
+                            best_root = root
+                            best_score = score
+                            if score == 0:
+                                break
+                    return best_root
+
+                internal_python_path = _find_python_runtime_root()
                 
                 # Read manifest content (using original info)
                 zip_filename = os.path.basename(zip_path)
@@ -356,7 +518,6 @@ class PackageManager:
         env_config = manifest.get("_env_config")
         
         key = f"{name}:{version}"
-        env_dir_name = "__procvision_env"
 
         if key in self.registry and not force:
             logger.info(f"Package {key} already installed.")
@@ -381,399 +542,132 @@ class PackageManager:
                 end_percent=70,
             )
 
-            # 2. Create venv or conda env
+            # 2. Create venv using host Python 3.12 and install dependencies from bundled wheels (offline).
             if progress_callback:
                 progress_callback.emit(72)
+
+            env_dir_name = "__procvision_env"
+            venv_dir = os.path.join(install_dir, env_dir_name)
             try:
-                for candidate in ("__procvision_env", "_env", "venv"):
-                    p = os.path.join(install_dir, candidate)
-                    if os.path.exists(p):
-                        shutil.rmtree(p, ignore_errors=True)
+                shutil.rmtree(venv_dir, ignore_errors=True)
             except Exception:
                 pass
-            venv_dir = os.path.join(install_dir, env_dir_name)
-            python_rel_path = ""
-            
-            # Priority 1: Use Bundled Python Interpreter if available
-            if internal_python_path:
-                logger.info(f"Found bundled python interpreter at {internal_python_path}")
-                # Resolve absolute path to the bundled python executable
-                # Note: internal_python_path is relative to install_dir
-                
-                # We need to find the executable path inside
-                bundled_python_dir = os.path.join(install_dir, internal_python_path)
-                
-                # Check if it is a venv (contains pyvenv.cfg)
-                is_bundled_venv = os.path.exists(os.path.join(bundled_python_dir, "pyvenv.cfg"))
-                
-                if os.name == 'nt':
-                    bundled_python_exe = os.path.join(bundled_python_dir, "python.exe")
-                    # Try Scripts/python.exe if root one doesn't exist (common in venv)
-                    if not os.path.exists(bundled_python_exe):
-                         bundled_python_exe = os.path.join(bundled_python_dir, "Scripts", "python.exe")
-                else:
-                    bundled_python_exe = os.path.join(bundled_python_dir, "bin", "python")
-                
-                if os.path.exists(bundled_python_exe):
-                    logger.info(f"Using bundled python: {bundled_python_exe}")
-                    
-                    if is_bundled_venv:
-                        logger.info("Bundled python is a venv. Using it directly.")
-                        # Use the bundled dir as venv_dir
-                        venv_dir = bundled_python_dir
-                        
-                        # Set paths
-                        if os.name == 'nt':
-                            python_cmd = bundled_python_exe
-                            pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
-                            # Calculate relative path from install_dir
-                            # internal_python_path might be "python_runtime"
-                            # We need "python_runtime/Scripts/python.exe"
-                            # But bundled_python_exe is absolute.
-                            python_rel_path = os.path.relpath(bundled_python_exe, install_dir).replace("\\", "/")
-                        else:
-                            python_cmd = bundled_python_exe
-                            pip_cmd = os.path.join(venv_dir, "bin", "pip")
-                            python_rel_path = os.path.relpath(bundled_python_exe, install_dir).replace("\\", "/")
-                        
-                        # Skip creation
-                        target_py_version = None
-                        
-                    else:
-                        # Not a venv (e.g. base python), create new venv using it
-                        # Verify it runs
-                        try:
-                             subprocess.check_call([bundled_python_exe, "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        except Exception as e:
-                             logger.warning(f"Bundled python check failed: {e}. Fallback to auto-detection.")
-                             internal_python_path = None # Disable bundled logic
-                        else:
-                             # Create venv using this python
-                             logger.info(f"Creating venv using bundled python...")
-                             subprocess.check_call([bundled_python_exe, "-m", "venv", venv_dir])
-                             
-                             # Set paths for venv
-                             if os.name == 'nt':
-                                 python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
-                                 pip_cmd = os.path.join(venv_dir, "Scripts", "pip.exe")
-                                 python_rel_path = f"{env_dir_name}/Scripts/python.exe"
-                             else:
-                                 python_cmd = os.path.join(venv_dir, "bin", "python")
-                                 pip_cmd = os.path.join(venv_dir, "bin", "pip")
-                                 python_rel_path = f"{env_dir_name}/bin/python"
-                             
-                             # Skip Conda logic
-                             target_py_version = None 
-                else:
-                     logger.warning(f"Bundled python executable not found at expected path. Fallback.")
-                     internal_python_path = None
 
-            # Fallback Logic (Conda / System or App-bundled runtime)
-            if not internal_python_path:
-                logger.info("Internal python interpreter NOT found. Falling back to environment detection.")
-                
-                # Determine target python version
-                target_py_version = None
-                
-                # Priority 2: Check .procvision_env.json
-                if env_config:
-                    target_py_version = env_config.get("python_version")
-                    if target_py_version:
-                        logger.info(f"Using python version from .procvision_env.json: {target_py_version}")
-                    else:
-                        logger.warning(".procvision_env.json found but 'python_version' is missing or empty.")
-                else:
-                    logger.info(".procvision_env.json not found in package.")
-
-                # Priority 3: Check manifest
-                if not target_py_version:
-                    target_py_version = manifest.get("python_version")
-                    if target_py_version:
-                         logger.info(f"Using python version from manifest.json: {target_py_version}")
-                
-                # Priority 4: Detect from wheels
-                wheels_dir_abs = os.path.join(install_dir, wheels_internal_path)
-                if not target_py_version:
-                    target_py_version = self._detect_python_version(wheels_dir_abs)
-                    if target_py_version:
-                        logger.info(f"Detected Python version from wheels: {target_py_version}")
-                
-                if not target_py_version:
-                    logger.warning("Could not determine target python version. Using current system python.")
-
-                # Check if we need Conda
-                use_conda = False
-                conda_cmd = "conda"
-                current_py = f"{sys.version_info.major}.{sys.version_info.minor}"
-                
-                logger.info(f"Environment Check: Target={target_py_version}, Current={current_py}")
-                
-                if target_py_version and target_py_version != current_py:
-                    if os.name == "nt":
-                        try:
-                            subprocess.check_call("conda --version", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True)
-                            use_conda = True
-                            logger.info(f"Target Python {target_py_version} != Current {current_py}. Using Conda.")
-                        except Exception:
-                            candidates = [
-                                os.environ.get("CONDA_EXE"),
-                                os.path.join(os.environ.get("USERPROFILE", ""), "miniconda3", "condabin", "conda.bat"),
-                                os.path.join(os.environ.get("USERPROFILE", ""), "miniconda3", "Scripts", "conda.exe"),
-                                os.path.join("C:\\ProgramData\\miniconda3", "condabin", "conda.bat"),
-                                os.path.join("C:\\ProgramData\\miniconda3", "Scripts", "conda.exe"),
-                            ]
-                            for c in candidates:
-                                if c and os.path.exists(c):
-                                    conda_cmd = c
-                                    use_conda = True
-                                    logger.info(f"Detected Conda at {conda_cmd}")
-                                    break
-                            if not use_conda:
-                                logger.warning(f"Target Python {target_py_version} requested but Conda not found. Trying venv (might fail).")
-                    else:
-                        try:
-                            subprocess.check_call(["conda", "--version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            use_conda = True
-                            logger.info(f"Target Python {target_py_version} != Current {current_py}. Using Conda.")
-                        except Exception:
-                            c = os.environ.get("CONDA_EXE")
-                            if c and os.path.exists(c):
-                                conda_cmd = c
-                                use_conda = True
-                                logger.info(f"Detected Conda at {conda_cmd}")
-                            else:
-                                logger.warning(f"Target Python {target_py_version} requested but Conda not found. Trying venv (might fail).")
-
-                # Priority: Use app-bundled runtime if present (PyInstaller one-dir)
-                packaged_python_exe = None
+            def _detect_python_major_minor(python_exe: str) -> Optional[str]:
                 try:
-                    if getattr(sys, "frozen", False):
-                        app_root = os.path.dirname(sys.executable)
-                        candidates = [
-                            os.path.join(app_root, "_internal", "runtime", "python", "python.exe"),
-                            os.path.join(app_root, "runtime", "python", "python.exe"),
-                            os.path.join(app_root, "_internal", "runtime", "venv", "Scripts", "python.exe"),
-                            os.path.join(app_root, "runtime", "venv", "Scripts", "python.exe"),
-                        ]
-                        for p in candidates:
-                            if os.path.exists(p):
-                                packaged_python_exe = p
-                                break
-                        if packaged_python_exe:
-                            runtime_ver = None
-                            try:
-                                r = subprocess.run(
-                                    [packaged_python_exe, "-c", "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    text=True,
-                                    encoding="utf-8",
-                                    errors="replace",
-                                )
-                                if r.returncode == 0:
-                                    runtime_ver = (r.stdout or "").strip()
-                            except Exception:
-                                runtime_ver = None
-                            if target_py_version and runtime_ver and runtime_ver != str(target_py_version).strip():
-                                logger.info(
-                                    "App-bundled python version mismatch (runtime=%s target=%s), skipping.",
-                                    runtime_ver,
-                                    target_py_version,
-                                )
-                                packaged_python_exe = None
-                            else:
-                                logger.info(f"Using app-bundled python runtime: {packaged_python_exe}")
-                                python_cmd = packaged_python_exe
-                                # Store absolute path so process can use it
-                                python_rel_path = os.path.abspath(packaged_python_exe).replace("\\", "/")
+                    r = subprocess.run(
+                        [python_exe, "-c", "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+                    if r.returncode != 0:
+                        return None
+                    return str((r.stdout or "").strip() or "")
                 except Exception:
-                    packaged_python_exe = None
-                
-                if packaged_python_exe:
-                    pass
-                elif use_conda:
-                    logger.info(f"Creating Conda env at {venv_dir} with python={target_py_version}...")
-                    try:
-                        def _run_conda(args: list[str]) -> subprocess.CompletedProcess:
-                            conda_path = conda_cmd
-                            conda_path_l = str(conda_path or "").lower()
-                            if os.name == "nt" and conda_path_l.endswith((".bat", ".cmd")):
-                                joined = " ".join([f"\"{a}\"" if (" " in a or "\t" in a) else a for a in args])
-                                return subprocess.run(
-                                    ["cmd.exe", "/d", "/s", "/c", f'call "{conda_path}" {joined}'],
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    text=True,
-                                    encoding="utf-8",
-                                    errors="replace",
-                                )
-                            return subprocess.run(
-                                [conda_path, *args],
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                encoding="utf-8",
-                                errors="replace",
-                            )
+                    return None
 
-                        r = _run_conda(["create", "-p", venv_dir, f"python={target_py_version}", "-y"])
-                        if r.returncode != 0:
-                            raise InstallFailedError(
-                                f"Conda create failed (rc={r.returncode}): {(r.stderr or r.stdout).strip()}"
-                            )
-                    except InstallFailedError:
-                        logger.error("Conda create failed. Check conda config / permissions / existing prefix.")
-                        raise
-                    except Exception as e:
-                        logger.error("Conda create failed. Check conda config / permissions / existing prefix.")
-                        raise InstallFailedError(f"Conda create failed: {e}")
-                    
-                    # Resolve paths for Conda (Windows)
-                    # In prefix env: python.exe is at root, pip is in Scripts
-                    if os.name == 'nt':
-                        python_cmd = os.path.join(venv_dir, "python.exe")
-                        python_rel_path = f"{env_dir_name}/python.exe"
-                    else:
-                        python_cmd = os.path.join(venv_dir, "bin", "python")
-                        python_rel_path = f"{env_dir_name}/bin/python"
+            required_py = "3.12"
+            host_python = None
+            if getattr(sys, "frozen", False):
+                app_root = os.path.dirname(sys.executable)
+                bundled_candidates = [
+                    os.path.join(app_root, "_internal", "runtime", "python", "python.exe"),
+                    os.path.join(app_root, "runtime", "python", "python.exe"),
+                ]
+                for c in bundled_candidates:
+                    if os.path.exists(c) and _detect_python_major_minor(c) == required_py:
+                        host_python = c
+                        break
+                if not host_python:
+                    python_which = shutil.which("python")
+                    if python_which and _detect_python_major_minor(python_which) == required_py:
+                        host_python = python_which
+            else:
+                if _detect_python_major_minor(sys.executable) == required_py:
+                    host_python = sys.executable
 
-                else:
-                    logger.info(f"Creating venv at {venv_dir}...")
-                    if getattr(sys, "frozen", False):
-                        try:
-                            python_which = shutil.which("python")
-                            if python_which:
-                                subprocess.check_call([python_which, "-m", "venv", venv_dir])
-                            else:
-                                raise FileNotFoundError("python command not found in PATH")
-                        except Exception as e:
-                            if use_conda and conda_cmd:
-                                try:
-                                    if os.name == "nt":
-                                        cmd = f'\"{conda_cmd}\" create -p \"{venv_dir}\" python={target_py_version or current_py} -y'
-                                        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace", shell=True)
-                                        if r.returncode != 0:
-                                            raise InstallFailedError(f"Conda create failed: {r.stderr.strip() or r.stdout.strip()}")
-                                    else:
-                                        cmd = [conda_cmd, "create", "-p", venv_dir, f"python={target_py_version or current_py}", "-y"]
-                                        r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
-                                        if r.returncode != 0:
-                                            raise InstallFailedError(f"Conda create failed: {r.stderr.strip() or r.stdout.strip()}")
-                                except InstallFailedError:
-                                    raise
-                                except Exception as e2:
-                                    raise InstallFailedError(f"Conda create failed: {e2}")
-                            else:
-                                raise InstallFailedError(f"Python runtime not found. Include python_runtime in package or install Python: {e}")
-                    else:
-                        subprocess.check_call([sys.executable, "-m", "venv", venv_dir])
-                    
-                    if os.name == 'nt':
-                        python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
-                        python_rel_path = f"{env_dir_name}/Scripts/python.exe"
-                    else:
-                        python_cmd = os.path.join(venv_dir, "bin", "python")
-                        python_rel_path = f"{env_dir_name}/bin/python"
+            if not host_python:
+                raise InstallFailedError(f"Python {required_py} runtime not found. Please install Python {required_py} or bundle it with the app.")
 
-            # 3. Install dependencies
-            # Determine pip path in venv
-            if progress_callback:
-                progress_callback.emit(86)
+            try:
+                subprocess.run(
+                    [host_python, "-m", "venv", venv_dir],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+            except subprocess.CalledProcessError as e:
+                raise InstallFailedError(f"Venv create failed: {(e.stderr or e.stdout or '').strip()}")
 
-            # Resolve actual paths on disk
+            if os.name == "nt":
+                python_cmd = os.path.join(venv_dir, "Scripts", "python.exe")
+                python_rel_path = f"{env_dir_name}/Scripts/python.exe"
+            else:
+                python_cmd = os.path.join(venv_dir, "bin", "python")
+                python_rel_path = f"{env_dir_name}/bin/python"
+
             wheels_dir = os.path.join(install_dir, wheels_internal_path)
             requirements_path = os.path.join(install_dir, algo_root, "requirements.txt")
 
-            logger.info(f"Installing dependencies for {key}...")
-            logger.info(f"Wheels dir: {wheels_dir}")
-            logger.info(f"Requirements: {requirements_path}")
-            
+            if not os.path.isdir(wheels_dir):
+                raise InstallFailedError(f"Wheels directory missing: {wheels_dir}")
+            if not os.path.exists(requirements_path):
+                raise InstallFailedError(f"requirements.txt missing: {requirements_path}")
+
             subprocess_env = os.environ.copy()
             for k in ("PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE"):
                 subprocess_env.pop(k, None)
             subprocess_env["PYTHONNOUSERSITE"] = "1"
             subprocess_env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
 
-            if python_cmd:
-                try:
-                    subprocess.run(
-                        [python_cmd, "-m", "ensurepip", "--upgrade"],
-                        check=True,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        env=subprocess_env,
-                        cwd=venv_dir,
-                    )
-                except Exception:
-                    pass
-            cmd = [
-                python_cmd, "-m", "pip", "install",
-                "--no-index",
-                "--find-links", wheels_dir,
-                "-r", requirements_path
-            ]
-            # Capture output to show error details
             try:
                 subprocess.run(
-                    cmd, 
-                    check=True, 
-                    stdout=subprocess.PIPE, 
+                    [python_cmd, "-m", "ensurepip", "--upgrade"],
+                    check=True,
+                    stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    encoding='utf-8',
-                    errors='replace',
+                    encoding="utf-8",
+                    errors="replace",
+                    env=subprocess_env,
+                    cwd=venv_dir,
+                )
+            except Exception:
+                pass
+
+            try:
+                subprocess.run(
+                    [
+                        python_cmd,
+                        "-m",
+                        "pip",
+                        "install",
+                        "--no-index",
+                        "--find-links",
+                        wheels_dir,
+                        "-r",
+                        requirements_path,
+                    ],
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     env=subprocess_env,
                     cwd=venv_dir,
                 )
             except subprocess.CalledProcessError as e:
-                logger.error(f"Pip install stdout: {e.stdout}")
-                logger.error(f"Pip install stderr: {e.stderr}")
-                # If pip is missing in conda-created env, install pip via conda then retry
-                try:
-                    if 'not found' in (e.stderr or '').lower() or 'no module named pip' in (e.stderr or '').lower():
-                        if 'use_conda' in locals() and use_conda:
-                            logger.info("Installing pip into conda prefix environment...")
-                            if os.name == "nt":
-                                conda_path = conda_cmd
-                                conda_path_l = str(conda_path or "").lower()
-                                if conda_path_l.endswith((".bat", ".cmd")):
-                                    ccmd = f'call "{conda_path}" install -p "{venv_dir}" pip -y'
-                                    subprocess.check_call(
-                                        ["cmd.exe", "/d", "/s", "/c", ccmd],
-                                        stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.PIPE,
-                                    )
-                                else:
-                                    subprocess.check_call(
-                                        [conda_path, "install", "-p", venv_dir, "pip", "-y"],
-                                        stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.PIPE,
-                                    )
-                            else:
-                                ccmd = [conda_cmd, "install", "-p", venv_dir, "pip", "-y"]
-                                subprocess.check_call(ccmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-                            subprocess.run(
-                                cmd, 
-                                check=True, 
-                                stdout=subprocess.PIPE, 
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                encoding='utf-8',
-                                errors='replace',
-                                env=subprocess_env,
-                                cwd=venv_dir,
-                            )
-                            logger.info("Pip install succeeded after installing pip via conda.")
-                        else:
-                            raise InstallFailedError(f"Pip install failed and conda not available: {e.stderr}")
-                    else:
-                        raise InstallFailedError(f"Pip install failed: {e.stderr}")
-                except subprocess.CalledProcessError as e2:
-                    logger.error("Conda pip install failed.")
-                    raise InstallFailedError(f"Conda pip install failed: {e2}")
+                raise InstallFailedError(f"Pip install failed: {(e.stderr or e.stdout or '').strip()}")
+
+            if progress_callback:
+                progress_callback.emit(86)
 
             # 4. Register
             if progress_callback:
@@ -784,13 +678,20 @@ class PackageManager:
                 "supported_pids": manifest["supported_pids"],
                 "state": PackageState.INSTALLED,
                 "created_at": time.time(),
-                "install_path": install_dir, # Root with venv
+                "install_path": install_dir,
                 "working_dir": os.path.join(install_dir, algo_root).replace("\\", "/"), # Actual algo root
                 "python_rel_path": python_rel_path # Relative path to python executable
             }
 
             self.registry[key] = entry
-            self._save_registry()
+            try:
+                self._save_registry()
+            except Exception:
+                try:
+                    del self.registry[key]
+                except Exception:
+                    pass
+                raise
             logger.info(f"Package {key} installed successfully.")
             if progress_callback:
                 progress_callback.emit(100)
@@ -856,7 +757,35 @@ class PackageManager:
         """Uninstalls a deployed package."""
         key = f"{name}:{version}"
         if key not in self.registry:
-            raise RunnerError(f"Package {key} not installed", "2005")
+            deployed_dir_new = os.path.join(self.config.deployed_dir, f"{name}-{version}")
+            deployed_dir_old = os.path.join(self.config.deployed_dir, name, version)
+            install_path = None
+            if os.path.isdir(deployed_dir_new):
+                install_path = deployed_dir_new
+            elif os.path.isdir(deployed_dir_old):
+                install_path = deployed_dir_old
+            if not install_path:
+                raise RunnerError(f"Package {key} not installed", "2005")
+
+            for mapping_file in glob.glob(os.path.join(self.config.active_dir, "*.json")):
+                try:
+                    with open(mapping_file, "r") as f:
+                        mapping = json.load(f) or {}
+                    if mapping.get("name") == name and mapping.get("version") == version:
+                        os.remove(mapping_file)
+                except Exception:
+                    pass
+
+            try:
+                shutil.rmtree(install_path)
+            except Exception as e:
+                logger.error(f"Failed to remove directory {install_path}: {e}")
+
+            try:
+                self._reconcile_registry_with_deployed()
+            except Exception:
+                pass
+            return
 
         # Check if active
         for mapping_file in glob.glob(os.path.join(self.config.active_dir, "*.json")):

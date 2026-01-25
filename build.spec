@@ -13,7 +13,6 @@ for m in ['MvCameraControl_class', 'CameraParams_header', 'MvErrorDefine_const',
         pass
 
 datas = []
-datas.append(('config/app_config.json', 'config'))
 datas.append(('config.json', '.'))
 
 block_cipher = None

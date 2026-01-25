@@ -11,12 +11,11 @@
   - 源码运行：建议始终通过 `python run_app.py` 启动（会将工作目录切到项目根目录）
   - EXE 运行：工作目录为 EXE 所在目录（配置与算法目录均相对该目录）
 
-## 配置文件
+## 配置文件（统一）
 
-本项目存在两类配置文件（结构不同）：
+项目统一使用单一配置文件：
 
-- `config.json`（项目根目录 / EXE 同级）：UI/运行偏好与部署相关配置（例如 server、storage、general、theme）
-- `config/app_config.json`（项目根目录 / EXE 同级的 config 子目录）：核心业务配置（auth/database/logging/camera/network 等）
+- `config.json`（项目根目录 / EXE 同级）：包含 UI/运行偏好（server/storage/general/theme）以及核心业务配置（auth/database/logging/camera/network 等）
 
 为避免“保存路径与加载路径不一致”，启动入口会在源码与 EXE 模式下统一工作目录，并确保发布包内置的默认配置会复制到可写位置。
 

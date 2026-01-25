@@ -154,7 +154,7 @@ class AppConfig:
     # Development settings
     debug_mode: bool = False
     dev_mode: bool = False
-    config_file_path: str = "config/app_config.json"
+    config_file_path: str = "config.json"
 
 
 class ConfigManager:
@@ -171,7 +171,7 @@ class ConfigManager:
         Args:
             config_file_path: Path to configuration file
         """
-        self.config_file_path = config_file_path or "config/app_config.json"
+        self.config_file_path = config_file_path or "config.json"
         self.config = AppConfig()
         self._load_configuration()
 
@@ -198,8 +198,20 @@ class ConfigManager:
                 self._update_config_from_dict(config_data)
                 logger.info(f"Configuration loaded from: {self.config_file_path}")
             else:
+                legacy = Path("config") / "app_config.json"
+                if legacy.exists():
+                    try:
+                        with open(legacy, "r", encoding="utf-8") as f:
+                            legacy_data = json.load(f) or {}
+                        if isinstance(legacy_data, dict):
+                            self._update_config_from_dict(legacy_data)
+                            logger.info("Migrating legacy config/app_config.json into config.json")
+                            self.save_configuration()
+                            return
+                    except Exception as e:
+                        logger.warning("Failed to migrate legacy config/app_config.json: %s", e)
                 logger.info("Configuration file not found, using defaults")
-                self._save_configuration()  # Save default configuration
+                self.save_configuration()
 
         except Exception as e:
             logger.error(f"Failed to load configuration file: {e}")
@@ -292,7 +304,18 @@ class ConfigManager:
     def save_configuration(self):
         """Save current configuration to file."""
         try:
-            config_data = {
+            config_data = {}
+            config_path = Path(self.config_file_path)
+            if config_path.exists():
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    if isinstance(existing, dict):
+                        config_data.update(existing)
+                except Exception:
+                    pass
+
+            config_data.update({
                 'auth': self._dataclass_to_dict(self.config.auth),
                 'database': self._dataclass_to_dict(self.config.database),
                 'ui': self._dataclass_to_dict(self.config.ui),
@@ -304,9 +327,7 @@ class ConfigManager:
                 'app_title': self.config.app_title,
                 'debug_mode': self.config.debug_mode,
                 'dev_mode': self.config.dev_mode
-            }
-
-            config_path = Path(self.config_file_path)
+            })
             config_path.parent.mkdir(parents=True, exist_ok=True)
 
             with open(config_path, 'w', encoding='utf-8') as f:

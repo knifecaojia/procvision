@@ -131,7 +131,11 @@ def resolve_theme_colors(theme_name: str, base_colors: Optional[Dict[str, str]])
 
 def load_user_theme_preference(config_path: Optional[Path] = None) -> str:
     """Read persisted theme preference from config.json."""
-    path = config_path or Path.cwd() / "config.json"
+    if config_path is None:
+        from src.core.paths import get_config_json_path
+        path = get_config_json_path()
+    else:
+        path = config_path
     try:
         if not path.exists():
             return ThemeLoader.DEFAULT_THEME
@@ -149,7 +153,11 @@ def load_user_theme_preference(config_path: Optional[Path] = None) -> str:
 
 def save_user_theme_preference(theme: str, config_path: Optional[Path] = None) -> None:
     """Persist theme preference into config.json."""
-    path = config_path or Path.cwd() / "config.json"
+    if config_path is None:
+        from src.core.paths import get_config_json_path
+        path = get_config_json_path()
+    else:
+        path = config_path
     try:
         import json
 

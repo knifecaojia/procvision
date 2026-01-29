@@ -72,7 +72,8 @@ class CalibrationStorage:
     ) -> Path:
         """Save calibration result to root config.json."""
         timestamp = result.timestamp
-        config_path = Path.cwd() / "config.json"
+        from src.core.paths import get_config_json_path
+        config_path = get_config_json_path()
 
         try:
             payload: Dict[str, Any] = {

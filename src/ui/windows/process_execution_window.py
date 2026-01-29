@@ -2471,7 +2471,8 @@ class ProcessExecutionWindow(QWidget):
 
     def _read_auto_start_next_setting(self) -> bool:
         try:
-            p = Path.cwd() / "config.json"
+            from src.core.paths import get_config_json_path
+            p = get_config_json_path()
             if p.exists():
                 data = json.loads(p.read_text(encoding="utf-8"))
                 general = data.get("general", {})
@@ -2482,7 +2483,8 @@ class ProcessExecutionWindow(QWidget):
 
     def _read_result_prompt_position(self) -> str:
         try:
-            p = Path.cwd() / "config.json"
+            from src.core.paths import get_config_json_path
+            p = get_config_json_path()
             if p.exists():
                 data = json.loads(p.read_text(encoding="utf-8"))
                 general = data.get("general", {})
@@ -2499,7 +2501,8 @@ class ProcessExecutionWindow(QWidget):
 
     def _read_draw_box_settings(self) -> tuple[bool, bool]:
         try:
-            p = Path.cwd() / "config.json"
+            from src.core.paths import get_config_json_path
+            p = get_config_json_path()
             if p.exists():
                 data = json.loads(p.read_text(encoding="utf-8"))
                 general = data.get("general", {})

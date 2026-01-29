@@ -27,6 +27,9 @@ class SystemPage(QFrame):
         self.setObjectName("systemPage")
         self.current_theme = initial_theme if initial_theme in {"dark", "light"} else "dark"
         self._loading_settings = False
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.timeout.connect(lambda: self.save_settings(silent=True))
         self.init_ui()
         self.load_settings()
         
@@ -283,7 +286,57 @@ class SystemPage(QFrame):
 
         self.img_browse_btn.clicked.connect(self.on_img_browse)
         self.log_browse_btn.clicked.connect(self.on_log_browse)
-        self.save_btn.clicked.connect(self.save_settings)
+        self.save_btn.clicked.connect(lambda: self.save_settings(silent=False))
+        self._setup_autosave()
+
+    def _setup_autosave(self) -> None:
+        widgets = [
+            self.addr_input,
+            self.port_input,
+            self.img_path_input,
+            self.img_retention_input,
+            self.log_path_input,
+            self.log_retention_input,
+        ]
+        for w in widgets:
+            try:
+                w.textChanged.connect(self._schedule_autosave)
+            except Exception:
+                pass
+            try:
+                w.editingFinished.connect(self._schedule_autosave)
+            except Exception:
+                pass
+
+        try:
+            self.auto_start_next_checkbox.toggled.connect(self._schedule_autosave)
+        except Exception:
+            pass
+        try:
+            self.result_position_combo.currentIndexChanged.connect(self._schedule_autosave)
+        except Exception:
+            pass
+        try:
+            self.draw_ok_checkbox.toggled.connect(self._schedule_autosave)
+        except Exception:
+            pass
+        try:
+            self.draw_ng_checkbox.toggled.connect(self._schedule_autosave)
+        except Exception:
+            pass
+        try:
+            self.theme_switch.toggled.connect(self._schedule_autosave)
+        except Exception:
+            pass
+
+    def _schedule_autosave(self, *args) -> None:
+        if self._loading_settings:
+            return
+        try:
+            self._autosave_timer.stop()
+        except Exception:
+            pass
+        self._autosave_timer.start(500)
 
     def on_img_browse(self):
         initial = self.img_path_input.text() or str(Path.cwd())
@@ -298,7 +351,8 @@ class SystemPage(QFrame):
             self.log_path_input.setText(self.normalize_path_for_os(path))
 
     def config_path(self) -> Path:
-        return Path.cwd() / "config.json"
+        from src.core.paths import get_config_json_path
+        return get_config_json_path()
 
     def load_settings(self):
         self._loading_settings = True
@@ -312,6 +366,7 @@ class SystemPage(QFrame):
                 image = storage.get("image", {})
                 log = storage.get("log", {})
                 general = data.get("general", {})
+                logging_cfg = data.get("logging", {})
                 if "address" in server:
                     self.addr_input.setText(str(server.get("address", "")))
                 if "port" in server:
@@ -322,6 +377,16 @@ class SystemPage(QFrame):
                     self.img_retention_input.setText(str(image.get("retention_days", "")))
                 if "path" in log:
                     self.log_path_input.setText(self.normalize_path_for_os(str(log.get("path", ""))))
+                elif logging_cfg.get("file_path"):
+                    try:
+                        from src.core.paths import get_app_base_dir
+
+                        log_file = Path(str(logging_cfg.get("file_path", "")))
+                        if not log_file.is_absolute():
+                            log_file = get_app_base_dir() / log_file
+                        self.log_path_input.setText(self.normalize_path_for_os(str(log_file.parent)))
+                    except Exception:
+                        pass
                 if "retention_days" in log:
                     self.log_retention_input.setText(str(log.get("retention_days", "")))
                 self.auto_start_next_checkbox.setChecked(bool(general.get("auto_start_next", False)))
@@ -350,7 +415,7 @@ class SystemPage(QFrame):
             self.theme_switch.blockSignals(False)
             self._update_theme_label()
 
-    def save_settings(self):
+    def save_settings(self, *args, silent: bool = False):
         try:
             p = self.config_path()
             if p.exists():
@@ -377,6 +442,20 @@ class SystemPage(QFrame):
                 data["storage"]["log"]["retention_days"] = int(self.log_retention_input.text().strip())
             except ValueError:
                 data["storage"]["log"]["retention_days"] = self.log_retention_input.text().strip()
+            log_dir = self.normalize_path_for_os(self.log_path_input.text().strip())
+            if log_dir:
+                try:
+                    log_path = Path(log_dir)
+                    if log_path.suffix.lower() == ".log":
+                        log_file_path = log_path
+                        data["storage"]["log"]["path"] = self.normalize_path_for_os(str(log_path.parent))
+                    else:
+                        log_file_path = log_path / "app.log"
+                    data.setdefault("logging", {})
+                    data["logging"].setdefault("file_enabled", True)
+                    data["logging"]["file_path"] = self.normalize_path_for_os(str(log_file_path))
+                except Exception:
+                    pass
             data.setdefault("general", {})
             data["general"]["auto_start_next"] = bool(self.auto_start_next_checkbox.isChecked())
             try:
@@ -391,10 +470,12 @@ class SystemPage(QFrame):
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             logger.info(f"Configuration saved: {p}")
-            self.show_toast("保存成功", True)
+            if not silent:
+                self.show_toast("保存成功", True)
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
-            self.show_toast("保存失败", False)
+            if not silent:
+                self.show_toast("保存失败", False)
 
     def normalize_path_for_os(self, path_str: str) -> str:
         if not path_str:

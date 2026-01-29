@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 from pathlib import Path
+from .paths import get_config_json_path
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,7 @@ class ConfigManager:
         Args:
             config_file_path: Path to configuration file
         """
-        self.config_file_path = config_file_path or "config.json"
+        self.config_file_path = config_file_path or str(get_config_json_path())
         self.config = AppConfig()
         self._load_configuration()
 
@@ -289,10 +290,15 @@ class ConfigManager:
 
     def _ensure_directories(self):
         """Ensure required directories exist."""
+        from .paths import get_app_base_dir
+
+        log_file = Path(self.config.logging.file_path)
+        if not log_file.is_absolute():
+            log_file = get_app_base_dir() / log_file
         directories = [
             os.path.dirname(self.config.database.database_path),
             self.config.database.backup_directory,
-            os.path.dirname(self.config.logging.file_path),
+            str(log_file.parent),
             os.path.dirname(self.config_file_path),
             self.config.camera.presets_directory
         ]

@@ -37,7 +37,8 @@ class NetworkService:
         Load server address and port from external config.json if available.
         """
         try:
-            cfg_path = Path.cwd() / "config.json"
+            from src.core.paths import get_config_json_path
+            cfg_path = get_config_json_path()
             if cfg_path.exists():
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)

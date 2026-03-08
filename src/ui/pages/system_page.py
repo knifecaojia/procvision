@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QCheckBox, QComboBox, QScrollArea, QWidget
 )
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QIntValidator
 
 from ..styles import refresh_widget_styles, save_user_theme_preference
 
@@ -132,8 +133,21 @@ class SystemPage(QFrame):
         boxopt_layout.addWidget(ng_box_label)
         boxopt_layout.addWidget(self.draw_ng_checkbox)
 
+        ok_duration_layout = QHBoxLayout()
+        ok_duration_label = QLabel("OK提示显示时长（秒）:")
+        ok_duration_label.setObjectName("paramLabel")
+        self.ok_duration_input = QLineEdit("2")
+        self.ok_duration_input.setObjectName("paramInput")
+        self.ok_duration_input.setFixedWidth(80)
+        self.ok_duration_input.setValidator(QIntValidator(1, 30, self))
+        self.ok_duration_input.setToolTip("范围: 1-30 秒")
+        ok_duration_layout.addWidget(ok_duration_label)
+        ok_duration_layout.addWidget(self.ok_duration_input)
+        ok_duration_layout.addStretch()
+
         general_layout.addLayout(pos_layout)
         general_layout.addLayout(boxopt_layout)
+        general_layout.addLayout(ok_duration_layout)
 
         scroll_layout.addWidget(general_frame)
         
@@ -297,6 +311,7 @@ class SystemPage(QFrame):
             self.img_retention_input,
             self.log_path_input,
             self.log_retention_input,
+            self.ok_duration_input,
         ]
         for w in widgets:
             try:
@@ -399,6 +414,12 @@ class SystemPage(QFrame):
                 self.result_position_combo.setCurrentIndex(idx)
                 self.draw_ok_checkbox.setChecked(bool(general.get("draw_boxes_ok", True)))
                 self.draw_ng_checkbox.setChecked(bool(general.get("draw_boxes_ng", True)))
+                ok_duration = general.get("ok_toast_duration", 2)
+                try:
+                    ok_duration = max(1, min(30, int(ok_duration)))
+                except (ValueError, TypeError):
+                    ok_duration = 2
+                self.ok_duration_input.setText(str(ok_duration))
                 theme_value = str(general.get("theme", self.current_theme)).lower()
                 if theme_value not in {"dark", "light"}:
                     theme_value = self.current_theme
@@ -465,6 +486,12 @@ class SystemPage(QFrame):
                 data["general"]["result_prompt_position"] = "center"
             data["general"]["draw_boxes_ok"] = bool(self.draw_ok_checkbox.isChecked())
             data["general"]["draw_boxes_ng"] = bool(self.draw_ng_checkbox.isChecked())
+            try:
+                ok_duration = int(self.ok_duration_input.text().strip())
+                ok_duration = max(1, min(30, ok_duration))
+            except (ValueError, TypeError):
+                ok_duration = 2
+            data["general"]["ok_toast_duration"] = ok_duration
             data["general"]["theme"] = "light" if self.theme_switch.isChecked() else "dark"
             p.parent.mkdir(parents=True, exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:

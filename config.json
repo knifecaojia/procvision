@@ -98,6 +98,7 @@
     "result_prompt_position": "center",
     "draw_boxes_ok": true,
     "draw_boxes_ng": true,
-    "theme": "dark"
+    "theme": "dark",
+    "ok_toast_duration": 2
   }
 }

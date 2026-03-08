@@ -394,6 +394,10 @@ class CameraPage(QFrame):
         params_title.setObjectName("paramsTitle")
         params_layout.addWidget(params_title)
 
+        # Configuration management panel
+        config_panel = self._create_config_management_panel()
+        params_layout.addWidget(config_panel)
+
         # Scrollable parameters container
         scroll_area = QScrollArea()
         scroll_area.setObjectName("paramsScrollArea")
@@ -433,6 +437,200 @@ class CameraPage(QFrame):
         params_layout.addWidget(scroll_area)
 
         return params_frame
+
+    def _create_config_management_panel(self) -> QFrame:
+        config_panel = QFrame()
+        config_panel.setObjectName("configManagementPanel")
+        config_layout = QVBoxLayout(config_panel)
+        config_layout.setContentsMargins(5, 5, 5, 5)
+        config_layout.setSpacing(8)
+
+        config_title = QLabel("参数配置管理")
+        config_title.setObjectName("sectionTitle")
+        config_layout.addWidget(config_title)
+
+        combo_row = QHBoxLayout()
+        combo_row.setSpacing(8)
+
+        combo_label = QLabel("选择配置:")
+        combo_label.setObjectName("paramLabel")
+        combo_row.addWidget(combo_label)
+
+        self.config_combo = QComboBox()
+        self.config_combo.setObjectName("configCombo")
+        self.config_combo.setMinimumWidth(200)
+        self.config_combo.currentTextChanged.connect(self._on_config_selected)
+        combo_row.addWidget(self.config_combo)
+
+        combo_row.addStretch()
+        config_layout.addLayout(combo_row)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        load_btn = QPushButton("加载")
+        load_btn.setToolTip("加载选中的配置到相机")
+        load_btn.clicked.connect(self._on_load_selected_config)
+        btn_row.addWidget(load_btn)
+
+        save_btn = QPushButton("保存")
+        save_btn.setToolTip("保存当前相机参数")
+        save_btn.clicked.connect(self._on_save_config)
+        btn_row.addWidget(save_btn)
+
+        delete_btn = QPushButton("删除")
+        delete_btn.setToolTip("删除选中的配置")
+        delete_btn.clicked.connect(self.on_delete_preset)
+        btn_row.addWidget(delete_btn)
+
+        export_btn = QPushButton("导出")
+        export_btn.setToolTip("导出选中配置为JSON")
+        export_btn.clicked.connect(self.on_export_selected_preset)
+        btn_row.addWidget(export_btn)
+
+        import_btn = QPushButton("导入")
+        import_btn.setToolTip("从JSON/ZIP导入配置")
+        import_btn.clicked.connect(self.on_import_presets)
+        btn_row.addWidget(import_btn)
+
+        btn_row.addStretch()
+        config_layout.addLayout(btn_row)
+
+        self.refresh_config_combo()
+        return config_panel
+
+    def _on_save_config(self):
+        if not self._require_service("保存配置"):
+            return
+        if not self.camera_service.get_connected_camera():
+            QMessageBox.warning(self, "错误", "请先连接相机")
+            return
+
+        preset_name, ok = QInputDialog.getText(
+            self, "保存配置", "请输入配置名称:"
+        )
+
+        if ok and preset_name:
+            if self.camera_service.save_preset(preset_name, self.current_username):
+                self.refresh_config_combo()
+                self.refresh_presets()
+                QMessageBox.information(self, "成功", f"配置 '{preset_name}' 已保存")
+            else:
+                QMessageBox.warning(self, "错误", "保存配置失败")
+
+    def refresh_config_combo(self):
+        if not hasattr(self, "config_combo") or not self.camera_service:
+            return
+        self.config_combo.clear()
+        presets = self.camera_service.list_presets(self.current_username)
+        self.config_combo.addItems(presets)
+
+    def _on_config_selected(self, preset_name: str):
+        pass
+
+    def _on_load_selected_config(self):
+        if not self._require_service("加载配置"):
+            return
+        if not self.camera_service.get_connected_camera():
+            QMessageBox.warning(self, "错误", "请先连接相机")
+            return
+
+        preset_name = self.config_combo.currentText()
+        if not preset_name:
+            return
+
+        success, failed_params = self.camera_service.apply_preset(preset_name, self.current_username)
+
+        for key, slider in self.parameter_sliders.items():
+            value = self.camera_service.get_parameter(key)
+            if value is not None:
+                slider.set_value(float(value))
+
+        if success:
+            QMessageBox.information(self, "成功", f"配置 '{preset_name}' 已加载")
+        else:
+            failed_str = "、".join(failed_params)
+            QMessageBox.warning(
+                self, "部分成功",
+                f"配置 '{preset_name}' 已加载\n\n以下参数设置失败: {failed_str}\n(该相机可能不支持这些参数)"
+            )
+
+    @Slot()
+    def on_export_selected_preset(self):
+        if not self._require_service("导出配置"):
+            return
+
+        preset_name = self.config_combo.currentText()
+        if not preset_name:
+            QMessageBox.warning(self, "提示", "请先选择一个配置")
+            return
+
+        from PySide6.QtWidgets import QFileDialog
+        default_path = Path.home() / "Downloads" / f"{preset_name}.json"
+        export_path, _ = QFileDialog.getSaveFileName(
+            self, "导出配置", str(default_path), "JSON文件 (*.json)"
+        )
+        if export_path:
+            if self.camera_service.export_preset(preset_name, self.current_username, Path(export_path)):
+                QMessageBox.information(self, "成功", f"配置已导出至:\n{export_path}")
+            else:
+                QMessageBox.warning(self, "错误", "导出失败")
+
+    @Slot()
+    def on_export_all_presets(self):
+        if not self._require_service("导出全部配置"):
+            return
+
+        from PySide6.QtWidgets import QFileDialog
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_path = Path.home() / "Downloads" / f"camera_presets_{timestamp}.zip"
+        export_path, _ = QFileDialog.getSaveFileName(
+            self, "导出全部配置", str(default_path), "ZIP文件 (*.zip)"
+        )
+        if export_path:
+            count = self.camera_service.export_all_presets(self.current_username, Path(export_path))
+            if count > 0:
+                QMessageBox.information(self, "成功", f"已导出 {count} 个配置至:\n{export_path}")
+            else:
+                QMessageBox.warning(self, "提示", "没有可导出的配置")
+
+    @Slot()
+    def on_import_presets(self):
+        if not self._require_service("导入配置"):
+            return
+
+        from PySide6.QtWidgets import QFileDialog
+        import_path, _ = QFileDialog.getOpenFileName(
+            self, "导入配置", "", "配置文件 (*.json *.zip)"
+        )
+        if not import_path:
+            return
+
+        import_path = Path(import_path)
+        if import_path.suffix.lower() == ".zip":
+            reply = QMessageBox.question(
+                self, "批量导入",
+                "是否覆盖同名配置?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            overwrite = reply == QMessageBox.StandardButton.Yes
+            count, failed = self.camera_service.import_all_presets(
+                import_path, self.current_username, overwrite
+            )
+            self.refresh_config_combo()
+            self.refresh_presets()
+            msg = f"成功导入 {count} 个配置"
+            if failed:
+                msg += f"\n失败: {len(failed)} 个"
+            QMessageBox.information(self, "导入结果", msg)
+        else:
+            preset_name = self.camera_service.import_preset(import_path, self.current_username)
+            if preset_name:
+                self.refresh_config_combo()
+                self.refresh_presets()
+                QMessageBox.information(self, "成功", f"配置 '{preset_name}' 已导入")
+            else:
+                QMessageBox.warning(self, "错误", "导入失败")
 
     def _create_status_section(self) -> QFrame:
         """Create the status section showing camera info."""
@@ -867,22 +1065,24 @@ class CameraPage(QFrame):
         """Delete selected preset."""
         if not self._require_service("删除预设"):
             return
-        preset_name = self.preset_combo.currentText()
+        preset_name = self.config_combo.currentText()
         if not preset_name:
+            QMessageBox.warning(self, "提示", "请先选择一个配置")
             return
 
         reply = QMessageBox.question(
             self, "确认删除",
-            f"确定要删除预设 '{preset_name}' 吗?",
+            f"确定要删除配置 '{preset_name}' 吗?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             if self.camera_service.delete_preset(preset_name, self.current_username):
+                self.refresh_config_combo()
                 self.refresh_presets()
-                QMessageBox.information(self, "成功", f"预设 '{preset_name}' 已删除")
+                QMessageBox.information(self, "成功", f"配置 '{preset_name}' 已删除")
             else:
-                QMessageBox.warning(self, "错误", "删除预设失败")
+                QMessageBox.warning(self, "错误", "删除配置失败")
 
     def refresh_presets(self):
         """Refresh preset list."""

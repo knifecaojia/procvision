@@ -28,6 +28,7 @@ class CameraService:
         self.preset_manager = PresetManager(base_dir=presets_dir)
         self.current_camera: Optional[CameraDevice] = None
         self._cached_cameras: List[CameraInfo] = []
+        self._last_camera_model: Optional[str] = None
         LOG.info("CameraService initialized")
 
     # Camera lifecycle ---------------------------------------------------------
@@ -65,6 +66,7 @@ class CameraService:
         try:
             device = self.manager.connect(camera_info)
             self.current_camera = device
+            self._last_camera_model = camera_info.model_name or "Unknown"
             LOG.info("Connected to camera: %s", camera_info.name)
             return True
         except Exception as exc:
@@ -142,11 +144,27 @@ class CameraService:
             return False
 
         try:
+            param_def = None
+            for param in self.current_camera.list_parameters():
+                if param.key == key:
+                    param_def = param
+                    break
+
+            if param_def:
+                if param_def.value_type == int:
+                    value = int(float(value))
+                elif param_def.value_type == float:
+                    value = float(value)
+                if param_def.min_value is not None and value < param_def.min_value:
+                    value = param_def.min_value
+                if param_def.max_value is not None and value > param_def.max_value:
+                    value = param_def.max_value
+
             self.current_camera.set_parameter(key, value)
             LOG.debug("Set parameter %s = %s", key, value)
             return True
         except Exception as exc:
-            LOG.error("Failed to set parameter %s: %s", key, exc)
+            LOG.warning("Parameter %s not accessible on this camera: %s", key, exc)
             return False
 
     def get_parameter_range(self, key: str) -> Tuple[float, float]:
@@ -186,6 +204,7 @@ class CameraService:
 
         try:
             camera_model = self.current_camera.info.model_name or "Unknown"
+            self._last_camera_model = camera_model
             parameters = self.get_all_parameters()
 
             self.preset_manager.save_preset(
@@ -230,7 +249,7 @@ class CameraService:
             LOG.error("Failed to load preset: %s", exc)
             return None
 
-    def apply_preset(self, name: str, username: str) -> bool:
+    def apply_preset(self, name: str, username: str) -> Tuple[bool, List[str]]:
         """Load and apply a preset to the current camera.
 
         Args:
@@ -238,34 +257,40 @@ class CameraService:
             username: Current user name
 
         Returns:
-            True if successful, False otherwise
+            Tuple of (success, list of failed parameters)
         """
         parameters = self.load_preset(name, username)
         if not parameters:
-            return False
+            return False, ["配置不存在"]
 
-        success = True
+        failed_params = []
         for key, value in parameters.items():
             if not self.set_parameter(key, value):
-                success = False
+                failed_params.append(key)
 
-        return success
+        return len(failed_params) == 0, failed_params
 
-    def list_presets(self, username: str) -> List[str]:
+    def list_presets(self, username: str, camera_model: Optional[str] = None) -> List[str]:
         """List all presets for current camera and user.
 
         Args:
             username: Current user name
+            camera_model: Optional camera model override
 
         Returns:
             List of preset names
         """
-        if not self.current_camera:
-            return []
+        model = camera_model or self._last_camera_model
+        if not model:
+            models = self.preset_manager.list_camera_models(username)
+            if models:
+                self._last_camera_model = models[0]
+                model = self._last_camera_model
+            else:
+                return []
 
         try:
-            camera_model = self.current_camera.info.model_name or "Unknown"
-            presets = self.preset_manager.list_presets(username, camera_model)
+            presets = self.preset_manager.list_presets(username, model)
             LOG.debug("Found %d presets for user '%s'", len(presets), username)
             return presets
         except Exception as exc:
@@ -293,6 +318,147 @@ class CameraService:
         except Exception as exc:
             LOG.error("Failed to delete preset: %s", exc)
             return False
+
+    def rename_preset(self, old_name: str, new_name: str, username: str) -> bool:
+        """Rename a preset.
+
+        Args:
+            old_name: Current preset name
+            new_name: New preset name
+            username: Current user name
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.current_camera:
+            return False
+
+        try:
+            camera_model = self.current_camera.info.model_name or "Unknown"
+            success = self.preset_manager.rename_preset(old_name, new_name, username, camera_model)
+            if success:
+                LOG.info("Renamed preset '%s' to '%s' for user '%s'", old_name, new_name, username)
+            return success
+        except Exception as exc:
+            LOG.error("Failed to rename preset: %s", exc)
+            return False
+
+    def get_preset_info(self, name: str, username: str) -> Optional[Dict[str, Any]]:
+        """Get preset metadata.
+
+        Args:
+            name: Preset name
+            username: Current user name
+
+        Returns:
+            Dict with preset info or None if not found
+        """
+        if not self.current_camera:
+            return None
+
+        try:
+            camera_model = self.current_camera.info.model_name or "Unknown"
+            return self.preset_manager.get_preset_metadata(name, username, camera_model)
+        except Exception as exc:
+            LOG.error("Failed to get preset info: %s", exc)
+            return None
+
+    def export_preset(self, name: str, username: str, export_path: Path) -> bool:
+        """Export a single preset to a JSON file.
+
+        Args:
+            name: Preset name
+            username: Current user name
+            export_path: Path to save the exported file
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.current_camera:
+            return False
+
+        try:
+            camera_model = self.current_camera.info.model_name or "Unknown"
+            success = self.preset_manager.export_preset(name, username, camera_model, export_path)
+            if success:
+                LOG.info("Exported preset '%s' to %s", name, export_path)
+            return success
+        except Exception as exc:
+            LOG.error("Failed to export preset: %s", exc)
+            return False
+
+    def import_preset(self, import_path: Path, username: str, new_name: Optional[str] = None) -> Optional[str]:
+        """Import a preset from a JSON file.
+
+        Args:
+            import_path: Path to the JSON file
+            username: Current user name
+            new_name: Optional new name for the imported preset
+
+        Returns:
+            Name of the imported preset, or None if failed
+        """
+        if not self.current_camera:
+            return None
+
+        try:
+            camera_model = self.current_camera.info.model_name or "Unknown"
+            preset_name = self.preset_manager.import_preset(
+                import_path, username, camera_model, new_name
+            )
+            if preset_name:
+                LOG.info("Imported preset '%s' from %s", preset_name, import_path)
+            return preset_name
+        except Exception as exc:
+            LOG.error("Failed to import preset: %s", exc)
+            return None
+
+    def export_all_presets(self, username: str, export_path: Path) -> int:
+        """Export all presets to a ZIP file.
+
+        Args:
+            username: Current user name
+            export_path: Path to save the ZIP file
+
+        Returns:
+            Number of presets exported
+        """
+        if not self.current_camera:
+            return 0
+
+        try:
+            camera_model = self.current_camera.info.model_name or "Unknown"
+            count = self.preset_manager.export_all_presets(username, camera_model, export_path)
+            LOG.info("Exported %d presets to %s", count, export_path)
+            return count
+        except Exception as exc:
+            LOG.error("Failed to export all presets: %s", exc)
+            return 0
+
+    def import_all_presets(self, import_path: Path, username: str, overwrite: bool = False) -> Tuple[int, List[str]]:
+        """Import all presets from a ZIP file.
+
+        Args:
+            import_path: Path to the ZIP file
+            username: Current user name
+            overwrite: If True, overwrite existing presets with same name
+
+        Returns:
+            Tuple of (number imported, list of failed names)
+        """
+        if not self.current_camera:
+            return 0, ["相机未连接"]
+
+        try:
+            camera_model = self.current_camera.info.model_name or "Unknown"
+            count, failed = self.preset_manager.import_all_presets(
+                import_path, username, camera_model, overwrite
+            )
+            LOG.info("Imported %d presets from %s (%d failed)", count, import_path, len(failed))
+            return count, failed
+        except Exception as exc:
+            LOG.error("Failed to import all presets: %s", exc)
+            return 0, [str(exc)]
 
     # Stream control -----------------------------------------------------------
     def start_preview(self) -> bool:

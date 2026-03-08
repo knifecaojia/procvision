@@ -336,6 +336,7 @@ class ProcessExecutionWindow(QWidget):
         self.auto_start_next = self._read_auto_start_next_setting()
         self.result_prompt_position = self._read_result_prompt_position()
         self.draw_boxes_ok, self.draw_boxes_ng = self._read_draw_box_settings()
+        self.ok_toast_duration = self._read_ok_toast_duration()
         # Overlay-related attributes (initialized early to avoid AttributeError)
         self.overlay_widget: Optional[QWidget] = None
         self.pass_overlay: Optional[QWidget] = None
@@ -2196,13 +2197,21 @@ class ProcessExecutionWindow(QWidget):
                     executed_steps = data.get("executed_steps", [])
                     valid_rects = []
                     for s in executed_steps:
-                         if s.get("is_correct") and s.get("bbox"):
-                             x1, y1, x2, y2 = s["bbox"]
-                             # Map to UI format
-                             # Algorithm returns [x1, y1, x2, y2]
-                             valid_rects.append({
-                                 "box_coords": [x1, y1, x2, y2]
-                             })
+                        if s.get("is_correct") and s.get("bbox"):
+                            bbox_data = s["bbox"]
+                            if bbox_data and isinstance(bbox_data[0], (list, tuple)):
+                                for box in bbox_data:
+                                    if len(box) >= 4:
+                                        x1, y1, x2, y2 = box[:4]
+                                        valid_rects.append({
+                                            "box_coords": [x1, y1, x2, y2]
+                                        })
+                            else:
+                                if len(bbox_data) >= 4:
+                                    x1, y1, x2, y2 = bbox_data[:4]
+                                    valid_rects.append({
+                                        "box_coords": [x1, y1, x2, y2]
+                                    })
                     
                     self.detection_boxes = self._ng_regions_to_rects(valid_rects)
                     self.detection_status = 'pass'
@@ -2444,7 +2453,8 @@ class ProcessExecutionWindow(QWidget):
             self._position_toast()
         except Exception:
             pass
-        QTimer.singleShot(2000, self.hide_toast)
+        duration_ms = getattr(self, 'ok_toast_duration', 2) * 1000
+        QTimer.singleShot(duration_ms, self.hide_toast)
 
     def hide_toast(self):
         if hasattr(self, "toast_label"):
@@ -2510,6 +2520,19 @@ class ProcessExecutionWindow(QWidget):
         except Exception:
             pass
         return True, True
+
+    def _read_ok_toast_duration(self) -> int:
+        try:
+            from src.core.paths import get_config_json_path
+            p = get_config_json_path()
+            if p.exists():
+                data = json.loads(p.read_text(encoding="utf-8"))
+                general = data.get("general", {})
+                duration = general.get("ok_toast_duration", 2)
+                return max(1, min(30, int(duration)))
+        except Exception:
+            pass
+        return 2
 
     def on_retry_detection(self):
         """Handle retry detection button click (from FAIL overlay)."""

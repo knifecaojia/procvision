@@ -37,7 +37,8 @@ class NetworkService:
         Load server address and port from external config.json if available.
         """
         try:
-            cfg_path = Path.cwd() / "config.json"
+            from src.core.paths import get_config_json_path
+            cfg_path = get_config_json_path()
             if cfg_path.exists():
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
@@ -202,3 +203,33 @@ class NetworkService:
             except Exception:
                 pass
             return {"code": -1, "error": str(e)}
+
+    def search_work_orders(self, filters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Search work orders with complex filters (POST request).
+        
+        Args:
+            filters: Filter conditions including:
+                - status: List of status codes
+                - task_no: Task number (fuzzy match, min 4 chars)
+                - prod_order_no: Production order number (fuzzy match, min 4 chars)
+                - craft_no: List of craft codes
+                - process_name: Process name (fuzzy match)
+                - time_range: Dict with type/start/end
+                - pagination: Dict with page/page_size
+                
+        Returns:
+            Task list data
+        """
+        self._require_token()
+        url = f"{self.base_url}/client/task/condition"
+        
+        logger.debug(f"Searching tasks with filters: {filters}")
+        
+        try:
+            response = self.session.post(url, json=filters, timeout=self.timeout)
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as e:
+            logger.error(f"Search tasks error: {e}")
+            raise

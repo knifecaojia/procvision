@@ -13,28 +13,80 @@ from pathlib import Path
 # Setup logging before importing other modules
 def setup_logging():
     """Configure application logging."""
-    from .config import get_config
+    from .config import get_config_manager
+    from .paths import get_app_base_dir
+    from .paths import get_config_json_path
+    from datetime import datetime
 
-    config = get_config()
+    config_manager = get_config_manager()
+    try:
+        config_manager.reload_configuration()
+    except Exception:
+        pass
+    config = config_manager.get_config()
     log_config = config.logging
 
     # Create logs directory
     log_file = Path(log_config.file_path)
-    log_file.parent.mkdir(parents=True, exist_ok=True)
+    if not log_file.is_absolute():
+        log_file = get_app_base_dir() / log_file
+        try:
+            raw = get_config_json_path().read_text(encoding="utf-8")
+            import json
+
+            payload = json.loads(raw) if raw else {}
+            storage_log_dir = payload.get("storage", {}).get("log", {}).get("path")
+            if storage_log_dir:
+                storage_path = Path(str(storage_log_dir))
+                if not storage_path.is_absolute():
+                    storage_path = get_app_base_dir() / storage_path
+                log_file = storage_path / log_file.name
+        except Exception:
+            pass
+    date_stamp = datetime.now().strftime("%Y%m%d")
+    if log_file.suffix.lower() == ".log":
+        log_file = log_file.with_name(f"{log_file.stem}_{date_stamp}{log_file.suffix}")
+    else:
+        log_file = log_file / f"app_{date_stamp}.log"
+    try:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
+
+    handlers: list[logging.Handler] = []
+    effective_log_file: Path | None = None
+    if log_config.console_enabled:
+        handlers.append(logging.StreamHandler())
+    if log_config.file_enabled:
+        file_handler: logging.Handler | None = None
+        try:
+            file_handler = logging.FileHandler(str(log_file), encoding="utf-8")
+            effective_log_file = log_file
+        except OSError:
+            fallback_root = (
+                Path(os.environ.get("LOCALAPPDATA") or os.environ.get("TEMP") or str(get_app_base_dir()))
+                / "SMART-VISION"
+                / "logs"
+            )
+            try:
+                fallback_root.mkdir(parents=True, exist_ok=True)
+                fallback_file = fallback_root / log_file.name
+                file_handler = logging.FileHandler(str(fallback_file), encoding="utf-8")
+                effective_log_file = fallback_file
+            except OSError:
+                file_handler = None
+        if file_handler:
+            handlers.append(file_handler)
 
     # Configure logging
     logging.basicConfig(
         level=getattr(logging, log_config.level.upper()),
         format=log_config.format,
-        handlers=[
-            logging.StreamHandler() if log_config.console_enabled else None,
-            logging.FileHandler(log_config.file_path) if log_config.file_enabled else None
-        ]
+        handlers=handlers or None,
+        force=True,
     )
-
-    # Remove None handlers
-    logger = logging.getLogger()
-    logger.handlers = [h for h in logger.handlers if h is not None]
+    if effective_log_file:
+        logging.getLogger("logging").info("Log file: %s", effective_log_file)
 
 
 class IndustrialVisionApp:

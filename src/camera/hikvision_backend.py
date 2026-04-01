@@ -349,15 +349,6 @@ class HikvisionDevice(BackendDevice):  # pragma: no cover - requires vendor SDK
             value_type=float,
             group="Acquisition",
         ),
-        "gamma": CameraParameter(
-            key="gamma",
-            display_name="Gamma",
-            min_value=0.1,
-            max_value=4.0,
-            step=0.1,
-            value_type=float,
-            group="Image",
-        ),
         "black_level": CameraParameter(
             key="black_level",
             display_name="Black Level",

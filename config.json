@@ -1,24 +1,22 @@
 {
-  "server": {
-    "address": "39.104.202.123",
-    "port": 18880
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s %(levelname)s:%(message)s",
+    "file_enabled": true,
+    "file_path": "logs/app.log",
+    "file_max_size_mb": 10,
+    "file_backup_count": 5,
+    "console_enabled": true
   },
   "storage": {
-    "image": {
-      "path": "F:\\Ai-LLM\\southwest\\05ui-poc\\logs",
-      "retention_days": 30
-    },
     "log": {
-      "path": "F:\\Ai-LLM\\southwest\\05ui-poc",
+      "path": "F:\\Ai-LLM\\southwest\\logs",
       "retention_days": 90
+    },
+    "image": {
+      "path": "C:\\VisionData\\Images",
+      "retention_days": 30
     }
-  },
-  "general": {
-    "auto_start_next": false,
-    "result_prompt_position": "top_right",
-    "draw_boxes_ok": true,
-    "draw_boxes_ng": true,
-    "theme": "dark"
   },
   "auth": {
     "bcrypt_cost_factor": 12,
@@ -72,15 +70,6 @@
     "enable_animations": true,
     "animation_duration_ms": 200
   },
-  "logging": {
-    "level": "INFO",
-    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    "file_enabled": true,
-    "file_path": "logs/app.log",
-    "file_max_size_mb": 10,
-    "file_backup_count": 5,
-    "console_enabled": true
-  },
   "camera": {
     "sdk_path": null,
     "enable_preview": true,
@@ -95,9 +84,21 @@
     "retry_count": 3,
     "verify_ssl": false
   },
-  "app_name": "SMART-VISION",
+  "app_name": "ProcVision",
   "app_version": "1.0.0",
   "app_title": "Industrial Vision System",
   "debug_mode": false,
-  "dev_mode": false
+  "dev_mode": false,
+  "server": {
+    "address": "39.104.202.123",
+    "port": 18880
+  },
+  "general": {
+    "auto_start_next": false,
+    "result_prompt_position": "center",
+    "draw_boxes_ok": true,
+    "draw_boxes_ng": true,
+    "theme": "dark",
+    "ok_toast_duration": 2
+  }
 }

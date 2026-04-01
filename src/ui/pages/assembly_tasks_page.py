@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from PySide6.QtWidgets import (
+    QPushButton,
     QComboBox,
     QFrame,
     QHBoxLayout,
@@ -22,6 +23,7 @@ from src.services.data_service import DataService
 from src.services.algorithm_manager import AlgorithmManager
 from ..components.pagination_widget import PaginationWidget
 from ..windows.process_execution_window import ProcessExecutionWindow
+from ..windows.task_filter_window import TaskFilterWindow
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,10 @@ class AssemblyTasksPage(QFrame):
         self.page_size = 10
         self.total_pages = 1
         self.current_status_filter = None
+        
+        # Advanced filter state
+        self.current_filters: Optional[Dict[str, Any]] = None
+        self.filter_window: Optional[TaskFilterWindow] = None
 
         self._work_orders_by_code: Dict[str, Dict[str, Any]] = {}
 
@@ -138,6 +144,12 @@ class AssemblyTasksPage(QFrame):
         header_layout.addWidget(self.page_size_filter)
         header_layout.addWidget(self.status_filter)
 
+        self.filter_btn = QPushButton("高级过滤")
+        self.filter_btn.setObjectName("advancedFilterBtn")
+        self.filter_btn.setFixedSize(100, 36)
+        self.filter_btn.clicked.connect(self._on_filter_clicked)
+        header_layout.addWidget(self.filter_btn)
+
         layout.addWidget(header_frame)
 
         self.html_viewer = QTextBrowser()
@@ -161,11 +173,19 @@ class AssemblyTasksPage(QFrame):
         layout.addWidget(self.pagination, 0, Qt.AlignmentFlag.AlignCenter)
 
     def load_data(self):
-        result = self.data_service.get_work_orders_online(
-            self.current_page,
-            self.page_size,
-            status=self.current_status_filter,
-        )
+        # Fetch data based on filter mode
+        if self.current_filters:
+            result = self.data_service.search_work_orders(
+                self.current_filters,
+                page=self.current_page,
+                page_size=self.page_size
+            )
+        else:
+            result = self.data_service.get_work_orders_online(
+                self.current_page, 
+                self.page_size,
+                status=self.current_status_filter,
+            )
         raw_items = result.get("items", [])
         self.total_pages = result.get("total_pages", 1)
         error_msg = result.get("error")
@@ -265,6 +285,26 @@ class AssemblyTasksPage(QFrame):
 
     def _on_page_changed(self, page):
         self.current_page = page
+        self.load_data()
+
+    def _on_filter_clicked(self):
+        if self.current_filters:
+            self._on_filter_applied(None)
+            return
+        if self.filter_window is None:
+            self.filter_window = TaskFilterWindow(self, theme=self.current_theme)
+            self.filter_window.filter_applied.connect(self._on_filter_applied)
+        self.filter_window.show()
+
+    def _on_filter_applied(self, filters: Dict[str, Any]):
+        self.current_filters = filters if filters else None
+        self.current_page = 1
+        if self.current_filters:
+            self.status_filter.setEnabled(False)
+            self.filter_btn.setText("清除过滤")
+        else:
+            self.status_filter.setEnabled(True)
+            self.filter_btn.setText("高级过滤")
         self.load_data()
 
     def on_html_anchor_clicked(self, url: QUrl):

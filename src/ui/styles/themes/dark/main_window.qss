@@ -1214,6 +1214,21 @@ QComboBox#processFilterCombo QAbstractItemView {
     selection-background-color: @hover_orange;
 }
 
+/* Advanced Filter Button */
+QPushButton#advancedFilterBtn {
+    background-color: transparent;
+    border: 1px solid @dark_border;
+    color: @arctic_white;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+QPushButton#advancedFilterBtn:hover {
+    border: 1px solid @hover_orange;
+    color: @hover_orange;
+}
+
 /* Process Status Badges */
 #statusBadge[status="1"] { /* Pending */
      background-color: rgba(107, 114, 128, 0.1);

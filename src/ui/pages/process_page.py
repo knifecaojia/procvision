@@ -3,9 +3,10 @@ Assembly guidance and inspection page for the industrial vision system.
 """
 
 import logging
+from typing import Dict, Any, Optional
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QWidget, QGridLayout, QComboBox
+    QScrollArea, QWidget, QGridLayout
 )
 from PySide6.QtCore import Qt
 import json
@@ -15,6 +16,7 @@ from src.services.algorithm_manager import AlgorithmManager
 from ..components.process_card import ProcessCard
 from ..components.pagination_widget import PaginationWidget
 from ..windows.process_execution_window import ProcessExecutionWindow
+from ..windows.task_filter_window import TaskFilterWindow
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +33,12 @@ class ProcessPage(QFrame):
         
         # Pagination state
         self.current_page = 1
-        self.page_size = 5 # Show 5 per page
+        self.page_size = 5
         self.total_pages = 1
-        self.current_status_filter = None # None means "All"
+        
+        # Advanced filter state
+        self.current_filters: Optional[Dict[str, Any]] = None
+        self.filter_window: Optional[TaskFilterWindow] = None
         
         self.init_ui()
         self.load_data()
@@ -56,16 +61,12 @@ class ProcessPage(QFrame):
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         
-        # Filter ComboBox
-        self.status_filter = QComboBox()
-        self.status_filter.setObjectName("processFilterCombo")
-        self.status_filter.addItem("全部", None)
-        self.status_filter.addItem("待执行", "1")
-        self.status_filter.addItem("执行中", "2")
-        self.status_filter.addItem("已完成", "3")
-        self.status_filter.setFixedWidth(120)
-        self.status_filter.currentIndexChanged.connect(self._on_filter_changed)
-        header_layout.addWidget(self.status_filter)
+        # Advanced filter button
+        self.filter_btn = QPushButton("高级过滤")
+        self.filter_btn.setObjectName("advancedFilterButton")
+        self.filter_btn.setFixedSize(100, 36)
+        self.filter_btn.clicked.connect(self._on_filter_clicked)
+        header_layout.addWidget(self.filter_btn)
         
         layout.addWidget(header_frame)
         
@@ -99,13 +100,21 @@ class ProcessPage(QFrame):
             item = self.cards_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-                
-        # Fetch data
-        result = self.data_service.get_work_orders(
-            self.current_page, 
-            self.page_size,
-            status=self.current_status_filter
-        )
+        
+        # Fetch data based on filter mode
+        if self.current_filters:
+            result = self.data_service.search_work_orders(
+                self.current_filters,
+                page=self.current_page,
+                page_size=self.page_size
+            )
+        else:
+            result = self.data_service.get_work_orders(
+                self.current_page, 
+                self.page_size,
+                status=None
+            )
+            
         items = result.get("items", [])
         self.total_pages = result.get("total_pages", 1)
         
@@ -133,15 +142,27 @@ class ProcessPage(QFrame):
         self.pagination.set_total_pages(self.total_pages)
         self.pagination.set_current_page(self.current_page)
 
-    def _on_filter_changed(self, index):
-        """Handle filter change."""
-        self.current_status_filter = self.status_filter.currentData()
-        self.current_page = 1 # Reset to first page
+    def _on_filter_clicked(self):
+        """Handle advanced filter button click."""
+        self.filter_window = TaskFilterWindow(self, self.current_filters)
+        self.filter_window.filter_applied.connect(self._on_filter_applied)
+        self.filter_window.exec()
+
+    def _on_filter_applied(self, filters: Dict[str, Any]):
+        """Handle filter applied from TaskFilterWindow."""
+        self.current_filters = filters
+        pagination = filters.get("pagination", {})
+        self.current_page = pagination.get("page", 1)
         self.load_data()
 
     def _on_page_changed(self, page):
         """Handle page change from pagination widget."""
         self.current_page = page
+        if self.current_filters:
+            self.current_filters["pagination"] = {
+                "page": page,
+                "page_size": self.page_size,
+            }
         self.load_data()
 
     def on_start_process(self, process_data: dict):

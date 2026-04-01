@@ -2227,6 +2227,7 @@ class ProcessExecutionWindow(QWidget):
                             task_no=str(self.process_data.get("task_no") or ""),
                             step_code=str(step_code),
                             step_status=2,
+                            process_code=str(self.process_data.get("process_code") or ""),
                             qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
                             algo_result={"status": "OK", "data": data},
                         )
@@ -2263,6 +2264,7 @@ class ProcessExecutionWindow(QWidget):
                             task_no=str(self.process_data.get("task_no") or ""),
                             step_code=str(step_code),
                             step_status=2,
+                            process_code=str(self.process_data.get("process_code") or ""),
                             qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
                             algo_result={"status": "OK", "data": data},
                         )
@@ -2296,6 +2298,7 @@ class ProcessExecutionWindow(QWidget):
                         task_no=str(self.process_data.get("task_no") or ""),
                         step_code=str(step_code),
                         step_status=2,
+                        process_code=str(self.process_data.get("process_code") or ""),
                         qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
                         algo_result={"status": status or "ERROR", "message": result.get("message")},
                     )
@@ -2329,6 +2332,7 @@ class ProcessExecutionWindow(QWidget):
                     task_no=str(self.process_data.get("task_no") or ""),
                     step_code=str(step_code),
                     step_status=2,
+                    process_code=str(self.process_data.get("process_code") or ""),
                     qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
                     algo_result={"status": "ERROR", "message": str(e)},
                 )
@@ -2360,6 +2364,7 @@ class ProcessExecutionWindow(QWidget):
                     task_no=str(self.process_data.get("task_no") or ""),
                     step_code=str(step_code),
                     step_status=2,
+                    process_code=str(self.process_data.get("process_code") or ""),
                     qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
                     algo_result={"status": "OK", "simulated": True},
                 )
@@ -2384,6 +2389,7 @@ class ProcessExecutionWindow(QWidget):
                     task_no=str(self.process_data.get("task_no") or ""),
                     step_code=str(step_code),
                     step_status=2,
+                    process_code=str(self.process_data.get("process_code") or ""),
                     qimage=self._last_qimage.copy() if self._last_qimage is not None else None,
                     algo_result={"status": "OK", "simulated": True},
                 )

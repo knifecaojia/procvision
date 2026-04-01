@@ -53,6 +53,7 @@ class ResultReportService:
         task_no: str,
         step_code: str,
         step_status: int,
+        process_code: str = "",
         *,
         qimage: Optional[object] = None,
         algo_result: Optional[object] = None,
@@ -61,6 +62,7 @@ class ResultReportService:
             "task_no": str(task_no),
             "step_code": str(step_code or "").strip(),
             "step_status": int(step_status),
+            "process_code": str(process_code or "").strip(),
             "algo_result": algo_result,
             "qimage": qimage,
         }
@@ -114,6 +116,7 @@ class ResultReportService:
         task_no = str(payload.get("task_no", "")).strip()
         step_code = str(payload.get("step_code", "")).strip()
         step_status = int(payload.get("step_status", 2))
+        process_code = str(payload.get("process_code", "")).strip()
         algo_result = payload.get("algo_result")
         qimage = payload.get("qimage")
 
@@ -136,6 +139,7 @@ class ResultReportService:
 
         body = {
             "task_no": task_no,
+            "process_code": process_code,
             "step_code": step_code,
             "step_status": step_status,
             "object_name": object_name,

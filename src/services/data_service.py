@@ -323,6 +323,77 @@ class DataService:
             logger.warning("Tasks fetch exception; returning empty: %s", e)
             return build_empty(str(e))
 
+    def search_work_orders(self, filters: Dict[str, Any], page: int = 1, page_size: int = 10) -> Dict[str, Any]:
+        """
+        Search work orders with complex filters using POST request.
+        
+        Args:
+            filters: Filter conditions from TaskFilterWindow
+            page: Page number (1-based)
+            page_size: Number of items per page
+            
+        Returns:
+            Dict with items, total, page, page_size, total_pages
+        """
+        pagination = filters.get("pagination", {})
+        effective_page = pagination.get("page", page)
+        effective_page_size = pagination.get("page_size", page_size)
+        
+        filters["pagination"] = {
+            "page": effective_page,
+            "page_size": effective_page_size,
+        }
+        
+        try:
+            logger.info(f"Searching work orders with filters: {filters}")
+            response = self.network_service.search_work_orders(filters)
+            
+            if response.get("code") == 200:
+                data = response.get("data")
+                rows = response.get("rows")
+                total = response.get("total", 0)
+                
+                if isinstance(data, dict):
+                    rows = rows if isinstance(rows, list) else (data.get("rows") or data.get("list") or data.get("records"))
+                    total = total or data.get("total", 0)
+                elif isinstance(data, list):
+                    rows = rows if isinstance(rows, list) else data
+                    
+                if not isinstance(rows, list):
+                    rows = []
+                    
+                total_int = int(total or 0)
+                total_pages = (total_int + effective_page_size - 1) // effective_page_size if total_int else 1
+                
+                return {
+                    "items": rows,
+                    "total": total_int,
+                    "page": effective_page,
+                    "page_size": effective_page_size,
+                    "total_pages": total_pages,
+                }
+                
+            logger.warning(f"Search work orders failed: code={response.get('code')} msg={response.get('msg')}")
+            return {
+                "items": [],
+                "total": 0,
+                "page": effective_page,
+                "page_size": effective_page_size,
+                "total_pages": 1,
+                "error": response.get("msg", "Search failed"),
+            }
+            
+        except Exception as e:
+            logger.error(f"Search work orders exception: {e}")
+            return {
+                "items": [],
+                "total": 0,
+                "page": effective_page,
+                "page_size": effective_page_size,
+                "total_pages": 1,
+                "error": str(e),
+            }
+
     def _generate_mock_tasks(self, count: int = 10) -> List[Dict[str, Any]]:
         algorithms = []
         try:

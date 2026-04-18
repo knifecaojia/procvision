@@ -664,12 +664,6 @@ class CameraPage(QFrame):
         self.status_value_label.setMinimumWidth(80)
         self.status_value_label.setProperty("connectionState", "disconnected")
 
-        cam_temp_label = QLabel("温度:")
-        cam_temp_label.setObjectName("paramLabel")
-        self.temp_value_label = QLabel("--")
-        self.temp_value_label.setObjectName("paramValue")
-        self.temp_value_label.setMinimumWidth(60)
-
         cam_fps_label = QLabel("实际帧率:")
         cam_fps_label.setObjectName("paramLabel")
         self.fps_value_label = QLabel("0 FPS")
@@ -680,10 +674,8 @@ class CameraPage(QFrame):
         status_grid.addWidget(self.model_value_label, 0, 1)
         status_grid.addWidget(cam_status_label, 0, 2)
         status_grid.addWidget(self.status_value_label, 0, 3)
-        status_grid.addWidget(cam_temp_label, 1, 0)
-        status_grid.addWidget(self.temp_value_label, 1, 1)
-        status_grid.addWidget(cam_fps_label, 1, 2)
-        status_grid.addWidget(self.fps_value_label, 1, 3)
+        status_grid.addWidget(cam_fps_label, 1, 0)
+        status_grid.addWidget(self.fps_value_label, 1, 1)
 
         status_layout.addWidget(status_title)
         status_layout.addLayout(status_grid)

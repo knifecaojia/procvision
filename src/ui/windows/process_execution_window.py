@@ -2174,14 +2174,15 @@ class ProcessExecutionWindow(QWidget):
             
             end_time = datetime.now()
             duration_ms = (end_time - start_time).total_seconds() * 1000
-            logger.info(f"Detection executed in {duration_ms:.2f}ms")
-            
+            logger.info(f"Detection executed in {duration_ms:.2f}ms, algo_result={json.dumps(result, ensure_ascii=False, default=str)}")
+
             status = str(result.get('status', '')).upper()
             if status == 'OK':
                 data = result.get("data", {})
                 result_status = data.get("result_status", "NG")
-                
+
                 if result_status == "OK":
+                    logger.info(f"Detection OK: step={step_number}, data={json.dumps(data, ensure_ascii=False, default=str)}")
                     defect_rects = data.get('defect_rects', [])
                     # Convert defect rects (dict) to QRects if any (though usually OK means no defects?)
                     # If OK means "Pass", defects might be empty.
@@ -2237,14 +2238,14 @@ class ProcessExecutionWindow(QWidget):
                     self.advance_timer = QTimer()
                     self.advance_timer.setSingleShot(True)
                     self.advance_timer.timeout.connect(self.advance_to_next_step)
-                    self.advance_timer.start(2000)
+                    self.advance_timer.start(self.ok_toast_duration * 1000)
                     try:
                         from src.runner.engine import RunnerEngine
                         RunnerEngine().on_step_finish(pid=str(pid), step_index=step_number, context={"user_params": {"step_number": step_number}})
                     except Exception:
                         pass
                 else:
-                    # Logic NG (Algorithm ran successfully but result is NG)
+                    logger.warning(f"Detection NG: step={step_number}, data={json.dumps(data, ensure_ascii=False, default=str)}")
                     defect_rects = data.get('defect_rects', [])
                     self.detection_boxes = self._ng_regions_to_rects(defect_rects)
                     self.detection_status = 'fail'
@@ -2278,7 +2279,7 @@ class ProcessExecutionWindow(QWidget):
                     
             else:
                 # System Error
-                logger.error(f"Runner execution failed: {result.get('message')}")
+                logger.error(f"Runner execution failed: {json.dumps(result, ensure_ascii=False, default=str)}")
                 self.detection_status = 'fail'
                 self.detection_boxes = []
                 try:
@@ -2371,11 +2372,10 @@ class ProcessExecutionWindow(QWidget):
             except Exception:
                 pass
 
-            # Auto-advance after 2 seconds
             self.advance_timer = QTimer()
             self.advance_timer.setSingleShot(True)
             self.advance_timer.timeout.connect(self.advance_to_next_step)
-            self.advance_timer.start(2000)  # 2 seconds
+            self.advance_timer.start(self.ok_toast_duration * 1000)
         else:
             logger.info("Detection FAILED")
             self.detection_status = 'fail'

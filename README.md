@@ -16,13 +16,13 @@
 
 ## 强制运行环境要求
 
-| 项目 | 要求 |
-|------|------|
-| 操作系统 | Windows 10/11 64 位 |
-| Python | 3.12.x（源码运行与打包 EXE 均按此设计） |
-| 网络 | 默认离线环境（不依赖互联网） |
-| 内存 | 建议 8GB+ |
-| 磁盘 | 500MB+ 可用空间 |
+| 项目     | 要求                                    |
+| -------- | --------------------------------------- |
+| 操作系统 | Windows 10/11 64 位                     |
+| Python   | 3.12.x（源码运行与打包 EXE 均按此设计） |
+| 网络     | 默认离线环境（不依赖互联网）            |
+| 内存     | 建议 8GB+                               |
+| 磁盘     | 500MB+ 可用空间                         |
 
 ---
 
@@ -76,6 +76,7 @@ python run_app.py
 ```
 
 默认登录凭据：
+
 - 用户名：`admin`
 - 密码：`admin123`
 
@@ -86,17 +87,18 @@ python run_app.py
 ### 前置条件
 
 1. **确保 Python 版本正确**：必须使用 Python 3.12.x
+
    ```powershell
    python --version
    # 输出应为 Python 3.12.x
    ```
-
 2. **确保虚拟环境已激活**：
+
    ```powershell
    venv\Scripts\activate
    ```
-
 3. **确保依赖已完整安装**：
+
    ```powershell
    pip install -r requirements.txt
    ```
@@ -112,12 +114,12 @@ python -m PyInstaller --clean -y --workpath build --distpath dist build.spec
 
 **参数说明**：
 
-| 参数 | 说明 |
-|------|------|
-| `--clean` | 清理缓存，重新构建 |
-| `-y` | 覆盖已有输出目录 |
+| 参数                 | 说明                 |
+| -------------------- | -------------------- |
+| `--clean`          | 清理缓存，重新构建   |
+| `-y`               | 覆盖已有输出目录     |
 | `--workpath build` | 临时构建文件存放目录 |
-| `--distpath dist` | 最终输出目录 |
+| `--distpath dist`  | 最终输出目录         |
 
 #### 方法二：直接使用 PyInstaller 命令
 
@@ -153,12 +155,13 @@ dist/
 ### 发布包准备
 
 1. **打包发布目录**：
+
    ```powershell
    # 将 dist/SouthwestUI 整个目录打包为 ZIP
    Compress-Archive -Path dist\SouthwestUI -DestinationPath SouthwestUI-v1.0.0.zip
    ```
-
 2. **可选：添加算法包**：
+
    - 在发布目录中创建 `algorithms/` 目录
    - 将算法包放入该目录
 
@@ -193,12 +196,12 @@ coll = COLLECT(
 
 ### 编译常见问题
 
-| 问题 | 解决方案 |
-|------|---------|
-| `ModuleNotFoundError: No module named 'PySide6'` | 确保在虚拟环境中安装了依赖 |
-| `Permission denied` | 关闭杀毒软件或以管理员权限运行 |
-| 打包后运行闪退 | 检查 `config.json` 是否正确复制，查看日志 |
-| 文件过大（>500MB） | 正常现象，PySide6 依赖较多 |
+| 问题                                               | 解决方案                                    |
+| -------------------------------------------------- | ------------------------------------------- |
+| `ModuleNotFoundError: No module named 'PySide6'` | 确保在虚拟环境中安装了依赖                  |
+| `Permission denied`                              | 关闭杀毒软件或以管理员权限运行              |
+| 打包后运行闪退                                     | 检查 `config.json` 是否正确复制，查看日志 |
+| 文件过大（>500MB）                                 | 正常现象，PySide6 依赖较多                  |
 
 ---
 
@@ -237,14 +240,14 @@ coll = COLLECT(
 
 ### 配置项说明
 
-| 配置项 | 类型 | 说明 |
-|--------|------|------|
-| `general.auto_start_next` | bool | 完成后自动开始下一产品 |
+| 配置项                             | 类型   | 说明                              |
+| ---------------------------------- | ------ | --------------------------------- |
+| `general.auto_start_next`        | bool   | 完成后自动开始下一产品            |
 | `general.result_prompt_position` | string | 结果提示位置（center/top_left等） |
-| `general.draw_boxes_ok` | bool | OK结果时绘制检测框 |
-| `general.draw_boxes_ng` | bool | NG结果时绘制检测框 |
-| `general.theme` | string | 主题（dark/light） |
-| `general.ok_toast_duration` | int | OK提示显示时长（秒） |
+| `general.draw_boxes_ok`          | bool   | OK结果时绘制检测框                |
+| `general.draw_boxes_ng`          | bool   | NG结果时绘制检测框                |
+| `general.theme`                  | string | 主题（dark/light）                |
+| `general.ok_toast_duration`      | int    | OK提示显示时长（秒）              |
 
 ---
 
@@ -256,11 +259,11 @@ coll = COLLECT(
 
 ### 算法包内容
 
-| 文件/目录 | 说明 |
-|----------|------|
-| `manifest.json` | 必须包含 `entry_point` 和 `supported_pids` |
-| `wheels/` | 离线依赖 wheel 包目录 |
-| `requirements.txt` | 依赖清单 |
+| 文件/目录            | 说明                                           |
+| -------------------- | ---------------------------------------------- |
+| `manifest.json`    | 必须包含 `entry_point` 和 `supported_pids` |
+| `wheels/`          | 离线依赖 wheel 包目录                          |
+| `requirements.txt` | 依赖清单                                       |
 
 ### 部署路径
 
@@ -282,7 +285,8 @@ A: 设置 `config.json` 中的 `debug_mode: true`，可查看详细日志。
 
 ### Q: 相机无法连接？
 
-A: 
+A:
+
 1. 检查相机是否正确连接
 2. 确认海康威视 SDK 已安装
 3. 查看 `logs/app.log` 日志文件
@@ -293,7 +297,8 @@ A: 检查 `build.spec` 中的 `Tree` 配置是否包含所需目录。
 
 ### Q: 打包后 EXE 无法运行？
 
-A: 
+A:
+
 1. 检查是否在虚拟环境中编译
 2. 确认 `config.json` 在 EXE 同级目录
 3. 查看日志文件排查错误

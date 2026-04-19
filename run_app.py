@@ -40,22 +40,21 @@ sys.path.insert(0, str(current_dir))
 # Setup environment
 os.environ.setdefault('PYTHONPATH', str(current_dir))
 
-try:
-    # Import and run the application
-    from src.core.app import main
+if __name__ == "__main__":
+    from src.utils.single_instance import enforce_single_instance
+    _instance_lock = enforce_single_instance("SMART-VISION", "SMART-VISION")
 
-    if __name__ == "__main__":
+    try:
         print("Starting Industrial Vision Application...")
         print("=" * 50)
 
-        # Check if default user exists
         try:
             from src.auth.services import AuthService
             auth_service = AuthService()
             admin_user = auth_service.get_user_by_username("admin")
 
             if admin_user:
-                print("✓ Default user 'admin' exists")
+                print("Default user 'admin' exists")
                 print("  You can log in with username 'admin' and password 'admin123'")
             else:
                 print("! Default user not found")
@@ -66,18 +65,18 @@ try:
 
         print("=" * 50)
 
-        # Run the application
+        from src.core.app import main
         exit_code = main()
         sys.exit(exit_code)
 
-except ImportError as e:
-    print(f"Import error: {e}")
-    print("\nTroubleshooting:")
-    print("1. Make sure you're in the project root directory")
-    print("2. Install dependencies: pip install -r requirements.txt")
-    print("3. Create default user: python scripts/create_default_user.py")
-    sys.exit(1)
+    except ImportError as e:
+        print(f"Import error: {e}")
+        print("\nTroubleshooting:")
+        print("1. Make sure you're in the project root directory")
+        print("2. Install dependencies: pip install -r requirements.txt")
+        print("3. Create default user: python scripts/create_default_user.py")
+        sys.exit(1)
 
-except Exception as e:
-    print(f"Fatal error: {e}")
-    sys.exit(1)
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        sys.exit(1)

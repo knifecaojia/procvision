@@ -43,7 +43,7 @@ class _ImageFetchTask(QObject, QRunnable):
 
     def run(self) -> None:
         try:
-            r = requests.get(self.url, timeout=20)
+            r = requests.get(self.url, timeout=20, proxies={"http": None, "https": None})
             r.raise_for_status()
             raw = r.content
             content_type = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()

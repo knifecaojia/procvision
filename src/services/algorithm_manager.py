@@ -210,10 +210,12 @@ class AlgorithmManager:
                      def report_reporthook(block_num, block_size, total_size):
                         if total_size > 0:
                             percent = int((block_num * block_size * 100) / total_size)
-                            # Emit progress occasionally to avoid flooding
                             if percent % 5 == 0: 
                                 progress_callback.emit(percent)
 
+                     proxy_handler = urllib.request.ProxyHandler({})
+                     opener = urllib.request.build_opener(proxy_handler)
+                     urllib.request.install_opener(opener)
                      urllib.request.urlretrieve(download_url, target_path, report_reporthook)
                      progress_callback.emit(100)
                      logger.info(f"Download completed: {target_path}")

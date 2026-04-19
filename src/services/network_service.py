@@ -28,6 +28,7 @@ class NetworkService:
         self._load_server_config()
         self.timeout = self.config.timeout
         self.session = requests.Session()
+        self.session.trust_env = False
         self.token = None
         self._initialized = True
         logger.info(f"Network base URL: {self.base_url}")

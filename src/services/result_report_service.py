@@ -252,6 +252,6 @@ class ResultReportService:
         if not object_name or not upload_url:
             raise RuntimeError("Invalid getUrl response: missing objectName/url")
 
-        put = requests.put(upload_url, data=data, headers={"Content-Type": content_type}, timeout=self._network.timeout)
+        put = requests.put(upload_url, data=data, headers={"Content-Type": content_type}, timeout=self._network.timeout, proxies={"http": None, "https": None})
         put.raise_for_status()
         return object_name

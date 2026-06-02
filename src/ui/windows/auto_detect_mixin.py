@@ -8,6 +8,13 @@ from typing import Any, Dict, Optional
 from PySide6.QtCore import QThread, QTimer, Signal
 from PySide6.QtGui import QImage
 
+from src.services.detection_image_annotation_service import (
+    build_annotated_qimage,
+    build_detection_labels,
+    extract_detection_regions,
+)
+from src.services.detection_task_trace_service import DetectionTaskTraceService
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,13 +22,14 @@ class AutoDetectWorker(QThread):
     result_ready = Signal(str, dict, object)
     error_occurred = Signal(str)
 
-    def __init__(self, window, is_simulated: bool):
+    def __init__(self, window, is_simulated: bool, task_seq: int):
         super().__init__()
         self._window = window
         self._is_simulated = is_simulated
         self._step_index = window.current_step_index
         self._process_data = dict(window.process_data)
         self._is_sim = window.is_simulated
+        self._task_seq = task_seq
 
     def run(self):
         try:
@@ -36,6 +44,7 @@ class AutoDetectWorker(QThread):
                 self.error_occurred.emit(str(e))
 
     def _run_simulated(self):
+        started_at = datetime.now()
         time.sleep(1.5)
         if self.isInterruptionRequested():
             return
@@ -45,7 +54,17 @@ class AutoDetectWorker(QThread):
         else:
             result = {"status": "OK", "data": {"result_status": "NG"}, "simulated": True}
         status = "OK" if passed else "NG"
-        qimage = self._window._last_qimage
+        qimage = self._window._last_qimage.copy() if self._window._last_qimage is not None else None
+        finished_at = datetime.now()
+        result["__trace"] = {
+            "task_seq": self._task_seq,
+            "started_at": started_at.isoformat(timespec="milliseconds"),
+            "finished_at": finished_at.isoformat(timespec="milliseconds"),
+            "elapsed_ms": round((finished_at - started_at).total_seconds() * 1000, 2),
+            "algo_debug": None,
+            "algo_executed_steps": None,
+            "message": "",
+        }
         self.result_ready.emit(status, result, qimage)
 
     def _run_external(self):
@@ -53,12 +72,13 @@ class AutoDetectWorker(QThread):
         if window._last_qimage is None:
             self.error_occurred.emit("无可用画面帧")
             return
+        started_at = datetime.now()
+        source_qimage = window._last_qimage.copy()
 
         idx = self._step_index
-        guide_url = window._get_step_guide_url(idx)
         guide_qi = window._guide_qimages.get(idx)
 
-        img = window._qimage_to_numpy(window._last_qimage)
+        img = window._qimage_to_numpy(source_qimage)
         guide_img = img
         if guide_qi is not None:
             try:
@@ -111,30 +131,38 @@ class AutoDetectWorker(QThread):
 
         if self.isInterruptionRequested():
             return
+        finished_at = datetime.now()
+        data = result.get("data", {}) if isinstance(result.get("data"), dict) else {}
+        result["__trace"] = {
+            "task_seq": self._task_seq,
+            "started_at": started_at.isoformat(timespec="milliseconds"),
+            "finished_at": finished_at.isoformat(timespec="milliseconds"),
+            "elapsed_ms": round((finished_at - started_at).total_seconds() * 1000, 2),
+            "algo_debug": data.get("debug"),
+            "algo_executed_steps": data.get("executed_steps"),
+            "message": result.get("message", ""),
+        }
 
         status_str = str(result.get('status', '')).upper()
         if status_str == 'OK':
-            data = result.get("data", {})
             result_status = data.get("result_status", "NG")
             if result_status == "OK":
-                self.result_ready.emit("OK", {"status": "OK", "data": data, "step_code": step_code, "step_number": step_number}, window._last_qimage)
+                self.result_ready.emit("OK", {"status": "OK", "data": data, "step_code": step_code, "step_number": step_number, "__trace": result.get("__trace")}, source_qimage)
             else:
-                self.result_ready.emit("NG", {"status": "OK", "data": data, "step_code": step_code, "step_number": step_number}, window._last_qimage)
+                self.result_ready.emit("NG", {"status": "OK", "data": data, "step_code": step_code, "step_number": step_number, "__trace": result.get("__trace")}, source_qimage)
         else:
-            self.result_ready.emit("ERROR", {"status": "ERROR", "message": result.get("message", ""), "step_code": step_code, "step_number": step_number}, window._last_qimage)
+            self.result_ready.emit("ERROR", {"status": "ERROR", "message": result.get("message", ""), "step_code": step_code, "step_number": step_number, "__trace": result.get("__trace")}, source_qimage)
 
 
 class AutoDetectController:
     def __init__(self, window):
         self._window = window
         self._active = False
-        self._pending_ng_data: Optional[Dict[str, Any]] = None
-        self._pending_ng_image: Optional[QImage] = None
-        self._pending_ng_step_code: Optional[str] = None
         self._worker: Optional[AutoDetectWorker] = None
         self._retry_timer: Optional[QTimer] = None
         self._advance_delay = 1500
         self._ng_retry_delay = 2000
+        self._trace_service = DetectionTaskTraceService()
 
     @property
     def active(self) -> bool:
@@ -153,12 +181,12 @@ class AutoDetectController:
         self._active = False
         self._stop_worker()
         self._stop_retry_timer()
+        self._window.clear_preview_annotation()
+        self._window.reset_auto_detect_ng_latch()
         logger.info("Auto detect stopped")
 
     def clear_cache(self):
-        self._pending_ng_data = None
-        self._pending_ng_image = None
-        self._pending_ng_step_code = None
+        self._window.reset_auto_detect_ng_latch()
 
     def _stop_worker(self):
         if self._worker is not None:
@@ -216,9 +244,10 @@ class AutoDetectController:
             w._set_instruction_text("自动检测中…")
         except Exception:
             pass
+        w.auto_detect_task_seq += 1
 
         is_sim = w.is_simulated
-        self._worker = AutoDetectWorker(w, is_sim)
+        self._worker = AutoDetectWorker(w, is_sim, w.auto_detect_task_seq)
         self._worker.result_ready.connect(self._on_result)
         self._worker.error_occurred.connect(self._on_error)
         self._worker.finished.connect(self._on_worker_finished)
@@ -227,12 +256,16 @@ class AutoDetectController:
     def _on_result(self, status: str, result: Dict[str, Any], qimage: Optional[QImage]):
         if not self._active:
             return
+        trace_payload: Dict[str, Any] = dict(result.get("__trace") or {})
+        ng_latched_before = self._is_ng_latched(result.get("step_code"))
+        ng_reported = False
         if status == "OK":
-            self._handle_ok(result, qimage)
+            ng_reported = self._handle_ok(result, qimage)
         elif status == "NG":
-            self._handle_ng(result, qimage)
+            ng_reported = self._handle_ng(result, qimage)
         else:
             self._handle_error(result.get("message", "检测执行失败"))
+        self._log_task_trace(result, status, trace_payload, ng_reported, ng_latched_before)
 
     def _on_error(self, msg: str):
         if not self._active:
@@ -247,45 +280,59 @@ class AutoDetectController:
                 pass
             self._worker = None
 
-    def _handle_ok(self, result: Dict[str, Any], qimage: Optional[QImage]):
+    def _handle_ok(self, result: Dict[str, Any], qimage: Optional[QImage]) -> bool:
         w = self._window
-        step_code = result.get("step_code", "")
         step_number = result.get("step_number", w.current_step_index + 1)
+        data = result.get("data", {})
+        step_code = str(result.get("step_code") or "").strip()
 
         logger.info("Auto detect OK: step=%s", step_number)
+        regions = extract_detection_regions(result)
         w.detection_status = 'pass'
-        w.detection_boxes = []
-        w.detection_labels = []
+        w.detection_boxes = w._ng_regions_to_rects(regions)
+        w.detection_labels = build_detection_labels(result, len(w.detection_boxes), is_ok=True)
+        w.set_preview_annotation(regions, w.detection_labels, "pass", visible=bool(w.draw_boxes_ok))
         try:
-            w._set_instruction_text("自动检测通过")
+            from .detection_mixin import resolve_success_instruction_text
+            w._set_instruction_text(resolve_success_instruction_text(data, "自动检测通过"))
         except Exception:
             pass
+        w.update_overlay_visibility()
         w.rebuild_status_section()
         self._update_indicator("ok")
 
         from .detection_mixin import save_local_record, get_step_code_from_payload
         sp = w._get_step_payload(w.current_step_index)
         sc = get_step_code_from_payload(sp, w.current_step_index)
-        save_local_record(w.process_data, True, sc, w.current_step_index + 1, result, qimage)
-
-        self._report_cached_ng_with_ok(result, qimage, sc)
-
+        annotated_qimage = build_annotated_qimage(
+            qimage,
+            result,
+            is_ok=True,
+            draw_ok=bool(getattr(w, "draw_boxes_ok", True)),
+            draw_ng=bool(getattr(w, "draw_boxes_ng", True)),
+        )
+        save_local_record(w.process_data, True, sc, w.current_step_index + 1, result, annotated_qimage)
+        self._report_ok(result, annotated_qimage, sc)
         self.clear_cache()
+        w.auto_detect_last_result_status = "OK"
 
         self._retry_timer = QTimer()
         self._retry_timer.setSingleShot(True)
         self._retry_timer.timeout.connect(self._advance_and_continue)
         self._retry_timer.start(w.ok_toast_duration * 1000)
+        return False
 
-    def _handle_ng(self, result: Dict[str, Any], qimage: Optional[QImage]):
+    def _handle_ng(self, result: Dict[str, Any], qimage: Optional[QImage]) -> bool:
         w = self._window
-        step_code = result.get("step_code", "")
         step_number = result.get("step_number", w.current_step_index + 1)
+        step_code = str(result.get("step_code") or "").strip()
 
-        logger.info("Auto detect NG: step=%s (caching)", step_number)
+        logger.info("Auto detect NG: step=%s", step_number)
+        regions = extract_detection_regions(result)
         w.detection_status = 'fail'
-        w.detection_boxes = []
-        w.detection_labels = []
+        w.detection_boxes = w._ng_regions_to_rects(regions)
+        w.detection_labels = build_detection_labels(result, len(w.detection_boxes), is_ok=False)
+        w.set_preview_annotation(regions, w.detection_labels, "fail", visible=bool(w.draw_boxes_ng))
 
         data = result.get("data", {})
         ng_reason = str(data.get("ng_reason", "")).strip()
@@ -294,22 +341,33 @@ class AutoDetectController:
         except Exception:
             pass
 
+        w.update_overlay_visibility()
         w.rebuild_status_section()
         self._update_indicator("ng")
 
         from .detection_mixin import save_local_record, get_step_code_from_payload
         sp = w._get_step_payload(w.current_step_index)
         sc = get_step_code_from_payload(sp, w.current_step_index)
-        save_local_record(w.process_data, False, sc, w.current_step_index + 1, result, qimage)
-
-        self._pending_ng_data = result
-        self._pending_ng_image = qimage.copy() if qimage is not None else None
-        self._pending_ng_step_code = sc
+        annotated_qimage = build_annotated_qimage(
+            qimage,
+            result,
+            is_ok=False,
+            draw_ok=bool(getattr(w, "draw_boxes_ok", True)),
+            draw_ng=bool(getattr(w, "draw_boxes_ng", True)),
+        )
+        should_report_ng = not self._is_ng_latched(step_code)
+        if should_report_ng:
+            save_local_record(w.process_data, False, sc, w.current_step_index + 1, result, annotated_qimage)
+            self._report_ng(result, annotated_qimage, sc)
+            w.auto_detect_ng_latched_step_code = step_code
+            w.auto_detect_ng_reported = True
+        w.auto_detect_last_result_status = "NG"
 
         self._retry_timer = QTimer()
         self._retry_timer.setSingleShot(True)
         self._retry_timer.timeout.connect(self._retry_current_step)
         self._retry_timer.start(self._ng_retry_delay)
+        return should_report_ng
 
     def _handle_error(self, msg: str):
         logger.error("Auto detect error: %s", msg)
@@ -318,10 +376,12 @@ class AutoDetectController:
         w.detection_status = 'fail'
         w.detection_boxes = []
         w.detection_labels = []
+        w.clear_preview_annotation()
         try:
             w._set_instruction_text(f"自动检测出错: {msg}")
         except Exception:
             pass
+        w.update_overlay_visibility()
         w.rebuild_status_section()
         self._update_indicator("error")
         self.stop()
@@ -354,26 +414,36 @@ class AutoDetectController:
         w.detection_status = 'idle'
         w.detection_boxes = []
         w.detection_labels = []
+        w.refresh_preview_annotation_overlay()
+        w.update_overlay_visibility()
         self._run_step()
 
-    def _report_cached_ng_with_ok(self, ok_result: Dict, ok_qimage: Optional[QImage], ok_step_code: str):
-        if self._pending_ng_data is None:
-            return
+    def _report_ng(self, ng_result: Dict, ng_qimage: Optional[QImage], ng_step_code: str) -> None:
         try:
             from src.services.result_report_service import ResultReportService
             w = self._window
             svc = ResultReportService()
             task_no = str(w.process_data.get("task_no") or "")
             process_code = str(w.process_data.get("process_code") or "")
-            if self._pending_ng_step_code:
-                svc.enqueue_step_result(
-                    task_no=task_no,
-                    step_code=str(self._pending_ng_step_code),
-                    step_status=3,
-                    process_code=process_code,
-                    qimage=self._pending_ng_image.copy() if self._pending_ng_image is not None else None,
-                    algo_result=self._pending_ng_data,
-                )
+            svc.enqueue_step_result(
+                task_no=task_no,
+                step_code=str(ng_step_code),
+                step_status=3,
+                process_code=process_code,
+                qimage=ng_qimage.copy() if ng_qimage is not None else None,
+                algo_result=ng_result,
+            )
+            logger.info("Reported first NG for step=%s", ng_step_code)
+        except Exception as e:
+            logger.warning("Failed to report NG: %s", e)
+
+    def _report_ok(self, ok_result: Dict, ok_qimage: Optional[QImage], ok_step_code: str) -> None:
+        try:
+            from src.services.result_report_service import ResultReportService
+            w = self._window
+            svc = ResultReportService()
+            task_no = str(w.process_data.get("task_no") or "")
+            process_code = str(w.process_data.get("process_code") or "")
             svc.enqueue_step_result(
                 task_no=task_no,
                 step_code=str(ok_step_code),
@@ -382,6 +452,45 @@ class AutoDetectController:
                 qimage=ok_qimage.copy() if ok_qimage is not None else None,
                 algo_result=ok_result,
             )
-            logger.info("Reported cached NG (step=%s) + OK (step=%s)", self._pending_ng_step_code, ok_step_code)
+            logger.info("Reported OK for step=%s", ok_step_code)
         except Exception as e:
-            logger.warning("Failed to report cached NG+OK: %s", e)
+            logger.warning("Failed to report OK: %s", e)
+
+    def _is_ng_latched(self, step_code: Optional[str]) -> bool:
+        step_code_text = str(step_code or "").strip()
+        if not step_code_text:
+            return False
+        w = self._window
+        return bool(
+            getattr(w, "auto_detect_ng_reported", False)
+            and str(getattr(w, "auto_detect_ng_latched_step_code", "")).strip() == step_code_text
+        )
+
+    def _log_task_trace(
+        self,
+        result: Dict[str, Any],
+        status: str,
+        trace_payload: Dict[str, Any],
+        ng_reported: bool,
+        ng_latched_before: bool,
+    ) -> None:
+        w = self._window
+        data = result.get("data", {}) if isinstance(result.get("data"), dict) else {}
+        regions = extract_detection_regions(result)
+        trace_payload.update(
+            {
+                "task_no": str(w.process_data.get("task_no") or ""),
+                "process_code": str(w.process_data.get("process_code") or ""),
+                "step_code": str(result.get("step_code") or ""),
+                "step_index": result.get("step_number", w.current_step_index + 1),
+                "result_status": status,
+                "ng_reported": bool(ng_reported),
+                "ng_latched_before": bool(ng_latched_before),
+                "ng_latched_after": bool(self._is_ng_latched(result.get("step_code"))),
+                "draw_boxes_ok": bool(getattr(w, "draw_boxes_ok", True)),
+                "draw_boxes_ng": bool(getattr(w, "draw_boxes_ng", True)),
+                "box_count": len(regions),
+                "message": result.get("message") or data.get("ng_reason") or trace_payload.get("message", ""),
+            }
+        )
+        self._trace_service.log_summary(trace_payload)

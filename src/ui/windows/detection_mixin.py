@@ -2,11 +2,17 @@ import json
 import logging
 import random
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from PySide6.QtCore import QTimer, QRect, QSize
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QGraphicsOpacityEffect
+
+from src.services.detection_image_annotation_service import (
+    build_annotated_qimage,
+    build_detection_labels,
+    extract_detection_regions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -256,78 +262,18 @@ def handle_external_detection(window) -> None:
             save_local_record(window.process_data, False, sc, window.current_step_index + 1, {"status": "ERROR", "message": str(e)}, window._last_qimage)
         except Exception:
             pass
-        _report_step_result(window, get_step_code_from_payload(window._get_step_payload(window.current_step_index), window.current_step_index), {"status": "ERROR", "message": str(e)})
+        _report_step_result(
+            window,
+            get_step_code_from_payload(window._get_step_payload(window.current_step_index), window.current_step_index),
+            {"status": "ERROR", "message": str(e)},
+        )
 
 
-def _collect_rects_from_data(data: Dict[str, Any]) -> List[Dict[str, Any]]:
-    rects: List[Dict[str, Any]] = []
-
-    position_rects = data.get("position_rects")
-    if isinstance(position_rects, (list, tuple)) and len(position_rects) > 0:
-        for r in position_rects:
-            if isinstance(r, dict) and any(k in r for k in ("x", "box_coords")):
-                rects.append(r)
-        if rects:
-            return rects
-
-    bbox = data.get("bbox")
-    if isinstance(bbox, (list, tuple)) and len(bbox) > 0:
-        for r in bbox:
-            if isinstance(r, dict) and any(k in r for k in ("x", "box_coords")):
-                rects.append(r)
-        if rects:
-            return rects
-
-    defect_rects = data.get("defect_rects") or []
-    if isinstance(defect_rects, (list, tuple)):
-        for r in defect_rects:
-            if isinstance(r, dict) and any(k in r for k in ("x", "box_coords")):
-                rects.append(r)
-
-    executed_steps = data.get("executed_steps") or []
-    if isinstance(executed_steps, (list, tuple)):
-        for s in executed_steps:
-            if not isinstance(s, dict):
-                continue
-            if s.get("is_correct") and s.get("bbox"):
-                bbox_data = s["bbox"]
-                if bbox_data and isinstance(bbox_data[0], (list, tuple)):
-                    for box in bbox_data:
-                        if len(box) >= 4:
-                            rects.append({"box_coords": list(box[:4])})
-                else:
-                    if len(bbox_data) >= 4:
-                        rects.append({"box_coords": list(bbox_data[:4])})
-
-    return rects
-
-
-def _build_box_labels(data: Dict[str, Any], box_count: int) -> List[str]:
-    labels: List[str] = []
-    ng_reason_raw = str(data.get("ng_reason") or "").strip()
-
-    if ng_reason_raw and "|" in ng_reason_raw:
-        parts = [p.strip() for p in ng_reason_raw.split("|") if p.strip()]
-    elif ng_reason_raw:
-        parts = [ng_reason_raw]
-    else:
-        parts = []
-
-    source_rects = data.get("position_rects") or data.get("bbox") or data.get("defect_rects") or []
-    for i in range(box_count):
-        if i < len(parts):
-            labels.append(parts[i])
-        elif isinstance(source_rects, list) and i < len(source_rects):
-            r = source_rects[i]
-            if isinstance(r, dict):
-                lbl = str(r.get("label") or "").strip()
-                labels.append(lbl if lbl else f"缺陷{i + 1}")
-            else:
-                labels.append(f"缺陷{i + 1}")
-        else:
-            labels.append(f"缺陷{i + 1}")
-
-    return labels
+def resolve_success_instruction_text(data: Dict[str, Any], fallback_text: str) -> str:
+    if isinstance(data, dict) and "message" in data:
+        value = data.get("message")
+        return "" if value is None else str(value)
+    return fallback_text
 
 
 def _process_algo_result(window, result: Dict[str, Any], step_code: str, step_number: int, idx: int):
@@ -347,18 +293,26 @@ def _process_algo_result(window, result: Dict[str, Any], step_code: str, step_nu
 def _handle_detection_ok(window, data: Dict, step_code: str, step_number: int, idx: int):
     logger.info(f"Detection OK: step={step_number}, data={json.dumps(data, ensure_ascii=False, default=str)}")
 
-    valid_rects = _collect_rects_from_data(data)
+    result_payload = {"status": "OK", "data": data}
+    valid_rects = extract_detection_regions(result_payload)
     window.detection_boxes = window._ng_regions_to_rects(valid_rects)
-    window.detection_labels = _build_box_labels(data, len(window.detection_boxes))
+    window.detection_labels = build_detection_labels(result_payload, len(window.detection_boxes), is_ok=True)
     window.detection_status = 'pass'
     try:
-        window._set_instruction_text("执行成功")
+        window._set_instruction_text(resolve_success_instruction_text(data, "执行成功"))
     except Exception:
         pass
     window.update_overlay_visibility()
     window.rebuild_status_section()
-    save_local_record(window.process_data, True, step_code, step_number, {"status": "OK", "data": data}, window._last_qimage)
-    _report_step_result(window, step_code, {"status": "OK", "data": data})
+    annotated_qimage = build_annotated_qimage(
+        window._last_qimage,
+        result_payload,
+        is_ok=True,
+        draw_ok=bool(getattr(window, "draw_boxes_ok", True)),
+        draw_ng=bool(getattr(window, "draw_boxes_ng", True)),
+    )
+    save_local_record(window.process_data, True, step_code, step_number, result_payload, annotated_qimage)
+    _report_step_result(window, step_code, result_payload, annotated_qimage)
 
     window.advance_timer = QTimer()
     window.advance_timer.setSingleShot(True)
@@ -368,9 +322,10 @@ def _handle_detection_ok(window, data: Dict, step_code: str, step_number: int, i
 
 def _handle_detection_ng(window, data: Dict, step_code: str, step_number: int, idx: int):
     logger.warning(f"Detection NG: step={step_number}, data={json.dumps(data, ensure_ascii=False, default=str)}")
-    valid_rects = _collect_rects_from_data(data)
+    result_payload = {"status": "OK", "data": data}
+    valid_rects = extract_detection_regions(result_payload)
     window.detection_boxes = window._ng_regions_to_rects(valid_rects)
-    window.detection_labels = _build_box_labels(data, len(window.detection_boxes))
+    window.detection_labels = build_detection_labels(result_payload, len(window.detection_boxes), is_ok=False)
     window.detection_status = 'fail'
     try:
         ng_reason = str(data.get("ng_reason") or "").strip()
@@ -380,14 +335,22 @@ def _handle_detection_ng(window, data: Dict, step_code: str, step_number: int, i
     window.update_overlay_visibility()
     window.rebuild_status_section()
     window._start_ng_flash()
-    save_local_record(window.process_data, False, step_code, step_number, {"status": "OK", "data": data}, window._last_qimage)
-    _report_step_result(window, step_code, {"status": "OK", "data": data})
+    annotated_qimage = build_annotated_qimage(
+        window._last_qimage,
+        result_payload,
+        is_ok=False,
+        draw_ok=bool(getattr(window, "draw_boxes_ok", True)),
+        draw_ng=bool(getattr(window, "draw_boxes_ng", True)),
+    )
+    save_local_record(window.process_data, False, step_code, step_number, result_payload, annotated_qimage)
+    _report_step_result(window, step_code, result_payload, annotated_qimage)
 
 
 def _handle_detection_error(window, result: Dict, step_code: str, step_number: int, idx: int):
     logger.error(f"Runner execution failed: {json.dumps(result, ensure_ascii=False, default=str)}")
     window.detection_status = 'fail'
     window.detection_boxes = []
+    window.detection_labels = []
     try:
         msg = str(result.get("message") or "").strip()
         window._set_instruction_text(f"执行失败: {msg}" if msg else "执行失败")
@@ -398,10 +361,15 @@ def _handle_detection_error(window, result: Dict, step_code: str, step_number: i
     window._start_ng_flash()
     save_local_record(window.process_data, False, step_code, step_number, {"status": "ERROR", "message": result.get("message")}, window._last_qimage)
     window.show_toast(f"执行出错: {result.get('message')}", False)
-    _report_step_result(window, step_code, {"status": str(result.get('status', '')).upper() or "ERROR", "message": result.get("message")})
+    _report_step_result(
+        window,
+        step_code,
+        {"status": str(result.get('status', '')).upper() or "ERROR", "message": result.get("message")},
+        window._last_qimage,
+    )
 
 
-def _report_step_result(window, step_code: str, algo_result: Dict) -> None:
+def _report_step_result(window, step_code: str, algo_result: Dict, qimage: Optional[QImage]) -> None:
     try:
         from src.services.result_report_service import ResultReportService
         ResultReportService().enqueue_step_result(
@@ -409,7 +377,7 @@ def _report_step_result(window, step_code: str, algo_result: Dict) -> None:
             step_code=str(step_code),
             step_status=2,
             process_code=str(window.process_data.get("process_code") or ""),
-            qimage=window._last_qimage.copy() if window._last_qimage is not None else None,
+            qimage=qimage.copy() if qimage is not None else None,
             algo_result=algo_result,
         )
     except Exception:

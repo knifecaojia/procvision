@@ -270,6 +270,10 @@ class CameraMixin:
                 self._last_display_size = None
             self.base_image_label.setPixmap(scaled_pixmap)
             self._set_video_state("active")
+            try:
+                self.refresh_preview_annotation_overlay()
+            except Exception:
+                pass
 
     def on_preview_error(self, error_msg: str):
         logger.error("Preview error: %s", error_msg)
@@ -279,3 +283,7 @@ class CameraMixin:
         self.base_image_label.clear()
         self.base_image_label.setText("等待相机视频")
         self._set_video_state("placeholder")
+        try:
+            self.refresh_preview_annotation_overlay()
+        except Exception:
+            pass

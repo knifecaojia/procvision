@@ -8,15 +8,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QObject, QEvent, QRect, QSize
 from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QPen, QTextCursor
-
 from ..styles import refresh_widget_styles
-
+from ..components.process_preview_annotation_overlay import ProcessPreviewAnnotationOverlay
 logger = logging.getLogger(__name__)
-
 StepStatus = Literal['completed', 'current', 'pending']
 DetectionStatus = Literal['idle', 'detecting', 'pass', 'fail']
-
-
 class OverlayWidget(QWidget):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -28,24 +24,19 @@ class OverlayWidget(QWidget):
         self._status: DetectionStatus = 'idle'
         self._draw_ok: bool = True
         self._draw_ng: bool = True
-
     def set_boxes(self, boxes: List[QRect]):
         self._boxes = boxes
         self.update()
-
     def set_labels(self, labels: List[str]):
         self._labels = labels or []
         self.update()
-
     def set_status(self, status: DetectionStatus):
         self._status = status
         self.update()
-
     def set_draw_options(self, draw_ok: bool, draw_ng: bool):
         self._draw_ok = bool(draw_ok)
         self._draw_ng = bool(draw_ng)
         self.update()
-
     def paintEvent(self, event):
         super().paintEvent(event)
         if self._status not in ('pass', 'fail'):
@@ -83,8 +74,6 @@ class OverlayWidget(QWidget):
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, text)
             painter.setPen(QPen(pen_color, 2))
         painter.end()
-
-
 class StatusIndicator(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -98,11 +87,9 @@ class StatusIndicator(QWidget):
             "ng": "#ef4444",
             "error": "#ef4444",
         }
-
     def set_state(self, state: str):
         self._state = state
         self.update()
-
     def paintEvent(self, event):
         from PySide6.QtGui import QPainter, QColor, QBrush
         painter = QPainter(self)
@@ -112,8 +99,6 @@ class StatusIndicator(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(2, 2, 16, 16)
         painter.end()
-
-
 class UIBuilderMixin:
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -327,10 +312,14 @@ class UIBuilderMixin:
         layout.addWidget(self.step_list_panel)
         self.visual_area = self.create_visual_area_container()
         layout.addWidget(self.visual_area, 1)
+        self.preview_annotation_widget = ProcessPreviewAnnotationOverlay(self.base_image_label.parent())
+        self.preview_annotation_widget.setVisible(False)
+        self.preview_annotation_widget.setGeometry(self.base_image_label.geometry())
         self.overlay_widget = self._create_overlay_widget()
         self.overlay_widget.setParent(self.base_image_label.parent())
         self.overlay_widget.setVisible(False)
         self.overlay_widget.setGeometry(self.base_image_label.geometry())
+        self.preview_annotation_widget.raise_()
         self.overlay_widget.raise_()
         self.reset_camera_placeholder()
         return content
@@ -620,28 +609,29 @@ class UIBuilderMixin:
         is_fail = self.detection_status == 'fail'
         dismissed = getattr(self, '_overlay_dismissed', False)
         has_boxes = bool(getattr(self, 'detection_boxes', []))
+        is_auto = bool(getattr(self, "auto_detect_active", False))
         overlay = getattr(self, 'overlay_widget', None)
         pass_ov = getattr(self, 'pass_overlay', None)
         fail_ov = getattr(self, 'fail_overlay', None)
         if overlay is not None:
-            overlay.setVisible((is_pass or is_fail) or (dismissed and has_boxes))
+            overlay.setVisible(((is_pass or is_fail) or (dismissed and has_boxes)) and not is_auto)
             try:
-                paint_status = self.detection_status
-                if dismissed and paint_status == 'idle' and has_boxes:
-                    paint_status = self._last_paint_status if hasattr(self, '_last_paint_status') and self._last_paint_status in ('pass', 'fail') else 'fail'
-                else:
-                    self._last_paint_status = paint_status
-                overlay.set_status(paint_status)
-                overlay.set_boxes(self.detection_boxes or [])
-                overlay.set_labels(getattr(self, 'detection_labels', []) or [])
+                overlay.set_status(self.detection_status)
+                overlay.set_boxes(self.detection_boxes if not is_auto else [])
+                overlay.set_labels((getattr(self, 'detection_labels', []) or []) if not is_auto else [])
                 overlay.set_draw_options(bool(self.draw_boxes_ok), bool(self.draw_boxes_ng))
             except Exception:
                 pass
-        if not dismissed:
+        if not dismissed and not is_auto:
             if pass_ov is not None:
                 pass_ov.setVisible(is_pass)
             if fail_ov is not None:
                 fail_ov.setVisible(is_fail)
+        else:
+            if pass_ov is not None:
+                pass_ov.setVisible(False)
+            if fail_ov is not None:
+                fail_ov.setVisible(False)
         try:
             if overlay is not None and overlay.isVisible():
                 target = pass_ov if (is_pass and not dismissed) else (fail_ov if (is_fail and not dismissed) else None)
@@ -679,6 +669,8 @@ class UIBuilderMixin:
 
     def _align_overlay_geometry(self):
         try:
+            if getattr(self, "preview_annotation_widget", None) and self.base_image_label:
+                self.preview_annotation_widget.setGeometry(self.base_image_label.geometry())
             if self.overlay_widget and self.base_image_label:
                 self.overlay_widget.setGeometry(self.base_image_label.geometry())
         except Exception:

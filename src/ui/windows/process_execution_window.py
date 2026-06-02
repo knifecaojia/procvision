@@ -82,6 +82,15 @@ class ProcessExecutionWindow(
         self._last_display_size = None
         self.detection_boxes: List[QRect] = []
         self.detection_labels: List[str] = []
+        self.preview_annotation_regions: List[Dict[str, Any]] = []
+        self.preview_annotation_boxes: List[QRect] = []
+        self.preview_annotation_labels: List[str] = []
+        self.preview_annotation_status: DetectionStatus = "idle"
+        self.preview_annotation_visible = False
+        self.auto_detect_ng_latched_step_code: Optional[str] = None
+        self.auto_detect_ng_reported = False
+        self.auto_detect_last_result_status: str = ""
+        self.auto_detect_task_seq = 0
         self._overlay_dismissed = False
         self.auto_start_next = self._read_auto_start_next_setting()
         self.result_prompt_position = self._read_result_prompt_position()
@@ -90,6 +99,7 @@ class ProcessExecutionWindow(
         self.split_layout_mode = self._load_layout_preference()
 
         self.overlay_widget: Optional[QWidget] = None
+        self.preview_annotation_widget: Optional[QWidget] = None
         self.pass_overlay: Optional[QWidget] = None
         self.fail_overlay: Optional[QWidget] = None
 
@@ -404,6 +414,7 @@ class ProcessExecutionWindow(
         self.detection_status = 'idle'
         self.detection_boxes = []
         self.detection_labels = []
+        self.clear_preview_annotation()
         self._overlay_dismissed = False
         self.update_overlay_visibility()
         self.rebuild_status_section()
@@ -419,6 +430,7 @@ class ProcessExecutionWindow(
         self.detection_status = 'idle'
         self.detection_boxes = []
         self.detection_labels = []
+        self.clear_preview_annotation()
         self._overlay_dismissed = False
         self.update_overlay_visibility()
         self.rebuild_status_section()
@@ -457,6 +469,8 @@ class ProcessExecutionWindow(
         self.detection_status = 'idle'
         self.detection_boxes = []
         self.detection_labels = []
+        self.clear_preview_annotation()
+        self.reset_auto_detect_ng_latch()
         self._overlay_dismissed = False
         self.progress_label.setText(f"步骤: {self.current_step_index + 1} / {self.total_steps}")
         self.progress_bar.setValue(self.current_step_index + 1)
@@ -609,6 +623,8 @@ class ProcessExecutionWindow(
         self.detection_status = 'idle'
         self.detection_boxes = []
         self.detection_labels = []
+        self.clear_preview_annotation()
+        self.reset_auto_detect_ng_latch()
         self._overlay_dismissed = False
         self.current_instruction = self.steps[0].description
         self._set_instruction_text(self.current_instruction)
@@ -678,6 +694,54 @@ class ProcessExecutionWindow(
         logger.info("ProcessExecutionWindow closing (camera connection preserved if active)")
         self.closed.emit()
         super().closeEvent(event)
+
+    def set_preview_annotation(
+        self,
+        regions: List[Dict[str, Any]],
+        labels: List[str],
+        status: DetectionStatus,
+        *,
+        visible: bool = True,
+    ) -> None:
+        self.preview_annotation_regions = list(regions or [])
+        self.preview_annotation_labels = list(labels or [])
+        self.preview_annotation_status = status
+        self.preview_annotation_visible = bool(visible and self.preview_annotation_regions)
+        self.refresh_preview_annotation_overlay()
+
+    def clear_preview_annotation(self) -> None:
+        self.preview_annotation_regions = []
+        self.preview_annotation_boxes = []
+        self.preview_annotation_labels = []
+        self.preview_annotation_status = "idle"
+        self.preview_annotation_visible = False
+        self.refresh_preview_annotation_overlay()
+
+    def refresh_preview_annotation_overlay(self) -> None:
+        widget = getattr(self, "preview_annotation_widget", None)
+        if widget is None:
+            return
+        try:
+            self._align_overlay_geometry()
+        except Exception:
+            pass
+        boxes = self._ng_regions_to_rects(self.preview_annotation_regions) if self.preview_annotation_visible else []
+        self.preview_annotation_boxes = boxes
+        try:
+            widget.set_status(self.preview_annotation_status if boxes else "idle")
+            widget.set_boxes(boxes)
+            widget.set_labels(self.preview_annotation_labels if boxes else [])
+            widget.set_draw_options(bool(self.draw_boxes_ok), bool(self.draw_boxes_ng))
+            widget.set_hint_visible(bool(self.auto_detect_active and boxes), "最近检测结果")
+            widget.setVisible(bool(self.preview_annotation_visible and boxes))
+            if widget.isVisible():
+                widget.raise_()
+        except Exception:
+            pass
+
+    def reset_auto_detect_ng_latch(self) -> None:
+        self.auto_detect_ng_latched_step_code = None
+        self.auto_detect_ng_reported = False
         try:
             pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
             if pid:

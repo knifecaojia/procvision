@@ -61,7 +61,7 @@ class TaskFilterWindow(QDialog):
         self._theme = theme if theme in ("dark", "light") else "dark"
         
         self.setWindowTitle("高级过滤")
-        self.setFixedSize(520, 520)
+        self.setFixedSize(720, 520)
         self.setWindowFlags(
             Qt.WindowType.Dialog |
             Qt.WindowType.WindowTitleHint |

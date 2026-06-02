@@ -189,7 +189,7 @@ class NetworkService:
             response.raise_for_status()
             try:
                 data = response.json()
-                logger.info(f"Health data: {data}")
+                logger.debug(f"Health data: {data}")
                 return data
             except Exception as parse_err:
                 raw_text = response.text

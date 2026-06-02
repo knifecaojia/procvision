@@ -435,7 +435,7 @@ class AssemblyTasksPage(QFrame):
             elif text == "人工通过" and variant == "success":
                 extra = " btn-manual"
             return (
-                f"<a class='btn-link' href='{escape(href)}'>"
+                f"<a class='btn-link' href='{href}'>"
                 f"<span class='btn btn-{escape(variant)}{extra}'>{escape(text)}</span>"
                 "</a>"
             )

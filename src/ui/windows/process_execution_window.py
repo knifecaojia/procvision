@@ -26,6 +26,7 @@ from ..styles import (
 )
 
 from .ui_builder_mixin import UIBuilderMixin, StepStatus, DetectionStatus
+from .split_view_mixin import SplitViewMixin
 from .camera_mixin import CameraMixin
 from .guide_image_mixin import GuideImageMixin
 from .detection_mixin import (
@@ -35,6 +36,7 @@ from .detection_mixin import (
     run_simulated_detection,
     handle_external_detection,
 )
+from .auto_detect_mixin import AutoDetectController
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ class ProcessStep:
 
 class ProcessExecutionWindow(
     UIBuilderMixin,
+    SplitViewMixin,
     CameraMixin,
     GuideImageMixin,
     QWidget,
@@ -78,10 +81,13 @@ class ProcessExecutionWindow(
         self._last_qimage: Optional[QImage] = None
         self._last_display_size = None
         self.detection_boxes: List[QRect] = []
+        self.detection_labels: List[str] = []
+        self._overlay_dismissed = False
         self.auto_start_next = self._read_auto_start_next_setting()
         self.result_prompt_position = self._read_result_prompt_position()
         self.draw_boxes_ok, self.draw_boxes_ng = self._read_draw_box_settings()
         self.ok_toast_duration = self._read_ok_toast_duration()
+        self.split_layout_mode = self._load_layout_preference()
 
         self.overlay_widget: Optional[QWidget] = None
         self.pass_overlay: Optional[QWidget] = None
@@ -122,6 +128,8 @@ class ProcessExecutionWindow(
         self._closing: bool = False
         self._task_status_started: bool = False
         self._ng_flash = NgFlashController(self)
+        self.auto_detect_active = False
+        self._auto_detect_controller = AutoDetectController(self)
 
         self.setWindowTitle(f"工艺执行 - {process_data.get('name', '')}")
         self.setMinimumSize(1280, 720)
@@ -273,6 +281,24 @@ class ProcessExecutionWindow(
         self.retry_btn.clicked.connect(self.on_retry_detection)
         self.skip_btn.clicked.connect(self.on_skip_step)
 
+    def toggle_auto_detect(self, checked: bool):
+        if checked:
+            if not self.camera_active and self._last_qimage is None:
+                try:
+                    self.show_toast("请先开启相机", False)
+                except Exception:
+                    pass
+                btn = getattr(self, "auto_detect_btn", None)
+                if btn:
+                    btn.setChecked(False)
+                return
+            self.auto_detect_active = True
+            self._auto_detect_controller.start()
+        else:
+            self.auto_detect_active = False
+            self._auto_detect_controller.stop()
+        self.rebuild_status_section()
+
     def _mark_task_running_once(self) -> None:
         if getattr(self, "_task_status_started", False):
             return
@@ -350,8 +376,17 @@ class ProcessExecutionWindow(
         return rects
 
     def on_start_detection(self):
-        if self.detection_status != 'idle' or (not self.camera_active and self._last_qimage is None):
+        if self.detection_status == 'detecting':
             return
+        if not self.camera_active and self._last_qimage is None:
+            return
+        if self.detection_status in ('pass', 'fail'):
+            self._stop_ng_flash()
+            self.detection_status = 'idle'
+            self.detection_boxes = []
+            self.detection_labels = []
+            self._overlay_dismissed = False
+            self.update_overlay_visibility()
         if self.is_simulated:
             logger.info("Starting detection simulation")
             self._mark_task_running_once()
@@ -367,6 +402,9 @@ class ProcessExecutionWindow(
         logger.info("Retrying detection")
         self._stop_ng_flash()
         self.detection_status = 'idle'
+        self.detection_boxes = []
+        self.detection_labels = []
+        self._overlay_dismissed = False
         self.update_overlay_visibility()
         self.rebuild_status_section()
 
@@ -379,6 +417,9 @@ class ProcessExecutionWindow(
         if self.detection_timer and self.detection_timer.isActive():
             self.detection_timer.stop()
         self.detection_status = 'idle'
+        self.detection_boxes = []
+        self.detection_labels = []
+        self._overlay_dismissed = False
         self.update_overlay_visibility()
         self.rebuild_status_section()
 
@@ -393,7 +434,12 @@ class ProcessExecutionWindow(
                 )
             except Exception:
                 pass
-            if getattr(self, 'auto_start_next', False):
+            if self.auto_detect_active:
+                self.auto_detect_active = False
+                self._auto_detect_controller.stop()
+                self.close()
+                return
+            elif getattr(self, 'auto_start_next', False):
                 self.reset_for_next_product()
                 try:
                     self.show_toast("已自动开始下一产品工艺检测", True)
@@ -409,15 +455,24 @@ class ProcessExecutionWindow(
         self.current_instruction = self.steps[self.current_step_index].description
         self._set_instruction_text(self.current_instruction)
         self.detection_status = 'idle'
+        self.detection_boxes = []
+        self.detection_labels = []
+        self._overlay_dismissed = False
         self.progress_label.setText(f"步骤: {self.current_step_index + 1} / {self.total_steps}")
         self.progress_bar.setValue(self.current_step_index + 1)
         self.rebuild_step_cards()
+        self.rebuild_step_bar_cards()
         self.update_overlay_visibility()
         self.rebuild_status_section()
         try:
             self._ensure_guide_for_step(self.current_step_index, preload_next=True)
         except Exception:
             pass
+        if getattr(self, "split_layout_mode", False):
+            try:
+                self._display_guide_image(self.current_step_index)
+            except Exception:
+                pass
         logger.info("Advanced to step %d", self.current_step_index + 1)
 
     def show_toast(self, text: str, success: bool = True):
@@ -552,19 +607,29 @@ class ProcessExecutionWindow(
             step.status = 'current' if i == 0 else 'pending'
         self.current_step_index = 0
         self.detection_status = 'idle'
+        self.detection_boxes = []
+        self.detection_labels = []
+        self._overlay_dismissed = False
         self.current_instruction = self.steps[0].description
         self._set_instruction_text(self.current_instruction)
         self.progress_label.setText(f"步骤: 1 / {self.total_steps}")
         self.progress_bar.setValue(1)
         self.rebuild_step_cards()
+        self.rebuild_step_bar_cards()
         self.update_overlay_visibility()
         self.rebuild_status_section()
+        self._auto_detect_controller.clear_cache()
         try:
             self._guide_qimages = {}
             self._guide_errors = {}
             self._ensure_guide_for_step(self.current_step_index, preload_next=True)
         except Exception:
             pass
+        if getattr(self, "split_layout_mode", False):
+            try:
+                self._display_guide_image(self.current_step_index)
+            except Exception:
+                pass
         logger.info("Reset for next product")
         try:
             pid = self.process_data.get('algorithm_code', self.process_data.get('pid'))
@@ -577,6 +642,8 @@ class ProcessExecutionWindow(
     def closeEvent(self, event):
         self._closing = True
         self._stop_ng_flash()
+        self.auto_detect_active = False
+        self._auto_detect_controller.stop()
         if self.preview_worker:
             self.preview_worker.stop()
             self.preview_worker.wait(1000)

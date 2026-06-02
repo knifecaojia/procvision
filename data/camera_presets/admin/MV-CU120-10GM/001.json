@@ -2,10 +2,10 @@
   "name": "001",
   "camera_model": "MV-CU120-10GM",
   "user_name": "admin",
-  "created_at": "2026-03-06T21:22:03.808171",
+  "created_at": "2026-04-20T08:53:59.728681",
   "parameters": {
-    "exposure_time": 344269.0,
-    "gain": 10.087900161743164,
-    "frame_rate": 20.0
+    "exposure_time": 196729.0,
+    "gain": 9.58530044555664,
+    "frame_rate": 9.5
   }
 }

@@ -281,7 +281,29 @@ A: 修改 `config.json` 中的 `general.theme` 为 `dark` 或 `light`。
 
 ### Q: 如何启用调试模式？
 
-A: 设置 `config.json` 中的 `debug_mode: true`，可查看详细日志。
+A: 有两种方式开启 DEBUG 级别日志：
+
+**方式一：修改配置文件（推荐）**
+
+编辑 `config.json`，将 `logging.level` 从 `"INFO"` 改为 `"DEBUG"`：
+
+```json
+"logging": {
+    "level": "DEBUG",
+    ...
+}
+```
+
+**方式二：设置环境变量**
+
+启动时通过环境变量指定：
+
+```powershell
+set SMART_VISION_LOG_LEVEL=DEBUG
+python run_app.py
+```
+
+开启后可看到所有 DEBUG 级别日志（如健康检查详情等）。调试完毕记得改回 `INFO`，否则日志量较大。
 
 ### Q: 相机无法连接？
 

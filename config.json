@@ -90,7 +90,7 @@
   "debug_mode": false,
   "dev_mode": false,
   "server": {
-    "address": "39.104.202.123",
+    "address": "8.130.122.131",
     "port": 18880
   },
   "general": {
@@ -99,6 +99,7 @@
     "draw_boxes_ok": true,
     "draw_boxes_ng": true,
     "theme": "dark",
-    "ok_toast_duration": 2
+    "ok_toast_duration": 2,
+    "layout_mode": "split"
   }
 }

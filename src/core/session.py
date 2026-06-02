@@ -95,7 +95,7 @@ class SessionManager:
                     if self.auth_service and getattr(self.auth_service, "network_service", None) and self.auth_service.network_service.token:
                         data = self.auth_service.network_service.health_check()
                         try:
-                            logger.info(f"Health data: {data}")
+                            logger.debug(f"Health data: {data}")
                         except Exception:
                             pass
                         code = data.get("code")

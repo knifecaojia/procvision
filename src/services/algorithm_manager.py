@@ -1,4 +1,5 @@
 import os
+import hashlib
 import shutil
 import logging
 import zipfile
@@ -12,6 +13,9 @@ from src.runner.config import default_config, RunnerConfig
 from src.services.data_service import DataService
 
 logger = logging.getLogger(__name__)
+
+MAX_DOWNLOAD_RETRIES = 3
+RETRY_BACKOFF_BASE = 2.0
 
 class WorkerSignals(QObject):
     progress = Signal(int)
@@ -131,22 +135,18 @@ class AlgorithmManager:
             # Fill from Local Zip (Overrides description if local-only)
             # Check if corresponding zip exists
             expected_zip_name = f"{info['name']}-{info['version']}.zip"
-            
-            if expected_zip_name in downloaded_map:
-                d_item = downloaded_map[expected_zip_name]
-                info["local_path"] = d_item["path"]
+            matched_zip = downloaded_map.get(expected_zip_name)
+
+            if matched_zip:
+                info["local_path"] = matched_zip["path"]
                 info["status"] = "downloaded"
-                
-                # Get Zip Size
                 try:
-                    size_bytes = os.path.getsize(d_item["path"])
+                    size_bytes = os.path.getsize(matched_zip["path"])
                     info["size"] = f"{size_bytes / 1024 / 1024:.1f} MB"
-                    
-                    # Update last_updated using zip modification time
-                    mtime = os.path.getmtime(d_item["path"])
+                    mtime = os.path.getmtime(matched_zip["path"])
                     import datetime
                     info["last_updated"] = datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d')
-                except:
+                except Exception:
                     pass
             
             deployed_dir_new = os.path.join(self.runner_config.deployed_dir, f"{info['name']}-{info['version']}")
@@ -168,120 +168,196 @@ class AlgorithmManager:
         return sorted(unified_list, key=lambda x: x["name"])
 
     def download_algorithm(self, progress_callback, name: str, version: str):
-        """
-        Download algorithm from remote server using URL from data_service.
-        """
-        # 1. Get algorithm info to find the URL
+        target_path = os.path.join(self.runner_config.zips_dir, f"{name}-{version}.zip")
+
+        if os.path.exists(target_path) and not self._validate_local_zip(target_path):
+            logger.info(f"Algorithm {name}:{version} already downloaded at {target_path}")
+            progress_callback.emit(100)
+            return
+
+        if os.path.exists(target_path):
+            logger.warning(f"Removing corrupted zip: {target_path}")
+            try:
+                os.remove(target_path)
+            except Exception:
+                pass
+
         server_algorithms = self.data_service.get_algorithms()
         target_algo = None
         for item in server_algorithms:
             if item.get("name") == name and item.get("version") == version:
                 target_algo = item
                 break
-        
-        if not target_algo:
-             # Fallback: Maybe it's not in the list but we know name/version?
-             # Or we can't download if we don't have URL.
-             # Check if we have a local mock fallback (repo)
-             # This preserves local testing capability if server list is missing the item
-             logger.warning(f"Algorithm {name}:{version} not found in server list. Checking local assets...")
-        else:
-             download_url = target_algo.get("url")
-             logger.info(f"Downloading {name}:{version} from {download_url}")
-             
-             # If URL is a local file path (mock data might use file:// or just path)
-             # Or if it's http/https, we need a real download.
-             # Since we don't have requests/httpx in imports yet, let's assume we might need to add it 
-             # OR if this is a POC, we might still rely on local file copy if the URL is local.
-             
-             # The user instruction says: "使用算法数据中给出的url 下载算法"
-             # If the URL is "http://...", we need to implement HTTP download.
-             # If it is "/path/to/...", we copy.
-             
-             # Let's try to implement a robust downloader using urllib (standard lib) or just handling local copy if it is a file path.
-             
-             import urllib.request
-             import urllib.error
-             
-             target_path = os.path.join(self.runner_config.zips_dir, f"{name}-{version}.zip")
-             
-             if download_url and (download_url.startswith("http://") or download_url.startswith("https://")):
-                 try:
-                     def report_reporthook(block_num, block_size, total_size):
-                        if total_size > 0:
-                            percent = int((block_num * block_size * 100) / total_size)
-                            if percent % 5 == 0: 
-                                progress_callback.emit(percent)
 
-                     proxy_handler = urllib.request.ProxyHandler({})
-                     opener = urllib.request.build_opener(proxy_handler)
-                     urllib.request.install_opener(opener)
-                     urllib.request.urlretrieve(download_url, target_path, report_reporthook)
-                     progress_callback.emit(100)
-                     logger.info(f"Download completed: {target_path}")
-                     return
-                 except Exception as e:
-                     logger.error(f"HTTP download failed: {e}")
-                     raise Exception(f"Download failed: {e}")
-             
-             elif download_url and os.path.exists(download_url):
-                 # Local file copy (Mock scenario but driven by data)
-                 source_zip = download_url
-                 logger.info(f"Copying from local URL: {source_zip}")
-                 total_size = os.path.getsize(source_zip)
-                 copied = 0
-                 chunk_size = 1024 * 1024 # 1MB
-                 
-                 # Temp file to ensure atomicity or just simple copy
-                 # But to track progress we copy manually
-                 try:
-                     with open(source_zip, 'rb') as src, open(target_path, 'wb') as dst:
-                        while True:
-                            chunk = src.read(chunk_size)
-                            if not chunk:
-                                break
-                            dst.write(chunk)
-                            copied += len(chunk)
-                            percent = int((copied / total_size) * 100)
-                            progress_callback.emit(percent)
-                            time.sleep(0.05)
-                     
-                     # No size verification required for local copy as per user request
-                         
-                 except Exception as e:
-                     # Cleanup partial
-                     if os.path.exists(target_path):
-                         os.remove(target_path)
-                     raise e
-                     
-                 return
+        expected_size = None
+        expected_md5 = None
+        if target_algo:
+            raw_size = target_algo.get("size")
+            if raw_size is not None:
+                try:
+                    expected_size = int(str(raw_size).replace("MB", "").replace("KB", "").strip()) if isinstance(raw_size, str) else int(raw_size)
+                    if isinstance(raw_size, str) and "MB" in raw_size.upper():
+                        expected_size = expected_size * 1024 * 1024
+                    elif isinstance(raw_size, str) and "KB" in raw_size.upper():
+                        expected_size = expected_size * 1024
+                except Exception:
+                    expected_size = None
+            expected_md5 = (target_algo.get("md5") or target_algo.get("hash") or "").strip() or None
 
-        # Fallback to local 'assets/repo' if URL download failed or URL missing
-        # This keeps the previous logic as a safety net for development
-        repo_dir = os.path.join(os.getcwd(), "assets", "repo")
-        source_zip = os.path.join(repo_dir, f"{name}-{version}.zip")
-        
-        target_path = os.path.join(self.runner_config.zips_dir, f"{name}-{version}.zip")
-        
-        if os.path.exists(source_zip):
-            logger.info(f"Simulating download by copying from {source_zip}")
-            total_size = os.path.getsize(source_zip)
-            copied = 0
-            chunk_size = 1024 * 1024 # 1MB
-            
-            with open(source_zip, 'rb') as src, open(target_path, 'wb') as dst:
+        download_url = None
+        if target_algo:
+            download_url = target_algo.get("url")
+
+        if not download_url:
+            repo_dir = os.path.join(os.getcwd(), "assets", "repo")
+            source_zip = os.path.join(repo_dir, f"{name}-{version}.zip")
+            if os.path.exists(source_zip):
+                download_url = source_zip
+                logger.info(f"Using local fallback: {source_zip}")
+
+        if not download_url:
+            raise Exception(f"Algorithm source not found for {name}:{version}. Please check server data or local assets.")
+
+        last_error = None
+        for attempt in range(1, MAX_DOWNLOAD_RETRIES + 1):
+            try:
+                logger.info(f"Download attempt {attempt}/{MAX_DOWNLOAD_RETRIES} for {name}:{version}")
+                self._do_download(download_url, target_path, progress_callback, expected_size)
+                validation_error = self._validate_local_zip(target_path)
+                if validation_error:
+                    raise Exception(validation_error)
+                if expected_md5:
+                    self._verify_md5(target_path, expected_md5)
+                logger.info(f"Download completed and verified: {target_path}")
+                return
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Download attempt {attempt} failed: {e}")
+                if os.path.exists(target_path):
+                    try:
+                        os.remove(target_path)
+                    except Exception:
+                        pass
+                if attempt < MAX_DOWNLOAD_RETRIES:
+                    backoff = RETRY_BACKOFF_BASE ** (attempt - 1)
+                    logger.info(f"Retrying in {backoff:.1f}s...")
+                    time.sleep(backoff)
+
+        raise Exception(f"Download failed after {MAX_DOWNLOAD_RETRIES} attempts: {last_error}")
+
+    def _do_download(self, download_url: str, target_path: str, progress_callback, expected_size: Optional[int] = None):
+        tmp_path = target_path + ".download"
+        try:
+            if download_url.startswith("http://") or download_url.startswith("https://"):
+                self._download_http(download_url, tmp_path, progress_callback)
+            elif os.path.exists(download_url):
+                self._copy_local(download_url, tmp_path, progress_callback)
+            else:
+                raise Exception(f"Download source not accessible: {download_url}")
+
+            if expected_size is not None:
+                actual_size = os.path.getsize(tmp_path)
+                if actual_size != expected_size:
+                    raise Exception(f"Size mismatch: expected {expected_size} bytes, got {actual_size} bytes")
+
+            if os.path.exists(target_path):
+                os.remove(target_path)
+            os.replace(tmp_path, target_path)
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+            raise
+
+    def _download_http(self, url: str, tmp_path: str, progress_callback):
+        import urllib.request
+        import urllib.error
+        import ssl
+
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+        proxy_handler = urllib.request.ProxyHandler({})
+        https_handler = urllib.request.HTTPSHandler(context=ssl_ctx)
+        opener = urllib.request.build_opener(proxy_handler, https_handler)
+
+        try:
+            response = opener.open(url, timeout=120)
+            total_size = int(response.headers.get("Content-Length", 0))
+            downloaded = 0
+            chunk_size = 1024 * 1024
+
+            with open(tmp_path, "wb") as f:
                 while True:
-                    chunk = src.read(chunk_size)
+                    chunk = response.read(chunk_size)
                     if not chunk:
                         break
-                    dst.write(chunk)
-                    copied += len(chunk)
-                    percent = int((copied / total_size) * 100)
-                    progress_callback.emit(percent)
-                    time.sleep(0.05)
-            return
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        percent = min(99, int(downloaded * 100 / total_size))
+                        progress_callback.emit(percent)
 
-        raise Exception(f"Algorithm source not found for {name}:{version}. Please check server data or local assets.")
+            progress_callback.emit(100)
+            logger.info(f"HTTP download completed: {tmp_path} ({downloaded} bytes)")
+        except Exception as e:
+            logger.error(f"HTTP download failed: {e}")
+            raise Exception(f"HTTP download failed: {e}")
+
+    def _copy_local(self, src_path: str, tmp_path: str, progress_callback):
+        total_size = os.path.getsize(src_path)
+        copied = 0
+        chunk_size = 1024 * 1024
+
+        with open(src_path, "rb") as src, open(tmp_path, "wb") as dst:
+            while True:
+                chunk = src.read(chunk_size)
+                if not chunk:
+                    break
+                dst.write(chunk)
+                copied += len(chunk)
+                percent = int((copied / total_size) * 100)
+                progress_callback.emit(percent)
+                time.sleep(0.01)
+
+        logger.info(f"Local copy completed: {tmp_path} ({copied} bytes)")
+
+    @staticmethod
+    def _validate_local_zip(zip_path: str) -> Optional[str]:
+        if not os.path.exists(zip_path):
+            return "Downloaded file not found"
+        if os.path.getsize(zip_path) < 64:
+            return "Downloaded file is too small to be a valid ZIP"
+        try:
+            with zipfile.ZipFile(zip_path, "r") as z:
+                bad = z.testzip()
+                if bad is not None:
+                    return f"Corrupt entry in ZIP archive: {bad}"
+                namelist = z.namelist()
+                has_manifest = any(n.endswith("manifest.json") for n in namelist)
+                if not has_manifest:
+                    return "Invalid algorithm package: manifest.json not found in ZIP"
+            return None
+        except zipfile.BadZipFile:
+            return "Downloaded file is not a valid ZIP archive"
+        except Exception as e:
+            return f"ZIP validation failed: {e}"
+
+    @staticmethod
+    def _verify_md5(file_path: str, expected_md5: str):
+        md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                md5.update(chunk)
+        actual = md5.hexdigest()
+        if actual.lower() != expected_md5.lower():
+            raise Exception(f"MD5 mismatch: expected {expected_md5}, got {actual}")
+        logger.info(f"MD5 verified: {actual}")
 
     def deploy_algorithm(self, progress_callback, name: str, version: str):
         """Deploy task."""

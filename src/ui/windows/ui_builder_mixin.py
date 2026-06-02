@@ -24,12 +24,17 @@ class OverlayWidget(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setObjectName("processOverlay")
         self._boxes: List[QRect] = []
+        self._labels: List[str] = []
         self._status: DetectionStatus = 'idle'
         self._draw_ok: bool = True
         self._draw_ng: bool = True
 
     def set_boxes(self, boxes: List[QRect]):
         self._boxes = boxes
+        self.update()
+
+    def set_labels(self, labels: List[str]):
+        self._labels = labels or []
         self.update()
 
     def set_status(self, status: DetectionStatus):
@@ -62,13 +67,50 @@ class OverlayWidget(QWidget):
             fill_color = QColor(239, 68, 68, 60)
             label_bg = QColor(239, 68, 68, 220)
         painter.setPen(QPen(pen_color, 2))
-        for r in self._boxes:
+        for i, r in enumerate(self._boxes):
             painter.fillRect(r, fill_color)
             painter.drawRect(r)
-            label_rect = QRect(r.topLeft().x(), r.topLeft().y() - 22, 38, 20)
-            painter.fillRect(label_rect, label_bg)
+            text = self._labels[i] if i < len(self._labels) else ("NG" if self._status == 'fail' else "OK")
             painter.setPen(QPen(QColor(255, 255, 255), 1))
-            painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, "NG" if self._status == 'fail' else "OK")
+            font = painter.font()
+            font.setPixelSize(13)
+            painter.setFont(font)
+            fm = painter.fontMetrics()
+            tw = max(38, fm.horizontalAdvance(text) + 12)
+            th = max(20, fm.height() + 6)
+            label_rect = QRect(r.topLeft().x(), r.topLeft().y() - th - 2, tw, th)
+            painter.fillRect(label_rect, label_bg)
+            painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, text)
+            painter.setPen(QPen(pen_color, 2))
+        painter.end()
+
+
+class StatusIndicator(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("statusIndicator")
+        self.setFixedSize(20, 20)
+        self._state = "idle"
+        self._colors = {
+            "idle": "#6b7280",
+            "detecting": "#f59e0b",
+            "ok": "#22c55e",
+            "ng": "#ef4444",
+            "error": "#ef4444",
+        }
+
+    def set_state(self, state: str):
+        self._state = state
+        self.update()
+
+    def paintEvent(self, event):
+        from PySide6.QtGui import QPainter, QColor, QBrush
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color_hex = self._colors.get(self._state, "#6b7280")
+        painter.setBrush(QBrush(QColor(color_hex)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(2, 2, 16, 16)
         painter.end()
 
 
@@ -207,6 +249,15 @@ class UIBuilderMixin:
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         layout.addWidget(self._create_camera_controls_section())
+        self.layout_toggle_btn = QPushButton("🔀 分栏")
+        self.layout_toggle_btn.setObjectName("layoutToggleButton")
+        self.layout_toggle_btn.setFixedHeight(36)
+        self.layout_toggle_btn.setCheckable(True)
+        split_mode = getattr(self, "split_layout_mode", False)
+        self.layout_toggle_btn.setChecked(split_mode)
+        self.layout_toggle_btn.setText("🔀 单画面" if split_mode else "🔀 分栏")
+        self.layout_toggle_btn.clicked.connect(lambda checked: self.toggle_layout_mode(checked))
+        layout.addWidget(self.layout_toggle_btn)
         self.return_btn = QPushButton("← 返回任务列表")
         self.return_btn.setObjectName("returnButton")
         self.return_btn.setFixedHeight(36)
@@ -270,30 +321,19 @@ class UIBuilderMixin:
         layout = QHBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self._create_step_list_panel())
-        self.visual_area = self._create_visual_guidance_area()
+        self.step_list_panel = self._create_step_list_panel()
+        if getattr(self, "split_layout_mode", False):
+            self.step_list_panel.setVisible(False)
+        layout.addWidget(self.step_list_panel)
+        self.visual_area = self.create_visual_area_container()
         layout.addWidget(self.visual_area, 1)
-        return content
-
-    def _create_visual_guidance_area(self) -> QWidget:
-        container = QFrame()
-        container.setObjectName("visualGuidanceArea")
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.base_image_label = QLabel()
-        self.base_image_label.setObjectName("baseImageLabel")
-        self.base_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.base_image_label.setMinimumSize(720, 480)
-        self.base_image_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.reset_camera_placeholder()
-        layout.addWidget(self.base_image_label)
         self.overlay_widget = self._create_overlay_widget()
-        self.overlay_widget.setParent(container)
+        self.overlay_widget.setParent(self.base_image_label.parent())
         self.overlay_widget.setVisible(False)
         self.overlay_widget.setGeometry(self.base_image_label.geometry())
         self.overlay_widget.raise_()
-        self.base_image_label.installEventFilter(self._make_overlay_sync())
-        return container
+        self.reset_camera_placeholder()
+        return content
 
     def _create_overlay_widget(self) -> QWidget:
         w = OverlayWidget()
@@ -321,6 +361,13 @@ class UIBuilderMixin:
         text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon)
         layout.addWidget(text)
+        close_btn = QPushButton("✕")
+        close_btn.setObjectName("overlayCloseButton")
+        close_btn.setFixedSize(28, 28)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.clicked.connect(self._dismiss_overlay)
+        close_btn.setParent(widget)
+        widget._close_btn = close_btn
         return widget
 
     def _create_fail_overlay(self) -> QWidget:
@@ -358,6 +405,13 @@ class UIBuilderMixin:
         layout.addWidget(icon)
         layout.addWidget(text)
         layout.addWidget(error_card)
+        close_btn = QPushButton("✕")
+        close_btn.setObjectName("overlayCloseButton")
+        close_btn.setFixedSize(28, 28)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.clicked.connect(self._dismiss_overlay)
+        close_btn.setParent(widget)
+        widget._close_btn = close_btn
         return widget
 
     def _create_step_list_panel(self) -> QWidget:
@@ -421,6 +475,38 @@ class UIBuilderMixin:
         self._apply_step_card_state(card, step.status, name_label, desc_label)
         return card
 
+    def _create_step_bar_card(self, step) -> QWidget:
+        card = QFrame()
+        card.setObjectName("stepBarCard")
+        card.setCursor(Qt.CursorShape.PointingHandCursor)
+        card.setFixedWidth(130)
+        card.setMinimumHeight(60)
+        card.setProperty("stepStatus", step.status)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(2)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        num_label = QLabel(f"{step.id + 1}")
+        num_label.setObjectName("stepBarNumLabel")
+        num_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name_label = QLabel(step.name)
+        name_label.setObjectName("stepBarNameLabel")
+        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        try:
+            name_label.setWordWrap(False)
+        except Exception:
+            pass
+        layout.addWidget(num_label)
+        layout.addWidget(name_label)
+        self._apply_step_bar_card_state(card, step.status, num_label, name_label)
+        return card
+
+    def _apply_step_bar_card_state(self, card, status, num_label, name_label):
+        for w in (card, num_label, name_label):
+            if w:
+                w.setProperty("stepStatus", status)
+                refresh_widget_styles(w)
+
     def _create_footer_bar(self) -> QWidget:
         footer_frame = QFrame()
         footer_frame.setObjectName("footerBar")
@@ -458,23 +544,25 @@ class UIBuilderMixin:
 
     def _create_status_section(self) -> QWidget:
         section = QWidget()
-        layout = QVBoxLayout(section)
+        layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        section.setFixedWidth(250)
         section.setFixedHeight(120)
+
+        auto_active = getattr(self, "auto_detect_active", False)
         detecting = self.detection_status == "detecting"
         allowed = (self.camera_active or (self._last_qimage is not None)) and not detecting
         btn_text = "检测中" if detecting else "开始检测"
         self.start_detection_btn = QPushButton(btn_text)
         self.start_detection_btn.setObjectName("startDetectionButton")
-        self.start_detection_btn.setFixedSize(250, 120)
+        self.start_detection_btn.setFixedSize(200, 120)
         try:
             self.start_detection_btn.setFont(self.custom_font)
         except Exception:
             pass
         self.start_detection_btn.setEnabled(allowed)
+        self.start_detection_btn.setVisible(not auto_active)
         if allowed:
             try:
                 self.start_detection_btn.clicked.connect(self.on_start_detection)
@@ -486,34 +574,86 @@ class UIBuilderMixin:
             except Exception:
                 pass
         layout.addWidget(self.start_detection_btn)
+
+        auto_text = "停止自动" if auto_active else "自动检测"
+        self.auto_detect_btn = QPushButton(auto_text)
+        self.auto_detect_btn.setObjectName("autoDetectButton")
+        self.auto_detect_btn.setCheckable(True)
+        self.auto_detect_btn.setChecked(auto_active)
+        self.auto_detect_btn.setFixedSize(200, 120)
+        try:
+            self.auto_detect_btn.setFont(self.custom_font)
+        except Exception:
+            pass
+        auto_allowed = auto_active or allowed
+        self.auto_detect_btn.setEnabled(auto_allowed)
+        try:
+            self.auto_detect_btn.clicked.connect(self.toggle_auto_detect)
+        except Exception:
+            pass
+        layout.addWidget(self.auto_detect_btn)
+
+        self.status_indicator = StatusIndicator(section)
+        self.status_indicator.setVisible(auto_active)
+        layout.addWidget(self.status_indicator)
+
         return section
+
+    def _dismiss_overlay(self):
+        self._overlay_dismissed = True
+        pass_ov = getattr(self, 'pass_overlay', None)
+        fail_ov = getattr(self, 'fail_overlay', None)
+        if pass_ov is not None:
+            pass_ov.setVisible(False)
+        if fail_ov is not None:
+            fail_ov.setVisible(False)
+        if self.detection_status == 'fail':
+            try:
+                self._stop_ng_flash()
+            except Exception:
+                pass
+            self.detection_status = 'idle'
+            self.rebuild_status_section()
 
     def update_overlay_visibility(self):
         is_pass = self.detection_status == 'pass'
         is_fail = self.detection_status == 'fail'
+        dismissed = getattr(self, '_overlay_dismissed', False)
+        has_boxes = bool(getattr(self, 'detection_boxes', []))
         overlay = getattr(self, 'overlay_widget', None)
         pass_ov = getattr(self, 'pass_overlay', None)
         fail_ov = getattr(self, 'fail_overlay', None)
         if overlay is not None:
-            overlay.setVisible(is_pass or is_fail)
+            overlay.setVisible((is_pass or is_fail) or (dismissed and has_boxes))
             try:
-                overlay.set_status(self.detection_status)
+                paint_status = self.detection_status
+                if dismissed and paint_status == 'idle' and has_boxes:
+                    paint_status = self._last_paint_status if hasattr(self, '_last_paint_status') and self._last_paint_status in ('pass', 'fail') else 'fail'
+                else:
+                    self._last_paint_status = paint_status
+                overlay.set_status(paint_status)
                 overlay.set_boxes(self.detection_boxes or [])
+                overlay.set_labels(getattr(self, 'detection_labels', []) or [])
                 overlay.set_draw_options(bool(self.draw_boxes_ok), bool(self.draw_boxes_ng))
             except Exception:
                 pass
-        if pass_ov is not None:
-            pass_ov.setVisible(is_pass)
-        if fail_ov is not None:
-            fail_ov.setVisible(is_fail)
+        if not dismissed:
+            if pass_ov is not None:
+                pass_ov.setVisible(is_pass)
+            if fail_ov is not None:
+                fail_ov.setVisible(is_fail)
         try:
             if overlay is not None and overlay.isVisible():
-                target = pass_ov if is_pass else (fail_ov if is_fail else None)
+                target = pass_ov if (is_pass and not dismissed) else (fail_ov if (is_fail and not dismissed) else None)
                 if target is not None:
                     target.adjustSize()
                     sz = target.sizeHint()
                     g = self._compute_prompt_geometry(sz)
                     target.setGeometry(g)
+                    cb = getattr(target, '_close_btn', None)
+                    if cb is not None:
+                        cb.raise_()
+                        cb.move(target.width() - cb.width() - 4, 4)
                 overlay.raise_()
         except Exception:
             pass
@@ -543,30 +683,6 @@ class UIBuilderMixin:
                 self.overlay_widget.setGeometry(self.base_image_label.geometry())
         except Exception:
             pass
-
-    def _make_overlay_sync(self):
-        class _Sync(QObject):
-            def __init__(self, overlay, window):
-                super().__init__()
-                self._overlay = overlay
-                self._window = window
-            def eventFilter(self, obj, event):
-                if event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
-                    self._overlay.setGeometry(obj.geometry())
-                    try:
-                        target = None
-                        for child in self._overlay.children():
-                            if isinstance(child, QWidget) and child.isVisible():
-                                target = child
-                                break
-                        if target is not None:
-                            target.adjustSize()
-                            g = self._window._compute_prompt_geometry(target.sizeHint())
-                            target.setGeometry(g)
-                    except Exception:
-                        pass
-                return False
-        return _Sync(self.overlay_widget, self)
 
     def _make_time_debug_filter(self):
         class _Time(QObject):
@@ -669,6 +785,17 @@ class UIBuilderMixin:
             name_label = card_widget.findChild(QLabel, "stepNameLabel")
             desc_label = card_widget.findChild(QLabel, "stepDescLabel")
             self._apply_step_card_state(card_widget, step.status, name_label, desc_label)
+
+    def rebuild_step_bar_cards(self):
+        cards = getattr(self, "step_bar_card_widgets", [])
+        for step, card_widget in zip(self.steps, cards):
+            num_label = card_widget.findChild(QLabel, "stepBarNumLabel")
+            name_label = card_widget.findChild(QLabel, "stepBarNameLabel")
+            self._apply_step_bar_card_state(card_widget, step.status, num_label, name_label)
+        try:
+            self._scroll_step_bar_to_current()
+        except Exception:
+            pass
 
     def rebuild_status_section(self):
         old_section = self.status_section

@@ -259,6 +259,77 @@ def handle_external_detection(window) -> None:
         _report_step_result(window, get_step_code_from_payload(window._get_step_payload(window.current_step_index), window.current_step_index), {"status": "ERROR", "message": str(e)})
 
 
+def _collect_rects_from_data(data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rects: List[Dict[str, Any]] = []
+
+    position_rects = data.get("position_rects")
+    if isinstance(position_rects, (list, tuple)) and len(position_rects) > 0:
+        for r in position_rects:
+            if isinstance(r, dict) and any(k in r for k in ("x", "box_coords")):
+                rects.append(r)
+        if rects:
+            return rects
+
+    bbox = data.get("bbox")
+    if isinstance(bbox, (list, tuple)) and len(bbox) > 0:
+        for r in bbox:
+            if isinstance(r, dict) and any(k in r for k in ("x", "box_coords")):
+                rects.append(r)
+        if rects:
+            return rects
+
+    defect_rects = data.get("defect_rects") or []
+    if isinstance(defect_rects, (list, tuple)):
+        for r in defect_rects:
+            if isinstance(r, dict) and any(k in r for k in ("x", "box_coords")):
+                rects.append(r)
+
+    executed_steps = data.get("executed_steps") or []
+    if isinstance(executed_steps, (list, tuple)):
+        for s in executed_steps:
+            if not isinstance(s, dict):
+                continue
+            if s.get("is_correct") and s.get("bbox"):
+                bbox_data = s["bbox"]
+                if bbox_data and isinstance(bbox_data[0], (list, tuple)):
+                    for box in bbox_data:
+                        if len(box) >= 4:
+                            rects.append({"box_coords": list(box[:4])})
+                else:
+                    if len(bbox_data) >= 4:
+                        rects.append({"box_coords": list(bbox_data[:4])})
+
+    return rects
+
+
+def _build_box_labels(data: Dict[str, Any], box_count: int) -> List[str]:
+    labels: List[str] = []
+    ng_reason_raw = str(data.get("ng_reason") or "").strip()
+
+    if ng_reason_raw and "|" in ng_reason_raw:
+        parts = [p.strip() for p in ng_reason_raw.split("|") if p.strip()]
+    elif ng_reason_raw:
+        parts = [ng_reason_raw]
+    else:
+        parts = []
+
+    source_rects = data.get("position_rects") or data.get("bbox") or data.get("defect_rects") or []
+    for i in range(box_count):
+        if i < len(parts):
+            labels.append(parts[i])
+        elif isinstance(source_rects, list) and i < len(source_rects):
+            r = source_rects[i]
+            if isinstance(r, dict):
+                lbl = str(r.get("label") or "").strip()
+                labels.append(lbl if lbl else f"缺陷{i + 1}")
+            else:
+                labels.append(f"缺陷{i + 1}")
+        else:
+            labels.append(f"缺陷{i + 1}")
+
+    return labels
+
+
 def _process_algo_result(window, result: Dict[str, Any], step_code: str, step_number: int, idx: int):
     status = str(result.get('status', '')).upper()
     if status == 'OK':
@@ -276,20 +347,9 @@ def _process_algo_result(window, result: Dict[str, Any], step_code: str, step_nu
 def _handle_detection_ok(window, data: Dict, step_code: str, step_number: int, idx: int):
     logger.info(f"Detection OK: step={step_number}, data={json.dumps(data, ensure_ascii=False, default=str)}")
 
-    executed_steps = data.get("executed_steps", [])
-    valid_rects = []
-    for s in executed_steps:
-        if s.get("is_correct") and s.get("bbox"):
-            bbox_data = s["bbox"]
-            if bbox_data and isinstance(bbox_data[0], (list, tuple)):
-                for box in bbox_data:
-                    if len(box) >= 4:
-                        valid_rects.append({"box_coords": list(box[:4])})
-            else:
-                if len(bbox_data) >= 4:
-                    valid_rects.append({"box_coords": list(bbox_data[:4])})
-
+    valid_rects = _collect_rects_from_data(data)
     window.detection_boxes = window._ng_regions_to_rects(valid_rects)
+    window.detection_labels = _build_box_labels(data, len(window.detection_boxes))
     window.detection_status = 'pass'
     try:
         window._set_instruction_text("执行成功")
@@ -308,8 +368,9 @@ def _handle_detection_ok(window, data: Dict, step_code: str, step_number: int, i
 
 def _handle_detection_ng(window, data: Dict, step_code: str, step_number: int, idx: int):
     logger.warning(f"Detection NG: step={step_number}, data={json.dumps(data, ensure_ascii=False, default=str)}")
-    defect_rects = data.get('defect_rects', [])
-    window.detection_boxes = window._ng_regions_to_rects(defect_rects)
+    valid_rects = _collect_rects_from_data(data)
+    window.detection_boxes = window._ng_regions_to_rects(valid_rects)
+    window.detection_labels = _build_box_labels(data, len(window.detection_boxes))
     window.detection_status = 'fail'
     try:
         ng_reason = str(data.get("ng_reason") or "").strip()

@@ -4,8 +4,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtGui import QImage
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QImage, QPixmap
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +198,8 @@ class GuideImageMixin:
             self._prune_guide_cache(int(getattr(self, "current_step_index", 0)))
             if int(step_index) == int(getattr(self, "current_step_index", 0)):
                 self._start_guide_download(int(step_index) + 1, prefetch=True)
+                if getattr(self, "split_layout_mode", False):
+                    self._display_guide_image(int(step_index))
         else:
             self._guide_errors[int(step_index)] = str(message or "guide image download failed")
             logger.warning("Guide image failed: step_index=%s error=%s", int(step_index), message)
@@ -206,3 +208,27 @@ class GuideImageMixin:
                     self.show_toast(f"引导图加载失败: {message}", False)
                 except Exception:
                     pass
+
+    def _display_guide_image(self, step_index: int) -> None:
+        label = getattr(self, "guide_image_label", None)
+        if label is None:
+            return
+        qi = self._guide_qimages.get(int(step_index))
+        if qi is None or qi.isNull():
+            label.setText("暂无引导图")
+            label.setPixmap(QPixmap())
+            return
+        pm = QPixmap.fromImage(qi)
+        spm = pm.scaled(
+            label.width(), label.height(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        label.setPixmap(spm)
+        label.setText("")
+
+    def _clear_guide_image_display(self) -> None:
+        label = getattr(self, "guide_image_label", None)
+        if label is not None:
+            label.clear()
+            label.setText("暂无引导图")

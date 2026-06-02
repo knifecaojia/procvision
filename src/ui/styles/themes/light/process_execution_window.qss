@@ -274,6 +274,23 @@ QPushButton#skipButton:hover {
     background-color: rgba(239, 68, 68, 0.1);
 }
 
+QPushButton#overlayCloseButton {
+    background-color: rgba(0, 0, 0, 0.4);
+    border: none;
+    border-radius: 14px;
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: bold;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
+}
+
+QPushButton#overlayCloseButton:hover {
+    background-color: rgba(0, 0, 0, 0.6);
+}
+
 #stepListPanel {
     background-color: #E0E7F6;
     border-right: 1px solid #C7D4EA;
@@ -384,6 +401,92 @@ QPushButton#startDetectionButton:disabled {
     color: #9ca3af;
 }
 
+QPushButton#autoDetectButton {
+    background-color: #2563eb;
+    border: none;
+    color: #ffffff;
+    border-radius: 4px;
+    font-size: 22px;
+    font-weight: 700;
+    padding: 0;
+}
+
+QPushButton#autoDetectButton:hover {
+    background-color: #1d4ed8;
+}
+
+QPushButton#autoDetectButton:checked {
+    background-color: #dc2626;
+}
+
+QPushButton#autoDetectButton:checked:hover {
+    background-color: #b91c1c;
+}
+
+QPushButton#autoDetectButton:disabled {
+    background-color: #D0D7E3;
+    color: #9ca3af;
+}
+
+#stepBarContainer {
+    background-color: #f0f0f0;
+    border-bottom: 1px solid #d0d0d0;
+}
+
+QScrollArea#stepBarScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+QWidget#stepBarStepsWidget {
+    background-color: transparent;
+}
+
+QFrame#stepBarCard {
+    border-radius: 6px;
+    padding: 4px 8px;
+    background-color: #ffffff;
+    border: 1px solid #d0d0d0;
+}
+
+QFrame#stepBarCard[stepStatus="current"] {
+    background-color: #fff7ed;
+    border: 2px solid #f97316;
+}
+
+QFrame#stepBarCard[stepStatus="completed"] {
+    border: 1px solid rgba(34, 197, 94, 0.5);
+    background-color: #f0fdf4;
+}
+
+#stepBarNumLabel {
+    font-size: 14px;
+    color: #6b7280;
+    font-weight: bold;
+}
+
+#stepBarNumLabel[stepStatus="current"] {
+    color: #f97316;
+}
+
+#stepBarNumLabel[stepStatus="completed"] {
+    color: #22c55e;
+}
+
+#stepBarNameLabel {
+    font-size: 16px;
+    color: #6b7280;
+}
+
+#stepBarNameLabel[stepStatus="current"] {
+    color: #ea580c;
+    font-weight: bold;
+}
+
+#stepBarNameLabel[stepStatus="completed"] {
+    color: #16a34a;
+}
+
 #completionDialog {
     background-color: #FFFFFF;
 }
@@ -413,4 +516,65 @@ QPushButton#startDetectionButton:disabled {
 
 #completionDialog QPushButton:hover {
     background-color: #16a34a;
+}
+
+QPushButton#layoutToggleButton {
+    background-color: #f3f4f6;
+    border: 1px solid #d1d5db;
+    color: #6b7280;
+    border-radius: 4px;
+    padding: 0 12px;
+    font-size: 14px;
+}
+
+QPushButton#layoutToggleButton:hover {
+    border: 1px solid #f97316;
+    color: #f97316;
+}
+
+QPushButton#layoutToggleButton:checked {
+    border: 1px solid #f97316;
+    color: #f97316;
+    background-color: rgba(249, 115, 22, 0.08);
+}
+
+#guideImageArea {
+    background-color: #ffffff;
+}
+
+#guideImageLabel {
+    background-color: #f9fafb;
+    border: 1px solid #e5e7eb;
+    color: #9ca3af;
+    font-size: 16px;
+}
+
+#guideImageTitle {
+    background-color: #f3f4f6;
+    color: #f97316;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 6px 12px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+#cameraImageTitle {
+    background-color: #f3f4f6;
+    color: #22c55e;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 6px 12px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+#splitSeparator {
+    background-color: #d1d5db;
+}
+
+#splitCameraArea {
+    background-color: #ffffff;
+}
+
+QStackedWidget#viewStack {
+    background-color: #ffffff;
 }

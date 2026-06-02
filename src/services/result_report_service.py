@@ -160,7 +160,7 @@ class ResultReportService:
 
     def _encode_qimage_jpeg(self, qimage: object, *, max_bytes: int) -> Tuple[bytes, str]:
         try:
-            from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+            from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
             from PySide6.QtGui import QImage
         except Exception as e:
             raise RuntimeError(f"PySide6 not available for image encoding: {e}")
@@ -193,7 +193,7 @@ class ResultReportService:
                 raise RuntimeError("Failed to encode image as JPEG")
             return bytes(ba)
 
-        def pick_quality(img: object) -> bytes:
+        def pick_quality(img: object) -> Optional[bytes]:
             best: Optional[bytes] = None
             low = 5
             high = 95
@@ -210,20 +210,45 @@ class ResultReportService:
             b = encode_jpeg(img, 1)
             if len(b) <= int(max_bytes):
                 return b
-            raise RuntimeError(f"JPEG too large even at min quality: size={len(b)} max={int(max_bytes)}")
+            return None
+
+        def scaled_image(img: QImage, max_dim: int) -> QImage:
+            if img.width() <= max_dim and img.height() <= max_dim:
+                return img
+            return img.scaled(
+                max_dim, max_dim,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+
+        scale_targets = [4096, 2048, 1024]
+
+        for max_dim in scale_targets:
+            candidate = scaled_image(qi, max_dim)
+            data = pick_quality(candidate)
+            if data is not None:
+                return data, "image/jpeg"
 
         try:
-            data = pick_quality(qi)
-            return data, "image/jpeg"
-        except Exception:
-            try:
-                if isinstance(qi, QImage):
-                    gray = qi.convertToFormat(QImage.Format.Format_Grayscale8)
-                    data = pick_quality(gray)
+            gray = qi.convertToFormat(QImage.Format.Format_Grayscale8)
+            for max_dim in scale_targets:
+                candidate = scaled_image(gray, max_dim)
+                data = pick_quality(candidate)
+                if data is not None:
                     return data, "image/jpeg"
-            except Exception:
-                pass
-            raise
+        except Exception:
+            pass
+
+        try:
+            tiny = scaled_image(qi, 512)
+            b = encode_jpeg(tiny, 1)
+            return b, "image/jpeg"
+        except Exception:
+            pass
+
+        raise RuntimeError(
+            f"Image encoding failed: unable to compress within {int(max_bytes)} bytes"
+        )
 
     def _sanitize_url(self, url: str) -> str:
         s = str(url or "").strip()

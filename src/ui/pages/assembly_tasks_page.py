@@ -477,13 +477,12 @@ class AssemblyTasksPage(QFrame):
 
             action_parts = []
             if status_code in {"-1", "-2"}:
-                action_parts.append(action_button("人工通过", f"app://manual_pass?work_order={task_no}", "success"))
+                action_parts.append(action_disabled("不可操作"))
             elif status_code in {"1", "2"}:
                 if deployed:
                     action_parts.append(action_button("启动", f"app://start?work_order={task_no}", "primary"))
                 else:
                     action_parts.append(action_disabled("启动", deploy_label or "未部署"))
-                action_parts.append(action_button("人工通过", f"app://manual_pass?work_order={task_no}", "success"))
             elif status_code in {"3", "4"}:
                 action_parts.append(action_disabled("不可操作"))
             else:

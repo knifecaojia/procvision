@@ -384,7 +384,7 @@ class UIBuilderMixin:
         self.retry_btn = QPushButton("重新检测")
         self.retry_btn.setObjectName("retryButton")
         self.retry_btn.setFixedHeight(36)
-        self.skip_btn = QPushButton("跳过")
+        self.skip_btn = QPushButton("人工通过")
         self.skip_btn.setObjectName("skipButton")
         self.skip_btn.setFixedHeight(36)
         button_layout.addWidget(self.retry_btn)

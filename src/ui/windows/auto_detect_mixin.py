@@ -160,7 +160,6 @@ class AutoDetectController:
         self._active = False
         self._worker: Optional[AutoDetectWorker] = None
         self._retry_timer: Optional[QTimer] = None
-        self._advance_delay = 1500
         self._ng_retry_delay = 2000
         self._trace_service = DetectionTaskTraceService()
 
@@ -172,17 +171,30 @@ class AutoDetectController:
         if self._active:
             return
         self._active = True
+        self._window.auto_detect_active = True
         logger.info("Auto detect started")
         self._run_step()
 
-    def stop(self):
-        if not self._active:
-            return
+    def stop(self, *, reset_detection_state: bool = True):
+        was_active = self._active
         self._active = False
+        w = self._window
+        w.auto_detect_active = False
+        if not was_active and not reset_detection_state:
+            return
         self._stop_worker()
         self._stop_retry_timer()
-        self._window.clear_preview_annotation()
-        self._window.reset_auto_detect_ng_latch()
+        w.clear_preview_annotation()
+        w.reset_auto_detect_ng_latch()
+        if reset_detection_state:
+            w._stop_ng_flash()
+            w.detection_status = 'idle'
+            w.detection_boxes = []
+            w.detection_labels = []
+            w._overlay_dismissed = False
+            w.update_overlay_visibility()
+            w.rebuild_status_section()
+            self._update_indicator("idle")
         logger.info("Auto detect stopped")
 
     def clear_cache(self):
@@ -372,7 +384,6 @@ class AutoDetectController:
     def _handle_error(self, msg: str):
         logger.error("Auto detect error: %s", msg)
         w = self._window
-        w.auto_detect_active = False
         w.detection_status = 'fail'
         w.detection_boxes = []
         w.detection_labels = []
@@ -384,7 +395,7 @@ class AutoDetectController:
         w.update_overlay_visibility()
         w.rebuild_status_section()
         self._update_indicator("error")
-        self.stop()
+        self.stop(reset_detection_state=False)
         try:
             w.show_toast(f"自动检测已停止: {msg}", False)
         except Exception:

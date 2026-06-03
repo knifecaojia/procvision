@@ -302,12 +302,9 @@ class ProcessExecutionWindow(
                 if btn:
                     btn.setChecked(False)
                 return
-            self.auto_detect_active = True
             self._auto_detect_controller.start()
         else:
-            self.auto_detect_active = False
             self._auto_detect_controller.stop()
-        self.rebuild_status_section()
 
     def _mark_task_running_once(self) -> None:
         if getattr(self, "_task_status_started", False):
@@ -447,7 +444,6 @@ class ProcessExecutionWindow(
             except Exception:
                 pass
             if self.auto_detect_active:
-                self.auto_detect_active = False
                 self._auto_detect_controller.stop()
                 self.close()
                 return
@@ -658,8 +654,7 @@ class ProcessExecutionWindow(
     def closeEvent(self, event):
         self._closing = True
         self._stop_ng_flash()
-        self.auto_detect_active = False
-        self._auto_detect_controller.stop()
+        self._auto_detect_controller.stop(reset_detection_state=False)
         if self.preview_worker:
             self.preview_worker.stop()
             self.preview_worker.wait(1000)

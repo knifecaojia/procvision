@@ -598,6 +598,10 @@ class UIBuilderMixin:
             fail_ov.setVisible(False)
         if self.detection_status == 'fail':
             try:
+                self._set_relay_ng_active(False, "overlay_dismiss")
+            except Exception:
+                pass
+            try:
                 self._stop_ng_flash()
             except Exception:
                 pass

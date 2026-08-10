@@ -28,6 +28,7 @@ from ..styles import (
 from .ui_builder_mixin import UIBuilderMixin, StepStatus, DetectionStatus
 from .split_view_mixin import SplitViewMixin
 from .camera_mixin import CameraMixin
+from .process_camera_panel_mixin import ProcessCameraPanelMixin
 from .guide_image_mixin import GuideImageMixin
 from .detection_mixin import (
     NgFlashController,
@@ -50,6 +51,7 @@ class ProcessStep:
 
 
 class ProcessExecutionWindow(
+    ProcessCameraPanelMixin,
     UIBuilderMixin,
     SplitViewMixin,
     CameraMixin,
@@ -309,6 +311,9 @@ class ProcessExecutionWindow(
     def _mark_task_running_once(self) -> None:
         if getattr(self, "_task_status_started", False):
             return
+        if bool(getattr(self, "is_simulated", False)):
+            self._task_status_started = True
+            return
         try:
             task_no = str(self.process_data.get("task_no") or "").strip()
             if not task_no:
@@ -388,6 +393,8 @@ class ProcessExecutionWindow(
         if not self.camera_active and self._last_qimage is None:
             return
         if self.detection_status in ('pass', 'fail'):
+            if self.detection_status == 'fail':
+                self._set_relay_ng_active(False, "manual_restart_detection")
             self._stop_ng_flash()
             self.detection_status = 'idle'
             self.detection_boxes = []
@@ -407,6 +414,7 @@ class ProcessExecutionWindow(
 
     def on_retry_detection(self):
         logger.info("Retrying detection")
+        self._set_relay_ng_active(False, "manual_retry")
         self._stop_ng_flash()
         self.detection_status = 'idle'
         self.detection_boxes = []
@@ -424,6 +432,7 @@ class ProcessExecutionWindow(
     def on_stop_detection(self):
         if self.detection_timer and self.detection_timer.isActive():
             self.detection_timer.stop()
+        self._set_relay_ng_active(False, "manual_stop")
         self.detection_status = 'idle'
         self.detection_boxes = []
         self.detection_labels = []
@@ -433,16 +442,18 @@ class ProcessExecutionWindow(
         self.rebuild_status_section()
 
     def advance_to_next_step(self):
+        self._set_relay_ng_active(False, "advance_step")
         if self.current_step_index >= len(self.steps) - 1:
             logger.info("All steps completed")
             self.set_step_status(self.current_step_index, 'completed')
-            try:
-                from src.services.result_report_service import ResultReportService
-                ResultReportService().enqueue_task_status_update(
-                    task_no=str(self.process_data.get("task_no") or ""), status=3,
-                )
-            except Exception:
-                pass
+            if not bool(getattr(self, "is_simulated", False)):
+                try:
+                    from src.services.result_report_service import ResultReportService
+                    ResultReportService().enqueue_task_status_update(
+                        task_no=str(self.process_data.get("task_no") or ""), status=3,
+                    )
+                except Exception:
+                    pass
             if self.auto_detect_active:
                 self._auto_detect_controller.stop()
                 self.close()
@@ -568,6 +579,14 @@ class ProcessExecutionWindow(
             pass
         return 2
 
+    def _set_relay_ng_active(self, active: bool, source: str) -> None:
+        try:
+            from src.services.relay_service import RelayService
+
+            RelayService().sync_with_ng(bool(active), source=source)
+        except Exception:
+            logger.exception("Failed to sync relay NG state: active=%s source=%s", active, source)
+
     def show_completion_dialog(self):
         from PySide6.QtWidgets import QDialog, QDialogButtonBox
         dialog = QDialog(self)
@@ -613,6 +632,7 @@ class ProcessExecutionWindow(
             self.close()
 
     def reset_for_next_product(self):
+        self._set_relay_ng_active(False, "reset_next_product")
         for i, step in enumerate(self.steps):
             step.status = 'current' if i == 0 else 'pending'
         self.current_step_index = 0
@@ -653,6 +673,7 @@ class ProcessExecutionWindow(
 
     def closeEvent(self, event):
         self._closing = True
+        self._set_relay_ng_active(False, "process_window_close")
         self._stop_ng_flash()
         self._auto_detect_controller.stop(reset_detection_state=False)
         if self.preview_worker:

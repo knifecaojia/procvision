@@ -159,7 +159,12 @@ class IndustrialVisionApp:
             except ImportError:
                 from src.camera import CameraService
 
-            self.camera_service = CameraService(self.config.camera)
+            camera_config = self.config.camera
+            presets_dir = Path(str(camera_config.presets_directory)) if camera_config.presets_directory else None
+            self.camera_service = CameraService(
+                sdk_path=camera_config.sdk_path,
+                presets_dir=presets_dir,
+            )
             self.logger.info("Camera service initialized")
         except Exception as e:
             self.logger.error(f"Failed to initialize camera service: {e}")
@@ -307,6 +312,16 @@ class IndustrialVisionApp:
 
             if hasattr(self, 'main_window') and self.main_window:
                 self.main_window.close()
+
+            try:
+                from src.services.relay_service import RelayService
+
+                relay_service = RelayService()
+                relay_service.turn_off(source="app_cleanup")
+                relay_service.close()
+                self.logger.info("Relay service cleaned up")
+            except Exception as e:
+                self.logger.warning(f"Failed to clean up relay service: {e}")
 
             # Save configuration
             try:

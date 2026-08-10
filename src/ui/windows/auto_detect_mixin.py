@@ -16,6 +16,7 @@ from src.services.detection_image_annotation_service import (
 from src.services.detection_task_trace_service import DetectionTaskTraceService
 
 logger = logging.getLogger(__name__)
+SIMULATED_PASS_PROBABILITY = 0.3
 
 
 class AutoDetectWorker(QThread):
@@ -48,7 +49,7 @@ class AutoDetectWorker(QThread):
         time.sleep(1.5)
         if self.isInterruptionRequested():
             return
-        passed = random.random() < 0.7
+        passed = random.random() < SIMULATED_PASS_PROBABILITY
         if passed:
             result = {"status": "OK", "simulated": True}
         else:
@@ -187,6 +188,7 @@ class AutoDetectController:
         w.clear_preview_annotation()
         w.reset_auto_detect_ng_latch()
         if reset_detection_state:
+            w._set_relay_ng_active(False, "auto_detect_stop")
             w._stop_ng_flash()
             w.detection_status = 'idle'
             w.detection_boxes = []
@@ -356,6 +358,7 @@ class AutoDetectController:
         w.update_overlay_visibility()
         w.rebuild_status_section()
         self._update_indicator("ng")
+        w._set_relay_ng_active(True, "auto_ng")
 
         from .detection_mixin import save_local_record, get_step_code_from_payload
         sp = w._get_step_payload(w.current_step_index)
@@ -421,6 +424,7 @@ class AutoDetectController:
         if not self._active:
             return
         w = self._window
+        w._set_relay_ng_active(False, "auto_ng_retry")
         w._stop_ng_flash()
         w.detection_status = 'idle'
         w.detection_boxes = []
@@ -430,9 +434,11 @@ class AutoDetectController:
         self._run_step()
 
     def _report_ng(self, ng_result: Dict, ng_qimage: Optional[QImage], ng_step_code: str) -> None:
+        w = self._window
+        if bool(getattr(w, "is_simulated", False)):
+            return
         try:
             from src.services.result_report_service import ResultReportService
-            w = self._window
             svc = ResultReportService()
             task_no = str(w.process_data.get("task_no") or "")
             process_code = str(w.process_data.get("process_code") or "")
@@ -449,9 +455,11 @@ class AutoDetectController:
             logger.warning("Failed to report NG: %s", e)
 
     def _report_ok(self, ok_result: Dict, ok_qimage: Optional[QImage], ok_step_code: str) -> None:
+        w = self._window
+        if bool(getattr(w, "is_simulated", False)):
+            return
         try:
             from src.services.result_report_service import ResultReportService
-            w = self._window
             svc = ResultReportService()
             task_no = str(w.process_data.get("task_no") or "")
             process_code = str(w.process_data.get("process_code") or "")

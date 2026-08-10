@@ -12,30 +12,24 @@ logger = logging.getLogger(__name__)
 class CameraConnectWorker(QThread):
     finished = Signal(bool, str)
 
-    def __init__(self, service, camera_info):
+    def __init__(self, service):
         super().__init__()
         self.service = service
-        self.info = camera_info
 
     def run(self):
         try:
-            if not self.service.connect_camera(self.info):
-                self.finished.emit(False, "Failed to connect to camera")
+            success, _camera_info, message = self.service.connect_bound_camera(force_refresh=True)
+            if not success:
+                self.finished.emit(False, message or "连接绑定相机失败")
                 return
-            device = self.service.get_connected_camera()
-            if not device:
-                self.finished.emit(False, "No camera device retrieved after connection")
-                return
-            try:
-                device.start_stream()
-            except Exception as e:
+            if not self.service.start_preview():
                 try:
                     self.service.disconnect_camera()
                 except Exception:
                     pass
-                self.finished.emit(False, f"Failed to start stream: {e}")
+                self.finished.emit(False, "预览启动失败")
                 return
-            self.finished.emit(True, "Connected")
+            self.finished.emit(True, "已连接绑定相机")
         except Exception as e:
             self.finished.emit(False, f"Connection error: {e}")
 
@@ -43,141 +37,117 @@ class CameraConnectWorker(QThread):
 class CameraMixin:
     def refresh_camera_list(self, auto_start: bool = False):
         start_time = datetime.now()
-        self.camera_combo.clear()
-        self.available_cameras = []
-
         if not self.camera_service:
-            self.camera_combo.addItem("无相机服务")
-            self.camera_combo.setVisible(False)
-            self.refresh_btn.setVisible(False)
-            self.camera_toggle_btn.setVisible(False)
+            self.update_bound_camera_panel(
+                "无相机服务",
+                "未绑定",
+                "当前窗口未初始化相机服务",
+                action_enabled=False,
+                connected=False,
+            )
             logger.info("Camera refresh took %.2fms (no service)", (datetime.now() - start_time).total_seconds() * 1000)
             return
 
         try:
-            cameras = self.camera_service.discover_cameras(force_refresh=False)
-            self.available_cameras = cameras
-            count = len(cameras)
-
-            if cameras:
-                for camera in cameras:
-                    serial = camera.serial_number or "N/A"
-                    self.camera_combo.addItem(f"{camera.name} ({serial})")
-                logger.info("Found %d cameras", count)
-            else:
-                self.camera_combo.addItem("未发现相机")
-                logger.warning("No cameras found")
-
-            connected_device = self.camera_service.get_connected_camera()
-            is_streaming = self.camera_service.is_streaming()
-
-            if connected_device and is_streaming:
-                logger.info("Camera already connected: %s, resuming preview", connected_device.info.name)
-                index = -1
-                for i, cam in enumerate(cameras):
-                    if cam.id == connected_device.info.id:
-                        index = i
-                        break
-                if index >= 0:
-                    self.camera_combo.setCurrentIndex(index)
-
-                if auto_start and count <= 1:
-                    self.camera_combo.setVisible(False)
-                    self.refresh_btn.setVisible(False)
-                    self.camera_toggle_btn.setVisible(False)
-                else:
-                    self.camera_combo.setVisible(True)
-                    self.refresh_btn.setVisible(True)
-                    self.camera_toggle_btn.setVisible(True)
-
-                self.start_camera_preview()
-                return
-
-            if auto_start:
-                if count <= 1:
-                    self.camera_combo.setVisible(False)
-                    self.refresh_btn.setVisible(False)
-                    if count == 1:
-                        self.camera_toggle_btn.setVisible(False)
-                        logger.info("Auto-starting single available camera")
-                        self.camera_toggle_btn.setChecked(True)
-                        self.start_camera_preview()
-                    else:
-                        self.camera_toggle_btn.setVisible(False)
-                else:
-                    self.camera_combo.setVisible(True)
-                    self.refresh_btn.setVisible(True)
-                    self.camera_toggle_btn.setVisible(True)
-            else:
-                if count > 1:
-                    self.camera_combo.setVisible(True)
-                    self.refresh_btn.setVisible(True)
-                    self.camera_toggle_btn.setVisible(True)
+            state = self.camera_service.get_bound_camera_runtime_state(force_refresh=False)
+            self.update_bound_camera_panel(
+                state["summary"],
+                state["status_text"],
+                state["detail"],
+                action_enabled=bool(state["has_binding"]),
+                connected=bool(state["connected"]),
+            )
+            if state["connected"] and state["streaming"] and not self.preview_worker:
+                logger.info("Bound camera already streaming, attaching preview worker")
+                self.start_camera_preview(force_reconnect=False)
+            elif auto_start and state["has_binding"] and state["can_connect"]:
+                logger.info("Auto-connecting bound camera for process execution")
+                self.start_camera_preview(force_reconnect=False)
 
         except Exception as e:
             logger.error("Failed to discover cameras: %s", e)
-            self.camera_combo.addItem("相机发现失败")
-            self.camera_combo.setVisible(True)
-            self.refresh_btn.setVisible(True)
-            self.camera_toggle_btn.setVisible(True)
+            self.update_bound_camera_panel(
+                "绑定相机状态获取失败",
+                "连接失败",
+                str(e),
+                action_enabled=True,
+                connected=False,
+            )
 
         total_time = (datetime.now() - start_time).total_seconds() * 1000
         logger.info("Camera refresh total took %.2fms", total_time)
 
-    def toggle_camera(self, checked: bool):
-        if checked:
-            self.start_camera_preview()
-        else:
-            self.stop_camera_preview()
+    def toggle_camera(self, _checked: bool = False):
+        force_reconnect = bool(self.camera_active)
+        if self.camera_service and self.camera_service.get_connected_camera():
+            force_reconnect = True
+        self.start_camera_preview(force_reconnect=force_reconnect)
 
-    def start_camera_preview(self):
+    def start_camera_preview(self, force_reconnect: bool = False):
         if not self.camera_service:
             logger.warning("No camera service available")
-            self.camera_toggle_btn.setChecked(False)
-            return
-        if not self.available_cameras:
-            logger.warning("No cameras available")
-            self.camera_toggle_btn.setChecked(False)
+            self.camera_toggle_btn.setEnabled(False)
             return
 
-        camera_index = self.camera_combo.currentIndex()
-        if camera_index < 0 or camera_index >= len(self.available_cameras):
-            logger.warning("Invalid camera selection")
-            self.camera_toggle_btn.setChecked(False)
+        state = self.camera_service.get_bound_camera_runtime_state(force_refresh=True)
+        if not state["has_binding"]:
+            self.show_toast("请先在相机管理页绑定相机", False)
+            self.refresh_camera_list(auto_start=False)
             return
 
-        camera_info = self.available_cameras[camera_index]
+        camera_info = state["camera"]
+        if not camera_info:
+            self.show_toast("未发现已绑定相机，请检查设备是否在线", False)
+            self.refresh_camera_list(auto_start=False)
+            return
+
+        if camera_info.accessible is False and not state["connected"]:
+            self.show_toast("当前绑定相机正在使用中或不可访问", False)
+            self.refresh_camera_list(auto_start=False)
+            return
+
         current_device = self.camera_service.get_connected_camera()
-        if current_device and current_device.info.id == camera_info.id:
-            logger.info("Camera %s already connected, attaching preview", camera_info.name)
-            if not self.camera_service.is_streaming():
-                self.camera_service.start_preview()
+        if current_device and state["connected"] and not force_reconnect:
+            logger.info("Bound camera %s already connected, attaching preview", camera_info.name)
+            if not self.camera_service.is_streaming() and not self.camera_service.start_preview():
+                self.show_toast("启动相机预览失败", False)
+                return
             self._start_preview_worker(current_device)
             return
 
+        if force_reconnect and current_device:
+            self.stop_camera_preview()
+
         self.camera_toggle_btn.setEnabled(False)
-        self.camera_combo.setEnabled(False)
         self.refresh_btn.setEnabled(False)
         self.camera_toggle_btn.setText("连接中...")
+        self.update_bound_camera_panel(
+            state["summary"],
+            "连接中...",
+            state["detail"],
+            action_enabled=False,
+            connected=False,
+        )
 
-        self._connect_worker = CameraConnectWorker(self.camera_service, camera_info)
-        self._connect_worker.finished.connect(lambda success, msg: self._on_camera_connected(success, msg, camera_info))
+        self._connect_worker = CameraConnectWorker(self.camera_service)
+        self._connect_worker.finished.connect(self._on_camera_connected)
         self._connect_worker.start()
 
     def _start_preview_worker(self, camera_device):
         try:
             from ..components.preview_worker import PreviewWorker
+            if self.preview_worker:
+                self.preview_worker.stop()
+                self.preview_worker.wait(1000)
             self.preview_worker = PreviewWorker(camera_device)
             self.preview_worker.frame_ready.connect(self.on_frame_ready)
             self.preview_worker.error_occurred.connect(self.on_preview_error)
             self.preview_worker.start()
 
             self.camera_active = True
-            self.camera_toggle_btn.setText("📷 停止相机")
-            self.camera_toggle_btn.setChecked(True)
             self.camera_toggle_btn.setEnabled(True)
-            self.camera_combo.setEnabled(True)
             self.refresh_btn.setEnabled(True)
+            self.refresh_camera_list(auto_start=False)
 
             logger.info("Camera preview started for: %s", camera_device.info.name)
             try:
@@ -187,28 +157,26 @@ class CameraMixin:
 
         except Exception as e:
             logger.error("Failed to initialize preview worker: %s", e)
-            self.camera_toggle_btn.setChecked(False)
-            self.camera_toggle_btn.setText("📷 启动相机")
+            self.camera_toggle_btn.setText("连接相机")
             self.show_toast(f"预览启动失败: {e}", False)
             if self.preview_worker:
                 self.preview_worker.stop()
                 self.preview_worker = None
 
-    def _on_camera_connected(self, success: bool, message: str, camera_info):
+    def _on_camera_connected(self, success: bool, message: str):
         self._connect_worker = None
         if not success:
             self.camera_toggle_btn.setEnabled(True)
-            self.camera_combo.setEnabled(True)
             self.refresh_btn.setEnabled(True)
             logger.error("Failed to start camera: %s", message)
-            self.camera_toggle_btn.setChecked(False)
-            self.camera_toggle_btn.setText("📷 启动相机")
+            self.camera_toggle_btn.setText("连接相机")
             self.show_toast(f"相机启动失败: {message}", False)
             if self.camera_service.current_camera:
                 try:
                     self.camera_service.disconnect_camera()
                 except Exception:
                     pass
+            self.refresh_camera_list(auto_start=False)
             return
         try:
             camera_device = self.camera_service.get_connected_camera()
@@ -234,9 +202,9 @@ class CameraMixin:
                 pass
 
             self.camera_active = False
-            self.camera_toggle_btn.setText("📷 启动相机")
-            self.camera_toggle_btn.setChecked(False)
+            self.camera_toggle_btn.setText("连接相机")
             self.reset_camera_placeholder()
+            self.refresh_camera_list(auto_start=False)
 
             logger.info("Camera preview stopped")
             try:

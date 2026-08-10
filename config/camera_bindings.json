@@ -1,0 +1,10 @@
+{
+  "default_camera": {
+    "slot_name": "default_camera",
+    "serial_number": "K71604931",
+    "expected_ip": "192.168.120.150",
+    "transport": "GigE",
+    "model_name": "MV-CU120-10GM",
+    "last_seen_name": "MV-CU120-10GM"
+  }
+}

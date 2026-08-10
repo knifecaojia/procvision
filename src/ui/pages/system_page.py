@@ -151,6 +151,88 @@ class SystemPage(QFrame):
 
         scroll_layout.addWidget(general_frame)
         
+        relay_frame = QFrame()
+        relay_frame.setObjectName("relayFrame")
+        relay_layout = QVBoxLayout(relay_frame)
+        relay_layout.setContentsMargins(20, 20, 20, 20)
+        relay_layout.setSpacing(15)
+
+        relay_title = QLabel("继电器配置")
+        relay_title.setObjectName("sectionTitle")
+
+        relay_port_layout = QHBoxLayout()
+        relay_port_label = QLabel("串口名:")
+        relay_port_label.setObjectName("paramLabel")
+        self.relay_port_combo = QComboBox()
+        self.relay_port_combo.setObjectName("paramInput")
+        self.relay_port_refresh_btn = QPushButton("刷新串口")
+        self.relay_port_refresh_btn.setObjectName("browseButton")
+        self.relay_port_refresh_btn.setFixedHeight(32)
+        relay_port_layout.addWidget(relay_port_label)
+        relay_port_layout.addWidget(self.relay_port_combo, 1)
+        relay_port_layout.addWidget(self.relay_port_refresh_btn)
+
+        relay_baud_layout = QHBoxLayout()
+        relay_baud_label = QLabel("波特率:")
+        relay_baud_label.setObjectName("paramLabel")
+        self.relay_baud_combo = QComboBox()
+        self.relay_baud_combo.setObjectName("paramInput")
+        for baud_rate in ("9600", "19200", "38400", "57600", "115200"):
+            self.relay_baud_combo.addItem(baud_rate, int(baud_rate))
+        relay_baud_layout.addWidget(relay_baud_label)
+        relay_baud_layout.addWidget(self.relay_baud_combo)
+        relay_baud_layout.addStretch()
+
+        relay_serial_layout = QHBoxLayout()
+        relay_serial_label = QLabel("串口调试:")
+        relay_serial_label.setObjectName("paramLabel")
+        self.relay_open_serial_btn = QPushButton("打开串口")
+        self.relay_open_serial_btn.setObjectName("saveButton")
+        self.relay_open_serial_btn.setMinimumSize(120, 40)
+        self.relay_open_serial_btn.setStyleSheet("padding: 0 18px;")
+        self.relay_close_serial_btn = QPushButton("关闭串口")
+        self.relay_close_serial_btn.setObjectName("browseButton")
+        self.relay_close_serial_btn.setMinimumSize(120, 40)
+        self.relay_close_serial_btn.setStyleSheet("padding: 0 18px;")
+        self.relay_serial_status_label = QLabel("串口未打开")
+        self.relay_serial_status_label.setObjectName("paramLabel")
+        relay_serial_layout.addWidget(relay_serial_label)
+        relay_serial_layout.addWidget(self.relay_open_serial_btn)
+        relay_serial_layout.addWidget(self.relay_close_serial_btn)
+        relay_serial_layout.addWidget(self.relay_serial_status_label)
+        relay_serial_layout.addStretch()
+
+        self.relay_action_widget = QWidget()
+        relay_action_layout = QHBoxLayout(self.relay_action_widget)
+        relay_action_layout.setContentsMargins(0, 0, 0, 0)
+        relay_action_layout.setSpacing(10)
+        relay_action_label = QLabel("继电器开关:")
+        relay_action_label.setObjectName("paramLabel")
+        self.relay_turn_on_btn = QPushButton("打开开关")
+        self.relay_turn_on_btn.setObjectName("saveButton")
+        self.relay_turn_on_btn.setMinimumSize(120, 40)
+        self.relay_turn_on_btn.setStyleSheet("padding: 0 18px;")
+        self.relay_turn_off_btn = QPushButton("关闭开关")
+        self.relay_turn_off_btn.setObjectName("browseButton")
+        self.relay_turn_off_btn.setMinimumSize(120, 40)
+        self.relay_turn_off_btn.setStyleSheet("padding: 0 18px;")
+        relay_manual_hint = QLabel("先打开串口，再用下面两个按钮做现场调试。")
+        relay_manual_hint.setObjectName("paramLabel")
+        relay_manual_hint.setWordWrap(True)
+        relay_action_layout.addWidget(relay_action_label)
+        relay_action_layout.addWidget(self.relay_turn_on_btn)
+        relay_action_layout.addWidget(self.relay_turn_off_btn)
+        relay_action_layout.addStretch()
+
+        relay_layout.addWidget(relay_title)
+        relay_layout.addLayout(relay_port_layout)
+        relay_layout.addLayout(relay_baud_layout)
+        relay_layout.addLayout(relay_serial_layout)
+        relay_layout.addWidget(self.relay_action_widget)
+        relay_layout.addWidget(relay_manual_hint)
+
+        scroll_layout.addWidget(relay_frame)
+
         # Server configuration
         server_frame = QFrame()
         server_frame.setObjectName("serverFrame")
@@ -302,6 +384,7 @@ class SystemPage(QFrame):
         self.log_browse_btn.clicked.connect(self.on_log_browse)
         self.save_btn.clicked.connect(lambda: self.save_settings(silent=False))
         self._setup_autosave()
+        self._set_relay_debug_state(False, False)
 
     def _setup_autosave(self) -> None:
         widgets = [
@@ -341,6 +424,34 @@ class SystemPage(QFrame):
             pass
         try:
             self.theme_switch.toggled.connect(self._schedule_autosave)
+        except Exception:
+            pass
+        try:
+            self.relay_port_combo.currentIndexChanged.connect(self._schedule_autosave)
+        except Exception:
+            pass
+        try:
+            self.relay_baud_combo.currentIndexChanged.connect(self._schedule_autosave)
+        except Exception:
+            pass
+        try:
+            self.relay_port_refresh_btn.clicked.connect(self.refresh_relay_port_options)
+        except Exception:
+            pass
+        try:
+            self.relay_open_serial_btn.clicked.connect(self.on_open_serial_clicked)
+        except Exception:
+            pass
+        try:
+            self.relay_close_serial_btn.clicked.connect(self.on_close_serial_clicked)
+        except Exception:
+            pass
+        try:
+            self.relay_turn_on_btn.clicked.connect(self.on_turn_on_relay_clicked)
+        except Exception:
+            pass
+        try:
+            self.relay_turn_off_btn.clicked.connect(self.on_turn_off_relay_clicked)
         except Exception:
             pass
 
@@ -420,6 +531,11 @@ class SystemPage(QFrame):
                 except (ValueError, TypeError):
                     ok_duration = 2
                 self.ok_duration_input.setText(str(ok_duration))
+                relay_cfg = data.get("relay", {})
+                self.refresh_relay_port_options(str(relay_cfg.get("port_name", "")))
+                relay_baud = relay_cfg.get("baud_rate", 9600)
+                self._set_relay_baud_value(relay_baud)
+                self._set_relay_debug_state(False, False)
                 theme_value = str(general.get("theme", self.current_theme)).lower()
                 if theme_value not in {"dark", "light"}:
                     theme_value = self.current_theme
@@ -493,9 +609,22 @@ class SystemPage(QFrame):
                 ok_duration = 2
             data["general"]["ok_toast_duration"] = ok_duration
             data["general"]["theme"] = "light" if self.theme_switch.isChecked() else "dark"
+            data.setdefault("relay", {})
+            data["relay"]["enabled"] = True
+            data["relay"]["port_name"] = self._selected_relay_port()
+            try:
+                data["relay"]["baud_rate"] = int(self.relay_baud_combo.currentData())
+            except (TypeError, ValueError):
+                data["relay"]["baud_rate"] = int(self.relay_baud_combo.currentText() or 9600)
             p.parent.mkdir(parents=True, exist_ok=True)
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
+            try:
+                from src.services.relay_service import RelayService
+
+                RelayService().reload_config()
+            except Exception:
+                logger.exception("Failed to reload relay settings after saving system config")
             logger.info(f"Configuration saved: {p}")
             if not silent:
                 self.show_toast("保存成功", True)
@@ -525,6 +654,122 @@ class SystemPage(QFrame):
         if hasattr(self, "toast_label"):
             self.toast_label.setVisible(False)
             self.toast_container.setVisible(False)
+
+    def _set_relay_baud_value(self, baud_rate) -> None:
+        try:
+            baud_int = int(baud_rate)
+        except (TypeError, ValueError):
+            baud_int = 9600
+        index = self.relay_baud_combo.findData(baud_int)
+        if index < 0:
+            self.relay_baud_combo.addItem(str(baud_int), baud_int)
+            index = self.relay_baud_combo.findData(baud_int)
+        self.relay_baud_combo.setCurrentIndex(max(0, index))
+
+    def refresh_relay_port_options(self, selected_port: str = "") -> None:
+        current_port = selected_port or self._selected_relay_port()
+        try:
+            from src.services.relay_service import RelayService
+            ports = RelayService().list_available_ports()
+        except Exception:
+            logger.exception("Failed to refresh relay COM ports")
+            ports = []
+        if current_port and current_port not in ports:
+            ports.append(current_port)
+        ports = sorted(set([port for port in ports if port]), key=lambda item: (len(item), item))
+        self.relay_port_combo.blockSignals(True)
+        self.relay_port_combo.clear()
+        self.relay_port_combo.addItem("请选择串口", "")
+        for port in ports:
+            self.relay_port_combo.addItem(port, port)
+        target_index = self.relay_port_combo.findData(current_port or "")
+        self.relay_port_combo.setCurrentIndex(max(0, target_index))
+        self.relay_port_combo.blockSignals(False)
+
+    def _selected_relay_port(self) -> str:
+        try:
+            return str(self.relay_port_combo.currentData() or "").strip()
+        except Exception:
+            return ""
+
+    def _set_relay_debug_state(self, serial_open: bool, relay_open: bool) -> None:
+        self.relay_close_serial_btn.setEnabled(bool(serial_open))
+        self.relay_open_serial_btn.setEnabled(not bool(serial_open))
+        self.relay_action_widget.setVisible(bool(serial_open))
+        self.relay_turn_on_btn.setEnabled(bool(serial_open) and not bool(relay_open))
+        self.relay_turn_off_btn.setEnabled(bool(serial_open) and bool(relay_open))
+        self.relay_serial_status_label.setText("串口已打开" if serial_open else "串口未打开")
+
+    def on_open_serial_clicked(self) -> None:
+        try:
+            self.save_settings(silent=True)
+            from src.services.relay_service import RelayService
+
+            relay_service = RelayService()
+            if not relay_service.is_configured():
+                self.show_toast("请先选择串口并保存", False)
+                self._set_relay_debug_state(False, False)
+                return
+            if not relay_service.open_port(source="system_page_open_serial"):
+                self.show_toast("打开串口失败", False)
+                self._set_relay_debug_state(False, False)
+                return
+            self._set_relay_debug_state(True, relay_service.is_open())
+            self.show_toast("串口已打开", True)
+        except Exception:
+            logger.exception("Failed to open relay serial port from system page")
+            self._set_relay_debug_state(False, False)
+            self.show_toast("打开串口失败", False)
+
+    def on_close_serial_clicked(self) -> None:
+        try:
+            from src.services.relay_service import RelayService
+
+            relay_service = RelayService()
+            relay_service.close_port(source="system_page_close_serial")
+            self._set_relay_debug_state(False, False)
+            self.show_toast("串口已关闭", True)
+        except Exception:
+            logger.exception("Failed to close relay serial port from system page")
+            self.show_toast("关闭串口失败", False)
+
+    def on_turn_on_relay_clicked(self) -> None:
+        try:
+            from src.services.relay_service import RelayService
+
+            relay_service = RelayService()
+            if not relay_service.is_connected():
+                self.show_toast("请先打开串口", False)
+                self._set_relay_debug_state(False, False)
+                return
+            if not relay_service.turn_on(source="system_page_manual_open"):
+                self.show_toast("打开开关失败", False)
+                self._set_relay_debug_state(True, False)
+                return
+            self._set_relay_debug_state(True, True)
+            self.show_toast("开关已打开", True)
+        except Exception:
+            logger.exception("Failed to open relay switch from system page")
+            self.show_toast("打开开关失败", False)
+
+    def on_turn_off_relay_clicked(self) -> None:
+        try:
+            from src.services.relay_service import RelayService
+
+            relay_service = RelayService()
+            if not relay_service.is_connected():
+                self.show_toast("请先打开串口", False)
+                self._set_relay_debug_state(False, False)
+                return
+            if not relay_service.turn_off(source="system_page_manual_close"):
+                self.show_toast("关闭开关失败", False)
+                self._set_relay_debug_state(True, True)
+                return
+            self._set_relay_debug_state(True, False)
+            self.show_toast("开关已关闭", True)
+        except Exception:
+            logger.exception("Failed to close relay switch from system page")
+            self.show_toast("关闭开关失败", False)
 
     def on_theme_switch(self, checked: bool):
         if self._loading_settings:

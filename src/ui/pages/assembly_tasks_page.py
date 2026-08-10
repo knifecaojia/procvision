@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QTextBrowser,
     QVBoxLayout,
 )
-from PySide6.QtCore import Qt, QUrl, QUrlQuery
+from PySide6.QtCore import Qt, QEvent, QUrl, QUrlQuery
 from PySide6.QtCore import QTimer
 
 from src.services.data_service import DataService
@@ -47,6 +47,7 @@ class AssemblyTasksPage(QFrame):
         self.filter_window: Optional[TaskFilterWindow] = None
 
         self._work_orders_by_code: Dict[str, Dict[str, Any]] = {}
+        self.execution_window: Optional[ProcessExecutionWindow] = None
 
         self.setup_colors(self.current_theme)
         self.init_ui()
@@ -117,6 +118,8 @@ class AssemblyTasksPage(QFrame):
 
         title_label = QLabel("装配引导与检测")
         title_label.setObjectName("processTitle")
+        title_label.installEventFilter(self)
+        self.title_label = title_label
 
         header_layout.addWidget(title_label)
         header_layout.addStretch()
@@ -307,6 +310,15 @@ class AssemblyTasksPage(QFrame):
             self.filter_btn.setText("高级过滤")
         self.load_data()
 
+    def eventFilter(self, obj, event):
+        try:
+            if obj is getattr(self, "title_label", None) and event.type() == QEvent.Type.MouseButtonDblClick:
+                self._handle_hidden_mock_launch()
+                return True
+        except Exception:
+            logger.exception("Hidden mock launch event handling failed")
+        return super().eventFilter(obj, event)
+
     def on_html_anchor_clicked(self, url: QUrl):
         if url.scheme() != "app":
             return
@@ -364,12 +376,20 @@ class AssemblyTasksPage(QFrame):
         if not data:
             return
 
-        display_pid = ""
-        craft_no = str(data.get("craft_code") or "").strip()
-        process_code = str(data.get("process_code") or "").strip()
-        if craft_no or process_code:
-            display_pid = f"{craft_no}{('-' + process_code) if process_code else ''}"
+        normalized = self._build_process_payload_from_task(data)
+        self._launch_execution_window(normalized)
 
+    def _on_execution_window_closed(self) -> None:
+        try:
+            self.execution_window = None
+        except Exception:
+            pass
+        try:
+            QTimer.singleShot(0, self.load_data)
+        except Exception:
+            pass
+
+    def _get_operator_name(self, fallback: str = "") -> str:
         operator_name = ""
         try:
             win = self.window()
@@ -378,10 +398,20 @@ class AssemblyTasksPage(QFrame):
                 operator_name = str(sm.get_username() or "").strip()
         except Exception:
             operator_name = ""
-        if not operator_name:
-            operator_name = str(data.get("worker_name") or data.get("worker_code") or "").strip()
+        if operator_name:
+            return operator_name
+        return str(fallback or "").strip()
 
-        normalized = {
+    def _build_process_payload_from_task(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        display_pid = ""
+        craft_no = str(data.get("craft_code") or "").strip()
+        process_code = str(data.get("process_code") or "").strip()
+        if craft_no or process_code:
+            display_pid = f"{craft_no}{('-' + process_code) if process_code else ''}"
+        operator_name = self._get_operator_name(
+            str(data.get("worker_name") or data.get("worker_code") or "").strip()
+        )
+        return {
             "name": data.get("work_order_code", ""),
             "title": data.get("craft_name") or data.get("process_name", ""),
             "version": data.get("craft_version", ""),
@@ -400,8 +430,69 @@ class AssemblyTasksPage(QFrame):
             "raw_work_order": data,
         }
 
+    def _build_mock_process_data(self) -> Dict[str, Any]:
+        task_no = "MOCK-TEST-001"
+        steps_detail = [
+            {
+                "step_number": 1,
+                "step_code": "MOCK-STEP-01",
+                "step_name": "取料定位",
+                "operation_guide": "放置测试件并确认定位区域。",
+            },
+            {
+                "step_number": 2,
+                "step_code": "MOCK-STEP-02",
+                "step_name": "部件装配",
+                "operation_guide": "执行模拟装配并观察检测结果。",
+            },
+            {
+                "step_number": 3,
+                "step_code": "MOCK-STEP-03",
+                "step_name": "完成确认",
+                "operation_guide": "验证最终步骤可继续流转。",
+            },
+        ]
+        operator_name = self._get_operator_name("测试用户")
+        raw_work_order = {
+            "work_order_code": task_no,
+            "craft_code": "MOCK",
+            "craft_name": "隐藏测试流程",
+            "process_code": "TEST",
+            "process_name": "模拟检测",
+            "algorithm_code": "SIM-HIDDEN-001",
+            "algorithm_name": "模拟检测流程",
+            "algorithm_version": "mock",
+            "step_infos": steps_detail,
+        }
+        return {
+            "name": task_no,
+            "title": "隐藏测试流程（Mock）",
+            "version": "mock",
+            "steps": len(steps_detail),
+            "algorithm_name": "模拟检测流程",
+            "algorithm_version": "mock",
+            "operator_name": operator_name,
+            "summary": "Hidden Mock Launch",
+            "steps_detail": steps_detail,
+            "pid": "SIM-HIDDEN-001",
+            "display_pid": "SIM-HIDDEN-001",
+            "task_no": task_no,
+            "craft_no": "MOCK",
+            "process_code": "TEST",
+            "algorithm_code": "SIM-HIDDEN-001",
+            "raw_work_order": raw_work_order,
+        }
+
+    def _launch_execution_window(self, process_data: Dict[str, Any]) -> bool:
+        current_window = getattr(self, "execution_window", None)
+        try:
+            if current_window is not None and current_window.isVisible():
+                logger.info("Skip launching another process window because one is already open")
+                return False
+        except Exception:
+            pass
         self.execution_window = ProcessExecutionWindow(
-            normalized,
+            process_data,
             None,
             camera_service=self.camera_service,
         )
@@ -410,16 +501,13 @@ class AssemblyTasksPage(QFrame):
         except Exception:
             pass
         self.execution_window.show_centered()
+        return True
 
-    def _on_execution_window_closed(self) -> None:
-        try:
-            self.execution_window = None
-        except Exception:
-            pass
-        try:
-            QTimer.singleShot(0, self.load_data)
-        except Exception:
-            pass
+    def _handle_hidden_mock_launch(self) -> None:
+        process_data = self._build_mock_process_data()
+        launched = self._launch_execution_window(process_data)
+        if launched:
+            logger.info("Hidden mock process launched from AssemblyTasksPage title")
 
     def _render_work_orders_table_html(self, items: list[dict], error_msg: Optional[str]) -> str:
         def escape(value):

@@ -76,44 +76,77 @@ QProgressBar#progressBar::chunk {
     background-color: #252525;
 }
 
-QComboBox#cameraCombo {
-    background-color: #252525;
-    border: 1px solid #3a3a3a;
-    border-radius: 4px;
-    padding: 4px 8px;
+#cameraBindingCard {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+}
+
+#cameraBindingTitle {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+#cameraBindingSummary {
     color: #ffffff;
-    font-size: 16px;
+    font-size: 15px;
+    font-weight: 600;
 }
 
-QComboBox#cameraCombo:hover {
-    border: 1px solid #f97316;
+#cameraBindingDetail {
+    color: #9ca3af;
+    font-size: 12px;
 }
 
-QComboBox#cameraCombo::drop-down {
-    border: none;
-}
-
-QComboBox#cameraCombo::down-arrow {
-    image: none;
-    border-left: 4px solid transparent;
-    border-right: 4px solid transparent;
-    border-top: 6px solid #9ca3af;
-    margin-right: 6px;
-}
-
-QComboBox#cameraCombo QAbstractItemView {
-    background-color: #252525;
-    border: 1px solid #3a3a3a;
-    selection-background-color: #f97316;
+#cameraBindingStatusBadge {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
     color: #ffffff;
+}
+
+#cameraBindingStatusBadge[cameraState="unbound"] {
+    background-color: #4b5563;
+}
+
+#cameraBindingStatusBadge[cameraState="offline"] {
+    background-color: #ef4444;
+}
+
+#cameraBindingStatusBadge[cameraState="busy"] {
+    background-color: #f59e0b;
+}
+
+#cameraBindingStatusBadge[cameraState="ready"] {
+    background-color: #2563eb;
+}
+
+#cameraBindingStatusBadge[cameraState="connected"] {
+    background-color: #16a34a;
+}
+
+#cameraBindingStatusBadge[cameraState="connecting"] {
+    background-color: #7c3aed;
+}
+
+#cameraBindingStatusBadge[cameraState="error"] {
+    background-color: #dc2626;
+}
+
+QFrame#cameraBindingCard,
+QPushButton#cameraRefreshButton,
+QPushButton#cameraToggleButton,
+QPushButton#cameraManageButton {
+    background-color: #252525;
 }
 
 QPushButton#cameraRefreshButton {
-    background-color: #252525;
     border: 1px solid #3a3a3a;
     color: #ffffff;
     border-radius: 4px;
-    font-size: 16px;
+    font-size: 14px;
+    padding: 0 12px;
 }
 
 QPushButton#cameraRefreshButton:hover {
@@ -121,12 +154,11 @@ QPushButton#cameraRefreshButton:hover {
 }
 
 QPushButton#cameraToggleButton {
-    background-color: #252525;
     border: 1px solid #22c55e;
     color: #22c55e;
     border-radius: 4px;
     padding: 0 14px;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: bold;
 }
 
@@ -134,13 +166,16 @@ QPushButton#cameraToggleButton:hover {
     border: 1px solid #16a34a;
 }
 
-QPushButton#cameraToggleButton:checked {
-    border: 1px solid #ef4444;
-    color: #ef4444;
+QPushButton#cameraManageButton {
+    border: 1px solid #4b5563;
+    color: #ffffff;
+    border-radius: 4px;
+    padding: 0 14px;
+    font-size: 14px;
 }
 
-QPushButton#cameraToggleButton:checked:hover {
-    border: 1px solid #dc2626;
+QPushButton#cameraManageButton:hover {
+    border: 1px solid #60a5fa;
 }
 
 #networkStatusIcon,

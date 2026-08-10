@@ -16,3 +16,4 @@ shiboken6==6.8.0.2
 six==1.17.0
 tzdata==2025.2
 PyInstaller
+pyserial==3.5

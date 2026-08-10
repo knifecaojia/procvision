@@ -24,6 +24,9 @@ class CameraInfo:
     ip_address: Optional[str] = None
     manufacturer: Optional[str] = None
     model_name: Optional[str] = None
+    user_defined_name: Optional[str] = None
+    accessible: Optional[bool] = None
+    access_status: Optional[str] = None
     backend_data: Dict[str, Any] = field(default_factory=dict)
 
 

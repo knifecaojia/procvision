@@ -137,6 +137,15 @@ class CameraConfig:
 
 
 @dataclass
+class RelayConfig:
+    """USB serial relay configuration settings."""
+
+    enabled: bool = True
+    port_name: str = ""
+    baud_rate: int = 9600
+
+
+@dataclass
 class AppConfig:
     """Main application configuration."""
 
@@ -146,6 +155,7 @@ class AppConfig:
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     camera: CameraConfig = field(default_factory=CameraConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
+    relay: RelayConfig = field(default_factory=RelayConfig)
 
     # Application metadata
     app_name: str = "SMART-VISION"
@@ -267,6 +277,9 @@ class ConfigManager:
         if 'network' in config_data:
             self._update_dataclass(self.config.network, config_data['network'])
 
+        if 'relay' in config_data:
+            self._update_dataclass(self.config.relay, config_data['relay'])
+
         # Update root level properties
         for key in ['app_name', 'app_version', 'app_title', 'debug_mode', 'dev_mode']:
             if key in config_data:
@@ -328,6 +341,7 @@ class ConfigManager:
                 'logging': self._dataclass_to_dict(self.config.logging),
                 'camera': self._dataclass_to_dict(self.config.camera),
                 'network': self._dataclass_to_dict(self.config.network),
+                'relay': self._dataclass_to_dict(self.config.relay),
                 'app_name': self.config.app_name,
                 'app_version': self.config.app_version,
                 'app_title': self.config.app_title,

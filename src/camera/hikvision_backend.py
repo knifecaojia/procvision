@@ -18,6 +18,7 @@ from typing import Iterable, List, Optional
 import numpy as np
 
 from .backend import BackendDevice, CameraBackend, FrameData
+from .camera_identity import build_camera_id, camera_matches, int_to_ipv4
 from .exceptions import (
     CameraError,
     ConnectionError,
@@ -162,20 +163,10 @@ class HikvisionBackend(CameraBackend):  # pragma: no cover - requires vendor SDK
 
     # ------------------------------------------------------------------
     def discover(self) -> List[CameraInfo]:
-        device_list = self._MV_CC_DEVICE_INFO_LIST()
-        tlayer_types = self._MV_GIGE_DEVICE | self._MV_USB_DEVICE
-        
-        # MV_CC_EnumDevices can be slow (network scan), consider caching or async
-        ret = self._MvCamera.MV_CC_EnumDevices(tlayer_types, device_list)
-        if ret != self._MV_OK:
-            raise CameraError(f"MV_CC_EnumDevices failed with code 0x{ret:08x}")
-
-        cameras: List[CameraInfo] = []
-        for index in range(device_list.nDeviceNum):
-            device_ptr = cast(device_list.pDeviceInfo[index], POINTER(self._MV_CC_DEVICE_INFO))
-            device_info = device_ptr.contents
-            cameras.append(self._convert_device_info(index, device_info))
-        return cameras
+        return [
+            self._convert_device_info(index, device_info)
+            for index, device_info in self._enumerate_devices()
+        ]
 
     # ------------------------------------------------------------------
     def shutdown(self) -> None:
@@ -203,6 +194,7 @@ class HikvisionBackend(CameraBackend):  # pragma: no cover - requires vendor SDK
         manufacturer = None
         model_name = None
         name = f"Camera {index}"
+        user_defined_name = None
 
         def _decode(buffer) -> Optional[str]:
             if buffer is None:
@@ -251,47 +243,48 @@ class HikvisionBackend(CameraBackend):  # pragma: no cover - requires vendor SDK
             manufacturer = _decode(gige.chManufacturerName)
             model_name = _decode(gige.chModelName)
             serial = _decode(gige.chSerialNumber)
-            # Handle both old and new SDK versions
+            user_defined_name = _decode(gige.chUserDefinedName)
             if hasattr(gige, 'chCurrentIp'):
                 ip_address = _decode(gige.chCurrentIp)
             elif hasattr(gige, 'nCurrentIp'):
-                # Newer SDK versions use nCurrentIp (integer) instead of chCurrentIp (string)
-                ip_address = str(gige.nCurrentIp)
-            name = _decode(gige.chUserDefinedName) or _decode(gige.chModelName) or name
+                ip_address = int_to_ipv4(gige.nCurrentIp)
+            name = user_defined_name or _decode(gige.chModelName) or name
         elif layer_type == self._MV_USB_DEVICE:
             transport = CameraTransport.USB
             usb = info.SpecialInfo.stUsb3VInfo
             manufacturer = _decode(usb.chManufacturerName)
             model_name = _decode(usb.chModelName)
             serial = _decode(usb.chSerialNumber)
-            name = _decode(usb.chUserDefinedName) or _decode(usb.chModelName) or name
+            user_defined_name = _decode(usb.chUserDefinedName)
+            name = user_defined_name or _decode(usb.chModelName) or name
+
+        accessible = self._get_device_accessibility(info)
+        if accessible is True:
+            access_status = "空闲可连接"
+        elif accessible is False:
+            access_status = "使用中/不可访问"
+        else:
+            access_status = "状态未知"
 
         return CameraInfo(
-            id=f"HIK-{serial or index}",
+            id=build_camera_id(serial, transport.value, model_name, ip_address),
             name=name,
             transport=transport,
             serial_number=serial,
             ip_address=ip_address,
             manufacturer=manufacturer,
             model_name=model_name,
-            backend_data={"backend": self.name, "index": index},
+            user_defined_name=user_defined_name,
+            accessible=accessible,
+            access_status=access_status,
+            backend_data={"backend": self.name},
         )
 
     # ------------------------------------------------------------------
     def connect(self, info: CameraInfo) -> BackendDevice:
-        index = info.backend_data.get("index", 0)
-        device_list = self._MV_CC_DEVICE_INFO_LIST()
-        ret = self._MvCamera.MV_CC_EnumDevices(
-            self._MV_GIGE_DEVICE | self._MV_USB_DEVICE, device_list
-        )
-        if ret != self._MV_OK:
-            raise ConnectionError(f"MV_CC_EnumDevices failed with code 0x{ret:08x}")
-
-        if device_list.nDeviceNum <= index:
-            raise ConnectionError(f"Device index {index} out of range.")
-
-        device_ptr = cast(device_list.pDeviceInfo[index], POINTER(self._MV_CC_DEVICE_INFO))
-        device_info = device_ptr.contents
+        device_info = self._find_matching_device_info(info)
+        if device_info is None:
+            raise ConnectionError(f"Target camera {info.id} is no longer available.")
 
         camera = self._MvCamera()
         ret = camera.MV_CC_CreateHandle(device_info)
@@ -313,6 +306,48 @@ class HikvisionBackend(CameraBackend):  # pragma: no cover - requires vendor SDK
             self._logger.debug("Packet size optimization not available: %s", exc)
 
         return HikvisionDevice(self, info, camera)
+
+    # ------------------------------------------------------------------
+    def _enumerate_devices(self) -> List[tuple[int, object]]:
+        device_list = self._MV_CC_DEVICE_INFO_LIST()
+        tlayer_types = self._MV_GIGE_DEVICE | self._MV_USB_DEVICE
+        ret = self._MvCamera.MV_CC_EnumDevices(tlayer_types, device_list)
+        if ret != self._MV_OK:
+            raise CameraError(f"MV_CC_EnumDevices failed with code 0x{ret:08x}")
+
+        devices: List[tuple[int, object]] = []
+        for index in range(device_list.nDeviceNum):
+            device_ptr = cast(device_list.pDeviceInfo[index], POINTER(self._MV_CC_DEVICE_INFO))
+            device_info = self._MV_CC_DEVICE_INFO()
+            ctypes.memmove(byref(device_info), byref(device_ptr.contents), sizeof(self._MV_CC_DEVICE_INFO))
+            devices.append((index, device_info))
+        return devices
+
+    # ------------------------------------------------------------------
+    def _find_matching_device_info(self, target: CameraInfo):
+        for index, device_info in self._enumerate_devices():
+            candidate = self._convert_device_info(index, device_info)
+            if camera_matches(target, candidate):
+                return device_info
+        return None
+
+    # ------------------------------------------------------------------
+    def _get_device_accessibility(self, device_info) -> Optional[bool]:
+        check_access = getattr(self._MvCamera, "MV_CC_IsDeviceAccessible", None)
+        if not callable(check_access):
+            return None
+
+        try:
+            result = check_access(device_info, self._MV_ACCESS_EXCLUSIVE)
+        except TypeError:
+            try:
+                result = check_access(byref(device_info), self._MV_ACCESS_EXCLUSIVE)
+            except Exception:
+                return None
+        except Exception:
+            return None
+
+        return bool(result)
 
 
 class HikvisionDevice(BackendDevice):  # pragma: no cover - requires vendor SDK

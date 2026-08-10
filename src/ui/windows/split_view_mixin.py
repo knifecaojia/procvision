@@ -189,6 +189,13 @@ class SplitViewMixin:
         self._rebuild_overlay_in_container(target)
 
     def _rebuild_overlay_in_container(self, container: QWidget):
+        preview_overlay = getattr(self, "preview_annotation_widget", None)
+        if preview_overlay is not None:
+            preview_overlay.setParent(container)
+            preview_overlay.setVisible(False)
+            preview_overlay.setGeometry(self.base_image_label.geometry())
+            preview_overlay.raise_()
+
         overlay = getattr(self, "overlay_widget", None)
         if overlay is not None:
             overlay.setParent(container)
@@ -247,6 +254,14 @@ class SplitViewMixin:
             self._align_overlay_geometry()
         except Exception:
             pass
+        try:
+            self.refresh_preview_annotation_overlay()
+        except Exception:
+            pass
+        try:
+            self.update_overlay_visibility()
+        except Exception:
+            pass
 
         self._save_layout_preference(split)
 
@@ -301,6 +316,9 @@ class SplitViewMixin:
         class _Sync(QObject):
             def eventFilter(self, obj, event):
                 if event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
+                    preview_overlay = getattr(parent_self, "preview_annotation_widget", None)
+                    if preview_overlay is not None:
+                        preview_overlay.setGeometry(obj.geometry())
                     overlay = getattr(parent_self, "overlay_widget", None)
                     if overlay is not None:
                         overlay.setGeometry(obj.geometry())

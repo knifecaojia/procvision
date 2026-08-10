@@ -30,6 +30,7 @@ from src.camera.calibration import (
     CalibrationStorage
 )
 from src.ui.components import SliderField, PreviewWorker
+from .camera_binding_dialog import CameraBindingDialog
 from .camera_calibration_panel import CameraCalibrationPanel
 from ..styles import refresh_widget_styles
 
@@ -70,10 +71,12 @@ class CameraPage(QFrame):
 
         # Control buttons
         self.connect_btn: Optional[QToolButton] = None
+        self.bind_btn: Optional[QToolButton] = None
         self.disconnect_btn: Optional[QToolButton] = None
         self.start_preview_btn: Optional[QToolButton] = None
         self.stop_preview_btn: Optional[QToolButton] = None
         self.screenshot_btn: Optional[QToolButton] = None
+        self.bound_camera_value_label: Optional[QLabel] = None
 
         self.current_theme = initial_theme if initial_theme in {"dark", "light"} else "dark"
         self._control_buttons: list[tuple[QToolButton, str]] = []
@@ -150,7 +153,15 @@ class CameraPage(QFrame):
 
     def _apply_service_unavailable_state(self):
         """Disable interactive controls when camera service is missing."""
-        for button in (self.connect_btn, self.disconnect_btn, self.start_preview_btn, self.stop_preview_btn, self.screenshot_btn, self.calibrate_btn):
+        for button in (
+            self.connect_btn,
+            self.bind_btn,
+            self.disconnect_btn,
+            self.start_preview_btn,
+            self.stop_preview_btn,
+            self.screenshot_btn,
+            self.calibrate_btn,
+        ):
             if button:
                 button.setEnabled(False)
         if self.calibrate_btn:
@@ -322,6 +333,7 @@ class CameraPage(QFrame):
 
         control_specs = [
             ("connect", "连接相机", "connect.svg", "⦿", self.on_connect_camera),
+            ("bind", "绑定相机", "devices.svg", "◎", self.on_bind_camera),
             ("disconnect", "断开连接", "disconnect.svg", "⦸", self.on_disconnect_camera),
             ("startPreview", "开始预览", "preview.svg", "▶", self.on_start_preview),
             ("stopPreview", "停止预览", "stop.svg", "■", self.on_stop_preview),
@@ -353,6 +365,8 @@ class CameraPage(QFrame):
             # Store button references
             if control_id == "connect":
                 self.connect_btn = button
+            elif control_id == "bind":
+                self.bind_btn = button
             elif control_id == "disconnect":
                 self.disconnect_btn = button
             elif control_id == "startPreview":
@@ -636,7 +650,7 @@ class CameraPage(QFrame):
         """Create the status section showing camera info."""
         status_frame = QFrame()
         status_frame.setObjectName("statusFrame")
-        status_frame.setFixedHeight(110)
+        status_frame.setFixedHeight(140)
 
         status_layout = QVBoxLayout(status_frame)
         status_layout.setContentsMargins(15, 10, 15, 10)
@@ -670,12 +684,20 @@ class CameraPage(QFrame):
         self.fps_value_label.setObjectName("paramValue")
         self.fps_value_label.setMinimumWidth(60)
 
+        cam_binding_label = QLabel("本机绑定:")
+        cam_binding_label.setObjectName("paramLabel")
+        self.bound_camera_value_label = QLabel("未绑定")
+        self.bound_camera_value_label.setObjectName("paramValue")
+        self.bound_camera_value_label.setWordWrap(True)
+
         status_grid.addWidget(cam_model_label, 0, 0)
         status_grid.addWidget(self.model_value_label, 0, 1)
         status_grid.addWidget(cam_status_label, 0, 2)
         status_grid.addWidget(self.status_value_label, 0, 3)
         status_grid.addWidget(cam_fps_label, 1, 0)
         status_grid.addWidget(self.fps_value_label, 1, 1)
+        status_grid.addWidget(cam_binding_label, 1, 2)
+        status_grid.addWidget(self.bound_camera_value_label, 1, 3)
 
         status_layout.addWidget(status_title)
         status_layout.addLayout(status_grid)
@@ -766,28 +788,59 @@ class CameraPage(QFrame):
         if not self._require_service("连接相机"):
             return
         try:
-            # Discover cameras
-            cameras = self.camera_service.discover_cameras()
+            cameras = self.camera_service.discover_cameras(force_refresh=True)
 
             if not cameras:
                 QMessageBox.warning(self, "错误", "未发现相机\n请检查相机连接和SDK安装")
                 return
 
-            # For now, connect to first camera
-            # TODO: Show selection dialog if multiple cameras
-            camera_info = cameras[0]
+            if not self.camera_service.get_camera_binding():
+                selected = self._prompt_bind_camera(cameras)
+                if not selected:
+                    return
+                self.camera_service.bind_camera(selected)
 
-            if self.camera_service.connect_camera(camera_info):
-                logger.info("Connected to camera: %s", camera_info.name)
+            success, camera_info, message = self.camera_service.connect_bound_camera(force_refresh=True)
+            if success and camera_info:
+                logger.info("Connected to bound camera: %s", camera_info.name)
                 self.update_connection_state()
                 self.rebuild_parameter_controls()
                 self.refresh_presets()
-                QMessageBox.information(self, "成功", f"已连接到相机: {camera_info.name}")
+                QMessageBox.information(self, "成功", f"已连接到绑定相机: {camera_info.name}")
             else:
-                QMessageBox.warning(self, "错误", "连接相机失败")
+                QMessageBox.warning(self, "错误", message or "连接相机失败")
         except Exception as exc:
             logger.error("Camera connection error: %s", exc, exc_info=True)
             QMessageBox.critical(self, "错误", f"连接相机时发生错误:\n{exc}")
+
+    @Slot()
+    def on_bind_camera(self):
+        """Bind this client to a specific discovered camera."""
+        if not self._require_service("绑定相机"):
+            return
+
+        try:
+            cameras = self.camera_service.discover_cameras(force_refresh=True)
+            if not cameras:
+                QMessageBox.warning(self, "错误", "未发现可绑定的相机")
+                return
+
+            selected = self._prompt_bind_camera(cameras)
+            if not selected:
+                return
+
+            self.camera_service.bind_camera(selected)
+            self.update_connection_state()
+            QMessageBox.information(self, "成功", f"当前客户端已绑定到:\n{selected.name}")
+        except Exception as exc:
+            logger.error("Camera binding error: %s", exc, exc_info=True)
+            QMessageBox.critical(self, "错误", f"绑定相机时发生错误:\n{exc}")
+
+    def _prompt_bind_camera(self, cameras: list[CameraInfo]) -> Optional[CameraInfo]:
+        dialog = CameraBindingDialog(self.camera_service, cameras, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return None
+        return dialog.selected_camera()
 
     @Slot()
     def on_disconnect_camera(self):
@@ -1098,6 +1151,8 @@ class CameraPage(QFrame):
         # Update buttons
         if self.connect_btn:
             self.connect_btn.setEnabled(not is_connected)
+        if self.bind_btn:
+            self.bind_btn.setEnabled(True)
         if self.disconnect_btn:
             self.disconnect_btn.setEnabled(is_connected)
         if self.start_preview_btn:
@@ -1120,6 +1175,9 @@ class CameraPage(QFrame):
             self.status_value_label.setText("未连接")
             self._update_status_label_state("disconnected")
             self._set_params_panel_visible(False)
+
+        if self.bound_camera_value_label:
+            self.bound_camera_value_label.setText(self.camera_service.get_binding_summary())
 
     def cleanup(self):
         """Cleanup resources."""

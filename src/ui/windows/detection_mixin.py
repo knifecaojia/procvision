@@ -15,6 +15,7 @@ from src.services.detection_image_annotation_service import (
 )
 
 logger = logging.getLogger(__name__)
+SIMULATED_PASS_PROBABILITY = 0.3
 
 DetectionStatus = Literal['idle', 'detecting', 'pass', 'fail']
 
@@ -108,7 +109,7 @@ def run_simulated_detection(window) -> None:
 
 
 def _on_simulated_complete(window) -> None:
-    passed = random.random() < 0.7
+    passed = random.random() < SIMULATED_PASS_PROBABILITY
     step_payload = window._get_step_payload(window.current_step_index)
     step_code = get_step_code_from_payload(step_payload, window.current_step_index)
 
@@ -122,7 +123,7 @@ def _on_simulated_complete(window) -> None:
             window.current_step_index + 1,
             {"status": "OK", "simulated": True}, window._last_qimage,
         )
-        _report_simulated_step(window, step_code)
+        _report_simulated_step(window, step_code, is_ok=True)
         window.advance_timer = QTimer()
         window.advance_timer.setSingleShot(True)
         window.advance_timer.timeout.connect(window.advance_to_next_step)
@@ -132,25 +133,31 @@ def _on_simulated_complete(window) -> None:
         window.detection_status = 'fail'
         window.update_overlay_visibility()
         window.rebuild_status_section()
+        try:
+            window._set_relay_ng_active(True, "manual_ng_simulated")
+        except Exception:
+            pass
         window._start_ng_flash()
         save_local_record(
             window.process_data, False, step_code,
             window.current_step_index + 1,
             {"status": "NG", "simulated": True}, window._last_qimage,
         )
-        _report_simulated_step(window, step_code)
+        _report_simulated_step(window, step_code, is_ok=False)
 
 
-def _report_simulated_step(window, step_code: str) -> None:
+def _report_simulated_step(window, step_code: str, is_ok: bool) -> None:
+    if bool(getattr(window, "is_simulated", False)):
+        return
     try:
         from src.services.result_report_service import ResultReportService
         ResultReportService().enqueue_step_result(
             task_no=str(window.process_data.get("task_no") or ""),
             step_code=str(step_code),
-            step_status=2,
+            step_status=2 if is_ok else 3,
             process_code=str(window.process_data.get("process_code") or ""),
             qimage=window._last_qimage.copy() if window._last_qimage is not None else None,
-            algo_result={"status": "OK", "simulated": True},
+            algo_result={"status": "OK" if is_ok else "NG", "simulated": True},
         )
     except Exception:
         pass
@@ -334,6 +341,10 @@ def _handle_detection_ng(window, data: Dict, step_code: str, step_number: int, i
         pass
     window.update_overlay_visibility()
     window.rebuild_status_section()
+    try:
+        window._set_relay_ng_active(True, "manual_ng")
+    except Exception:
+        pass
     window._start_ng_flash()
     annotated_qimage = build_annotated_qimage(
         window._last_qimage,

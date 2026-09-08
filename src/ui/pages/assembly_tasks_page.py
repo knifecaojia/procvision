@@ -7,6 +7,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from PySide6.QtWidgets import (
+    QDialog,
     QPushButton,
     QComboBox,
     QFrame,
@@ -21,7 +22,9 @@ from PySide6.QtCore import QTimer
 
 from src.services.data_service import DataService
 from src.services.algorithm_manager import AlgorithmManager
+from src.services.task_payload_mapper import normalize_material_list, normalize_task_row
 from ..components.pagination_widget import PaginationWidget
+from ..components.material_warning_dialog import MaterialWarningDialog
 from ..windows.process_execution_window import ProcessExecutionWindow
 from ..windows.task_filter_window import TaskFilterWindow
 
@@ -194,7 +197,7 @@ class AssemblyTasksPage(QFrame):
         error_msg = result.get("error")
 
         algo_lookup = self._build_algorithm_lookup()
-        items = [self._normalize_task_row(r, algo_lookup) for r in (raw_items or [])]
+        items = [normalize_task_row(r, algo_lookup) for r in (raw_items or [])]
 
         self._work_orders_by_code = {}
         for process_data in items:
@@ -235,42 +238,6 @@ class AssemblyTasksPage(QFrame):
         except Exception:
             pass
         return lookup
-
-    def _normalize_task_row(self, row: Dict[str, Any], algo_lookup: Dict[str, Dict[str, str]]) -> Dict[str, Any]:
-        task_no = str(row.get("task_no") or row.get("work_order_code") or "").strip()
-        craft_no = str(row.get("craft_no") or row.get("craft_code") or "").strip()
-        craft_version = str(row.get("craft_version") or "").strip()
-        craft_name = str(row.get("craft_name") or "").strip()
-        process_code = str(row.get("process_code") or "").strip()
-        process_name = str(row.get("process_name") or row.get("process") or "").strip()
-        worker_name = str(row.get("worker_name") or "").strip()
-        status = row.get("status")
-        status_str = str(status) if status is not None else ""
-        algorithm_id = str(row.get("algorithm_id") or row.get("algorithm_code") or "").strip()
-        step_infos = row.get("step_infos") or row.get("steps") or row.get("step_list") or []
-
-        algo_meta = algo_lookup.get(algorithm_id, {}) if algorithm_id else {}
-        algorithm_name = (algo_meta.get("name") or "").strip() or algorithm_id
-        algorithm_version = (algo_meta.get("version") or "").strip()
-
-        return {
-            "work_order_code": task_no,
-            "craft_code": craft_no,
-            "craft_version": craft_version,
-            "craft_name": craft_name,
-            "process_code": process_code,
-            "process_name": process_name,
-            "start_time": row.get("start_time"),
-            "end_time": row.get("end_time"),
-            "worker_code": row.get("worker_code"),
-            "worker_name": worker_name,
-            "status": status_str,
-            "algorithm_code": algorithm_id,
-            "algorithm_name": algorithm_name,
-            "algorithm_version": algorithm_version,
-            "step_infos": step_infos if isinstance(step_infos, list) else [],
-            "raw_task": row,
-        }
 
     def _on_filter_changed(self, index):
         self.current_status_filter = self.status_filter.currentData()
@@ -313,7 +280,9 @@ class AssemblyTasksPage(QFrame):
     def eventFilter(self, obj, event):
         try:
             if obj is getattr(self, "title_label", None) and event.type() == QEvent.Type.MouseButtonDblClick:
-                self._handle_hidden_mock_launch()
+                modifiers = event.modifiers() if hasattr(event, "modifiers") else Qt.KeyboardModifier.NoModifier
+                with_materials = not bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+                self._handle_hidden_mock_launch(with_materials=with_materials)
                 return True
         except Exception:
             logger.exception("Hidden mock launch event handling failed")
@@ -376,8 +345,17 @@ class AssemblyTasksPage(QFrame):
         if not data:
             return
 
+        self._confirm_and_launch_process(data)
+
+    def _confirm_and_launch_process(self, data: Dict[str, Any]) -> bool:
+        material_list = data.get("material_list") or []
+        if material_list:
+            dialog = MaterialWarningDialog(data, self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return False
+
         normalized = self._build_process_payload_from_task(data)
-        self._launch_execution_window(normalized)
+        return self._launch_execution_window(normalized)
 
     def _on_execution_window_closed(self) -> None:
         try:
@@ -411,45 +389,71 @@ class AssemblyTasksPage(QFrame):
         operator_name = self._get_operator_name(
             str(data.get("worker_name") or data.get("worker_code") or "").strip()
         )
+        step_infos = data.get("step_infos")
+        if not isinstance(step_infos, list) or not step_infos:
+            step_infos = data.get("steps_detail")
+        if not isinstance(step_infos, list):
+            step_infos = []
         return {
             "name": data.get("work_order_code", ""),
             "title": data.get("craft_name") or data.get("process_name", ""),
             "version": data.get("craft_version", ""),
-            "steps": len(data.get("step_infos", []) or []),
+            "steps": len(step_infos),
             "algorithm_name": data.get("algorithm_name", ""),
             "algorithm_version": data.get("algorithm_version", ""),
             "operator_name": operator_name,
             "summary": f"Task: {data.get('work_order_code')}",
-            "steps_detail": data.get("step_infos", []),
+            "steps_detail": step_infos,
+            "step_infos": step_infos,
             "pid": data.get("algorithm_code", None),
             "display_pid": display_pid,
             "task_no": data.get("work_order_code", ""),
             "craft_no": craft_no,
+            "craft_name": data.get("craft_name", ""),
             "process_code": process_code,
+            "process_name": data.get("process_name", ""),
+            "process_desc": data.get("process_desc", ""),
+            "prod_order_no": data.get("prod_order_no", ""),
+            "material_list": data.get("material_list", []),
             "algorithm_code": data.get("algorithm_code", ""),
+            "allow_mock_camera": bool(data.get("allow_mock_camera", False)),
+            "mock_camera_text": data.get("mock_camera_text", "MOCK CAM"),
             "raw_work_order": data,
         }
 
-    def _build_mock_process_data(self) -> Dict[str, Any]:
+    def _build_mock_process_data(self, with_materials: bool = True) -> Dict[str, Any]:
         task_no = "MOCK-TEST-001"
+        material_list = normalize_material_list(self._build_mock_material_items(with_materials))
         steps_detail = [
             {
                 "step_number": 1,
                 "step_code": "MOCK-STEP-01",
                 "step_name": "取料定位",
-                "operation_guide": "放置测试件并确认定位区域。",
+                "operation_guide": "放置测试件并确认定位区域，核对当前工单与物料。",
             },
             {
                 "step_number": 2,
                 "step_code": "MOCK-STEP-02",
-                "step_name": "部件装配",
-                "operation_guide": "执行模拟装配并观察检测结果。",
+                "step_name": "主件装配",
+                "operation_guide": "根据引导完成主件装配，注意易错料方向。",
             },
             {
                 "step_number": 3,
                 "step_code": "MOCK-STEP-03",
+                "step_name": "辅件复核",
+                "operation_guide": "复核辅件数量、位号和方向，准备进入检测。",
+            },
+            {
+                "step_number": 4,
+                "step_code": "MOCK-STEP-04",
+                "step_name": "外观检测",
+                "operation_guide": "触发模拟检测，观察 PASS/FAIL 与步骤流转。",
+            },
+            {
+                "step_number": 5,
+                "step_code": "MOCK-STEP-05",
                 "step_name": "完成确认",
-                "operation_guide": "验证最终步骤可继续流转。",
+                "operation_guide": "确认本轮任务完成，验证最终步骤可继续流转。",
             },
         ]
         operator_name = self._get_operator_name("测试用户")
@@ -459,29 +463,160 @@ class AssemblyTasksPage(QFrame):
             "craft_name": "隐藏测试流程",
             "process_code": "TEST",
             "process_name": "模拟检测",
+            "process_desc": "用于本地验证启动前提醒、右侧物料信息和模拟检测流程。",
+            "prod_order_no": "MOCK-PO-001",
             "algorithm_code": "SIM-HIDDEN-001",
             "algorithm_name": "模拟检测流程",
             "algorithm_version": "mock",
             "step_infos": steps_detail,
+            "material_list": material_list,
         }
         return {
             "name": task_no,
             "title": "隐藏测试流程（Mock）",
             "version": "mock",
             "steps": len(steps_detail),
+            "work_order_code": task_no,
             "algorithm_name": "模拟检测流程",
             "algorithm_version": "mock",
             "operator_name": operator_name,
+            "worker_name": operator_name,
             "summary": "Hidden Mock Launch",
+            "step_infos": steps_detail,
             "steps_detail": steps_detail,
             "pid": "SIM-HIDDEN-001",
             "display_pid": "SIM-HIDDEN-001",
             "task_no": task_no,
             "craft_no": "MOCK",
+            "craft_code": "MOCK",
+            "craft_name": "隐藏测试流程-有物料" if with_materials else "隐藏测试流程-无物料",
+            "craft_version": "mock",
             "process_code": "TEST",
+            "process_name": "模拟检测",
+            "process_desc": "用于本地验证启动前提醒、右侧物料信息和模拟检测流程。",
+            "prod_order_no": "MOCK-PO-001",
+            "material_list": material_list,
+            "allow_mock_camera": True,
+            "mock_camera_text": "MOCK CAM",
             "algorithm_code": "SIM-HIDDEN-001",
             "raw_work_order": raw_work_order,
         }
+
+    def _build_mock_material_items(self, with_materials: bool) -> list[dict]:
+        if not with_materials:
+            return []
+        return [
+            {
+                "assembly_number": "A01",
+                "position_number": "U1",
+                "model_no": "TX-MAIN-01",
+                "polarity_direction": "缺口朝上",
+                "material_no": "9000000929403",
+                "material_name": "主控芯片",
+                "material_quantity": 1,
+                "material_unit": "件",
+                "error_prevention_mark": "错",
+            },
+            {
+                "assembly_number": "A02",
+                "position_number": "C3/C4",
+                "model_no": "CAP-10UF",
+                "polarity_direction": "白线朝右",
+                "material_no": "9000000929404",
+                "material_name": "电解电容",
+                "material_quantity": 2,
+                "material_unit": "件",
+                "error_prevention_mark": "",
+            },
+            {
+                "assembly_number": "A03",
+                "position_number": "R12/R13/R14",
+                "model_no": "RES-4K7-1%-0603",
+                "polarity_direction": "无方向要求",
+                "material_no": "9000000929405",
+                "material_name": "精密电阻组件",
+                "material_quantity": 3,
+                "material_unit": "件",
+                "error_prevention_mark": "",
+            },
+            {
+                "assembly_number": "A04",
+                "position_number": "J1",
+                "model_no": "CONN-USB-TYPEC-16P",
+                "polarity_direction": "开口朝外壳右侧，注意贴合边缘",
+                "material_no": "9000000929406",
+                "material_name": "Type-C 接口座",
+                "material_quantity": 1,
+                "material_unit": "件",
+                "error_prevention_mark": "方向易错",
+            },
+            {
+                "assembly_number": "A05",
+                "position_number": "D5",
+                "model_no": "LED-RED-0603-HL",
+                "polarity_direction": "三角丝印对应负极，灯珠缺口朝左上",
+                "material_no": "9000000929407",
+                "material_name": "状态指示灯",
+                "material_quantity": 1,
+                "material_unit": "件",
+                "error_prevention_mark": "",
+            },
+            {
+                "assembly_number": "A06",
+                "position_number": "U7",
+                "model_no": "DRV-MOTOR-48PIN-QFN",
+                "polarity_direction": "1脚圆点朝右下，芯片文字正向可读",
+                "material_no": "9000000929408",
+                "material_name": "电机驱动控制芯片长名称测试项",
+                "material_quantity": 1,
+                "material_unit": "件",
+                "error_prevention_mark": "错",
+            },
+            {
+                "assembly_number": "A07",
+                "position_number": "TP1/TP2/TP3/TP4",
+                "model_no": "TEST-PAD-GOLD",
+                "polarity_direction": "无方向要求",
+                "material_no": "9000000929409",
+                "material_name": "测试焊盘保护片",
+                "material_quantity": 4,
+                "material_unit": "片",
+                "error_prevention_mark": "",
+            },
+            {
+                "assembly_number": "A08",
+                "position_number": "L2",
+                "model_no": "IND-22UH-SMD-LARGE",
+                "polarity_direction": "顶部丝印需与板上白框长边平行",
+                "material_no": "9000000929410",
+                "material_name": "功率电感",
+                "material_quantity": 1,
+                "material_unit": "件",
+                "error_prevention_mark": "",
+            },
+            {
+                "assembly_number": "A09",
+                "position_number": "F1",
+                "model_no": "FUSE-RESET-1A-1206",
+                "polarity_direction": "保险丝文字朝上，靠近输入端一侧安装",
+                "material_no": "9000000929411",
+                "material_name": "可恢复保险丝",
+                "material_quantity": 1,
+                "material_unit": "件",
+                "error_prevention_mark": "复核",
+            },
+            {
+                "assembly_number": "A10",
+                "position_number": "CN8-LEFT-SIDE-EXTENSION",
+                "model_no": "CABLE-HARNESS-POWER-SIGNAL-MIXED",
+                "polarity_direction": "线束卡扣朝外，红线靠板边，插入到底后轻拉确认锁止",
+                "material_no": "9000000929412",
+                "material_name": "外接电源与信号混合线束总成长文本滚动测试项",
+                "material_quantity": 1,
+                "material_unit": "套",
+                "error_prevention_mark": "",
+            },
+        ]
 
     def _launch_execution_window(self, process_data: Dict[str, Any]) -> bool:
         current_window = getattr(self, "execution_window", None)
@@ -503,11 +638,14 @@ class AssemblyTasksPage(QFrame):
         self.execution_window.show_centered()
         return True
 
-    def _handle_hidden_mock_launch(self) -> None:
-        process_data = self._build_mock_process_data()
-        launched = self._launch_execution_window(process_data)
+    def _handle_hidden_mock_launch(self, with_materials: bool = True) -> None:
+        process_data = self._build_mock_process_data(with_materials=with_materials)
+        launched = self._confirm_and_launch_process(process_data)
         if launched:
-            logger.info("Hidden mock process launched from AssemblyTasksPage title")
+            logger.info(
+                "Hidden mock process launched from AssemblyTasksPage title, with_materials=%s",
+                with_materials,
+            )
 
     def _render_work_orders_table_html(self, items: list[dict], error_msg: Optional[str]) -> str:
         def escape(value):

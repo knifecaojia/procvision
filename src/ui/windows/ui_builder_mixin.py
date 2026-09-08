@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, QObject, QEvent, QRect, QSize
 from PySide6.QtGui import QPixmap, QImage, QPainter, QColor, QPen, QTextCursor
 from ..styles import refresh_widget_styles
 from ..components.process_preview_annotation_overlay import ProcessPreviewAnnotationOverlay
+from ..components.process_material_info_panel import ProcessMaterialInfoPanel
 logger = logging.getLogger(__name__)
 StepStatus = Literal['completed', 'current', 'pending']
 DetectionStatus = Literal['idle', 'detecting', 'pass', 'fail']
@@ -147,7 +148,6 @@ class UIBuilderMixin:
     def create_header_bar(self) -> QWidget:
         header_frame = QFrame()
         header_frame.setObjectName("headerBar")
-        header_frame.setMinimumHeight(56)
         header_layout = QHBoxLayout(header_frame)
         header_layout.setContentsMargins(16, 10, 16, 10)
         header_layout.setSpacing(20)
@@ -164,6 +164,7 @@ class UIBuilderMixin:
         sep2.setObjectName("headerSeparator")
         header_layout.addWidget(sep2)
         header_layout.addWidget(self._create_header_controls_section())
+        header_frame.setFixedHeight(max(56, header_frame.sizeHint().height()))
         return header_frame
 
     def _create_product_info_section(self) -> QWidget:
@@ -312,6 +313,8 @@ class UIBuilderMixin:
         layout.addWidget(self.step_list_panel)
         self.visual_area = self.create_visual_area_container()
         layout.addWidget(self.visual_area, 1)
+        self.material_info_panel = ProcessMaterialInfoPanel(self.process_data)
+        layout.addWidget(self.material_info_panel)
         self.preview_annotation_widget = ProcessPreviewAnnotationOverlay(self.base_image_label.parent())
         self.preview_annotation_widget.setVisible(False)
         self.preview_annotation_widget.setGeometry(self.base_image_label.geometry())
@@ -501,22 +504,25 @@ class UIBuilderMixin:
         footer_frame.setObjectName("footerBar")
         footer_frame.setFixedHeight(120)
         footer_layout = QHBoxLayout(footer_frame)
-        footer_layout.setContentsMargins(16, 0, 16, 0)
+        footer_layout.setContentsMargins(16, 0, 8, 0)
         footer_layout.setSpacing(20)
-        footer_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer_layout.addWidget(self._create_instruction_section(), 1)
+        instruction_section = self._create_instruction_section()
+        instruction_section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        footer_layout.addWidget(instruction_section, 1)
         self.status_section = self._create_status_section()
-        footer_layout.addWidget(self.status_section)
+        footer_layout.addWidget(self.status_section, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return footer_frame
 
     def _create_instruction_section(self) -> QWidget:
         section = QWidget()
+        section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout = QVBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.instruction_label = QTextEdit()
         self.instruction_label.setObjectName("instructionLabel")
+        self.instruction_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         try:
             self.instruction_label.setReadOnly(True)
             self.instruction_label.setAcceptRichText(False)
@@ -533,15 +539,16 @@ class UIBuilderMixin:
 
     def _create_status_section(self) -> QWidget:
         section = QWidget()
+        section.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         layout = QHBoxLayout(section)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         section.setFixedHeight(120)
 
         auto_active = getattr(self, "auto_detect_active", False)
         detecting = self.detection_status == "detecting"
-        allowed = (self.camera_active or (self._last_qimage is not None)) and not detecting
+        allowed = bool(getattr(self, "_has_detection_source", lambda: False)()) and not detecting
         btn_text = "检测中" if detecting else "开始检测"
         self.start_detection_btn = QPushButton(btn_text)
         self.start_detection_btn.setObjectName("startDetectionButton")
@@ -559,7 +566,10 @@ class UIBuilderMixin:
                 pass
         else:
             try:
-                self.start_detection_btn.setToolTip("请先开启相机")
+                tooltip = "请先开启相机"
+                if bool(getattr(self, "_allows_mock_camera_bypass", lambda: False)()):
+                    tooltip = "MOCK CAM 已启用"
+                self.start_detection_btn.setToolTip(tooltip)
             except Exception:
                 pass
         layout.addWidget(self.start_detection_btn)

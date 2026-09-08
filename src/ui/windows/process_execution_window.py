@@ -71,6 +71,17 @@ class ProcessExecutionWindow(
 
         self.product_sn = str(process_data.get("task_no") or process_data.get("name") or "")
         self.order_number = str(process_data.get("display_pid") or process_data.get('pid', process_data.get('name', 'ME-ASM-2024-001')))
+        self.prod_order_no = str(process_data.get("prod_order_no") or "").strip()
+        self.craft_name = str(process_data.get("craft_name") or process_data.get("title") or "").strip()
+        self.craft_no = str(process_data.get("craft_no") or "").strip()
+        self.craft_version = str(process_data.get("craft_version") or process_data.get("version") or "").strip()
+        self.process_name = str(process_data.get("process_name") or "").strip()
+        self.process_code = str(process_data.get("process_code") or "").strip()
+        self.process_desc = str(process_data.get("process_desc") or "").strip()
+        raw_materials = process_data.get("material_list")
+        self.material_list = raw_materials if isinstance(raw_materials, list) else []
+        self.allow_mock_camera = bool(process_data.get("allow_mock_camera", False))
+        self.mock_camera_text = str(process_data.get("mock_camera_text") or "MOCK CAM").strip() or "MOCK CAM"
         self.operator_name = str(
             process_data.get("operator_name") or process_data.get("username")
             or process_data.get("worker_name") or process_data.get("operator") or ""
@@ -295,7 +306,7 @@ class ProcessExecutionWindow(
 
     def toggle_auto_detect(self, checked: bool):
         if checked:
-            if not self.camera_active and self._last_qimage is None:
+            if not self._has_detection_source():
                 try:
                     self.show_toast("请先开启相机", False)
                 except Exception:
@@ -390,7 +401,7 @@ class ProcessExecutionWindow(
     def on_start_detection(self):
         if self.detection_status == 'detecting':
             return
-        if not self.camera_active and self._last_qimage is None:
+        if not self._has_detection_source():
             return
         if self.detection_status in ('pass', 'fail'):
             if self.detection_status == 'fail':
@@ -534,6 +545,12 @@ class ProcessExecutionWindow(
         name = str(self.process_data.get('algorithm_name', self.process_data.get('name', '')))
         pid = str(self.process_data.get('pid', ''))
         return ('模拟' in name) or pid.startswith('SIM-')
+
+    def _allows_mock_camera_bypass(self) -> bool:
+        return bool(self.is_simulated and self.allow_mock_camera)
+
+    def _has_detection_source(self) -> bool:
+        return bool(self.camera_active or self._last_qimage is not None or self._allows_mock_camera_bypass())
 
     def _read_auto_start_next_setting(self) -> bool:
         try:

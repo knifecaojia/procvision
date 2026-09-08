@@ -249,7 +249,10 @@ class CameraMixin:
 
     def reset_camera_placeholder(self):
         self.base_image_label.clear()
-        self.base_image_label.setText("等待相机视频")
+        placeholder_text = "等待相机视频"
+        if bool(getattr(self, "_allows_mock_camera_bypass", lambda: False)()):
+            placeholder_text = str(getattr(self, "mock_camera_text", "") or "MOCK CAM")
+        self.base_image_label.setText(placeholder_text)
         self._set_video_state("placeholder")
         try:
             self.refresh_preview_annotation_overlay()

@@ -239,7 +239,7 @@ class AutoDetectController:
         w = self._window
         if w.detection_status == 'detecting':
             return
-        if not w.camera_active and w._last_qimage is None:
+        if not bool(getattr(w, "_has_detection_source", lambda: False)()):
             logger.warning("Auto detect: no camera/image available")
             self.stop()
             try:

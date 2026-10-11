@@ -75,31 +75,6 @@ class OverlayWidget(QWidget):
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, text)
             painter.setPen(QPen(pen_color, 2))
         painter.end()
-class StatusIndicator(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("statusIndicator")
-        self.setFixedSize(20, 20)
-        self._state = "idle"
-        self._colors = {
-            "idle": "#6b7280",
-            "detecting": "#f59e0b",
-            "ok": "#22c55e",
-            "ng": "#ef4444",
-            "error": "#ef4444",
-        }
-    def set_state(self, state: str):
-        self._state = state
-        self.update()
-    def paintEvent(self, event):
-        from PySide6.QtGui import QPainter, QColor, QBrush
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        color_hex = self._colors.get(self._state, "#6b7280")
-        painter.setBrush(QBrush(QColor(color_hex)))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(2, 2, 16, 16)
-        painter.end()
 class UIBuilderMixin:
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -537,67 +512,6 @@ class UIBuilderMixin:
         layout.addWidget(self.instruction_label)
         return section
 
-    def _create_status_section(self) -> QWidget:
-        section = QWidget()
-        section.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        layout = QHBoxLayout(section)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        layout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        section.setFixedHeight(120)
-
-        auto_active = getattr(self, "auto_detect_active", False)
-        detecting = self.detection_status == "detecting"
-        allowed = bool(getattr(self, "_has_detection_source", lambda: False)()) and not detecting
-        btn_text = "检测中" if detecting else "开始检测"
-        self.start_detection_btn = QPushButton(btn_text)
-        self.start_detection_btn.setObjectName("startDetectionButton")
-        self.start_detection_btn.setFixedSize(200, 120)
-        try:
-            self.start_detection_btn.setFont(self.custom_font)
-        except Exception:
-            pass
-        self.start_detection_btn.setEnabled(allowed)
-        self.start_detection_btn.setVisible(not auto_active)
-        if allowed:
-            try:
-                self.start_detection_btn.clicked.connect(self.on_start_detection)
-            except Exception:
-                pass
-        else:
-            try:
-                tooltip = "请先开启相机"
-                if bool(getattr(self, "_allows_mock_camera_bypass", lambda: False)()):
-                    tooltip = "MOCK CAM 已启用"
-                self.start_detection_btn.setToolTip(tooltip)
-            except Exception:
-                pass
-        layout.addWidget(self.start_detection_btn)
-
-        auto_text = "停止自动" if auto_active else "自动检测"
-        self.auto_detect_btn = QPushButton(auto_text)
-        self.auto_detect_btn.setObjectName("autoDetectButton")
-        self.auto_detect_btn.setCheckable(True)
-        self.auto_detect_btn.setChecked(auto_active)
-        self.auto_detect_btn.setFixedSize(200, 120)
-        try:
-            self.auto_detect_btn.setFont(self.custom_font)
-        except Exception:
-            pass
-        auto_allowed = auto_active or allowed
-        self.auto_detect_btn.setEnabled(auto_allowed)
-        try:
-            self.auto_detect_btn.clicked.connect(self.toggle_auto_detect)
-        except Exception:
-            pass
-        layout.addWidget(self.auto_detect_btn)
-
-        self.status_indicator = StatusIndicator(section)
-        self.status_indicator.setVisible(auto_active)
-        layout.addWidget(self.status_indicator)
-
-        return section
-
     def _dismiss_overlay(self):
         self._overlay_dismissed = True
         pass_ov = getattr(self, 'pass_overlay', None)
@@ -802,11 +716,3 @@ class UIBuilderMixin:
             self._scroll_step_bar_to_current()
         except Exception:
             pass
-
-    def rebuild_status_section(self):
-        old_section = self.status_section
-        footer_layout = old_section.parent().layout()
-        new_section = self._create_status_section()
-        self.status_section = new_section
-        footer_layout.replaceWidget(old_section, new_section)
-        old_section.deleteLater()

@@ -436,6 +436,25 @@ QPushButton#startDetectionButton:disabled {
     color: #9ca3af;
 }
 
+QPushButton#finalCheckButton {
+    background-color: #7c3aed;
+    border: none;
+    color: #ffffff;
+    border-radius: 4px;
+    font-size: 24px;
+    font-weight: 700;
+    padding: 0;
+}
+
+QPushButton#finalCheckButton:hover {
+    background-color: #6d28d9;
+}
+
+QPushButton#finalCheckButton:disabled {
+    background-color: #D0D7E3;
+    color: #9ca3af;
+}
+
 QPushButton#autoDetectButton {
     background-color: #2563eb;
     border: none;

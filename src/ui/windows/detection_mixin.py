@@ -2,7 +2,7 @@ import json
 import logging
 import random
 from datetime import datetime
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Callable, Dict, Literal, Optional
 
 from PySide6.QtCore import QTimer, QRect, QSize
 from PySide6.QtGui import QImage
@@ -98,20 +98,44 @@ def get_step_code_from_payload(step_payload: Dict[str, Any], fallback_index: int
     ).strip()
 
 
-def run_simulated_detection(window) -> None:
+def run_simulated_detection(
+    window,
+    *,
+    step_payload: Optional[Dict[str, Any]] = None,
+    step_index: Optional[int] = None,
+    on_ok_complete: Optional[Callable[[], None]] = None,
+) -> None:
     window.detection_status = 'detecting'
     window.update_overlay_visibility()
     window.rebuild_status_section()
     window.detection_timer = QTimer()
     window.detection_timer.setSingleShot(True)
-    window.detection_timer.timeout.connect(lambda: _on_simulated_complete(window))
+    window.detection_timer.timeout.connect(
+        lambda: _on_simulated_complete(
+            window,
+            step_payload=step_payload,
+            step_index=step_index,
+            on_ok_complete=on_ok_complete,
+        )
+    )
     window.detection_timer.start(1500)
 
 
-def _on_simulated_complete(window) -> None:
+def _on_simulated_complete(
+    window,
+    *,
+    step_payload: Optional[Dict[str, Any]] = None,
+    step_index: Optional[int] = None,
+    on_ok_complete: Optional[Callable[[], None]] = None,
+) -> None:
     passed = random.random() < SIMULATED_PASS_PROBABILITY
-    step_payload = window._get_step_payload(window.current_step_index)
-    step_code = get_step_code_from_payload(step_payload, window.current_step_index)
+    effective_index = window.current_step_index if step_index is None else step_index
+    payload = step_payload or window._get_step_payload(effective_index)
+    step_code = get_step_code_from_payload(payload, effective_index)
+    try:
+        step_number = int(str(payload.get("step_number") or payload.get("step_code") or (effective_index + 1)).strip())
+    except Exception:
+        step_number = effective_index + 1
 
     if passed:
         logger.info("Detection PASSED (simulated)")
@@ -120,13 +144,13 @@ def _on_simulated_complete(window) -> None:
         window.rebuild_status_section()
         save_local_record(
             window.process_data, True, step_code,
-            window.current_step_index + 1,
+            step_number,
             {"status": "OK", "simulated": True}, window._last_qimage,
         )
         _report_simulated_step(window, step_code, is_ok=True)
         window.advance_timer = QTimer()
         window.advance_timer.setSingleShot(True)
-        window.advance_timer.timeout.connect(window.advance_to_next_step)
+        window.advance_timer.timeout.connect(on_ok_complete or window.advance_to_next_step)
         window.advance_timer.start(window.ok_toast_duration * 1000)
     else:
         logger.info("Detection FAILED (simulated)")
@@ -140,7 +164,7 @@ def _on_simulated_complete(window) -> None:
         window._start_ng_flash()
         save_local_record(
             window.process_data, False, step_code,
-            window.current_step_index + 1,
+            step_number,
             {"status": "NG", "simulated": True}, window._last_qimage,
         )
         _report_simulated_step(window, step_code, is_ok=False)
@@ -163,14 +187,20 @@ def _report_simulated_step(window, step_code: str, is_ok: bool) -> None:
         pass
 
 
-def handle_external_detection(window) -> None:
+def handle_external_detection(
+    window,
+    *,
+    step_payload: Optional[Dict[str, Any]] = None,
+    step_index: Optional[int] = None,
+    on_ok_complete: Optional[Callable[[], None]] = None,
+) -> None:
     if window._last_qimage is None:
         logger.warning("No camera frame available for external detection")
         return
 
-    idx = window.current_step_index
-    guide_url = window._get_step_guide_url(idx)
-    guide_qi = window._guide_qimages.get(idx)
+    idx = window.current_step_index if step_index is None and step_payload is None else step_index
+    guide_url = window._get_step_guide_url(idx) if isinstance(idx, int) else ""
+    guide_qi = window._guide_qimages.get(idx) if isinstance(idx, int) else None
     if guide_url and guide_qi is None:
         window._ensure_guide_for_step(idx, preload_next=True)
         err = window._guide_errors.get(idx, "")
@@ -199,13 +229,13 @@ def handle_external_detection(window) -> None:
             except Exception:
                 guide_img = img
 
-        step_payload = window._get_step_payload(idx)
-        raw_step_no = step_payload.get("step_number") or step_payload.get("step_code") or step_payload.get("step_name")
+        payload = step_payload or window._get_step_payload(idx)
+        raw_step_no = payload.get("step_number") or payload.get("step_code") or payload.get("step_name")
         try:
             step_number = int(str(raw_step_no).strip())
         except Exception:
-            step_number = idx + 1
-        step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or step_number).strip()
+            step_number = (idx + 1) if isinstance(idx, int) else 99
+        step_code = str(payload.get("step_code") or payload.get("step_number") or step_number).strip()
 
         algo_name = str(window.process_data.get("algorithm_name") or "").strip()
         algo_ver = str(window.process_data.get("algorithm_version") or "").strip()
@@ -214,8 +244,8 @@ def handle_external_detection(window) -> None:
 
         camera_id = window.camera_service.current_camera.info.id if window.camera_service and window.camera_service.current_camera else "unknown"
         step_desc = ""
-        if step_payload:
-            step_desc = str(step_payload.get("operation_guide") or step_payload.get("step_content") or "").strip()
+        if payload:
+            step_desc = str(payload.get("operation_guide") or payload.get("step_content") or "").strip()
         if not step_desc:
             step_desc = f"步骤 {step_number}"
         context = {
@@ -227,7 +257,7 @@ def handle_external_detection(window) -> None:
         }
 
         try:
-            guide_info = window._get_step_guide_info(idx)
+            guide_info = window._get_step_guide_info(idx) if isinstance(idx, int) else payload.get("guide_info", [])
             result = runner.execute_flow(
                 name=algo_name, version=algo_ver,
                 step_index=step_number, step_desc=step_desc,
@@ -249,7 +279,7 @@ def handle_external_detection(window) -> None:
         duration_ms = (end_time - start_time).total_seconds() * 1000
         logger.info(f"Detection executed in {duration_ms:.2f}ms, algo_result={json.dumps(result, ensure_ascii=False, default=str)}")
 
-        _process_algo_result(window, result, step_code, step_number, idx)
+        _process_algo_result(window, result, step_code, step_number, idx, on_ok_complete=on_ok_complete)
 
     except Exception as e:
         logger.error(f"External detection failed: {e}")
@@ -283,21 +313,37 @@ def resolve_success_instruction_text(data: Dict[str, Any], fallback_text: str) -
     return fallback_text
 
 
-def _process_algo_result(window, result: Dict[str, Any], step_code: str, step_number: int, idx: int):
+def _process_algo_result(
+    window,
+    result: Dict[str, Any],
+    step_code: str,
+    step_number: int,
+    idx: int,
+    *,
+    on_ok_complete: Optional[Callable[[], None]] = None,
+):
     status = str(result.get('status', '')).upper()
     if status == 'OK':
         data = result.get("data", {})
         result_status = data.get("result_status", "NG")
 
         if result_status == "OK":
-            _handle_detection_ok(window, data, step_code, step_number, idx)
+            _handle_detection_ok(window, data, step_code, step_number, idx, on_ok_complete=on_ok_complete)
         else:
             _handle_detection_ng(window, data, step_code, step_number, idx)
     else:
         _handle_detection_error(window, result, step_code, step_number, idx)
 
 
-def _handle_detection_ok(window, data: Dict, step_code: str, step_number: int, idx: int):
+def _handle_detection_ok(
+    window,
+    data: Dict,
+    step_code: str,
+    step_number: int,
+    idx: int,
+    *,
+    on_ok_complete: Optional[Callable[[], None]] = None,
+):
     logger.info(f"Detection OK: step={step_number}, data={json.dumps(data, ensure_ascii=False, default=str)}")
 
     result_payload = {"status": "OK", "data": data}
@@ -323,7 +369,7 @@ def _handle_detection_ok(window, data: Dict, step_code: str, step_number: int, i
 
     window.advance_timer = QTimer()
     window.advance_timer.setSingleShot(True)
-    window.advance_timer.timeout.connect(window.advance_to_next_step)
+    window.advance_timer.timeout.connect(on_ok_complete or window.advance_to_next_step)
     window.advance_timer.start(window.ok_toast_duration * 1000)
 
 

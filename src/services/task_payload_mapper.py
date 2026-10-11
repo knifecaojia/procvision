@@ -95,8 +95,8 @@ def normalize_task_row(row: Dict[str, Any], algo_lookup: Dict[str, Dict[str, str
         "algorithm_code": algorithm_id,
         "algorithm_name": algorithm_name,
         "algorithm_version": algorithm_version,
+        "final_check_flag": row.get("final_check_flag", 0),
         "step_infos": step_infos if isinstance(step_infos, list) else [],
         "material_list": material_list,
         "raw_task": row,
     }
-

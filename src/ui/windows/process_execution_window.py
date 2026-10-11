@@ -26,6 +26,8 @@ from ..styles import (
 )
 
 from .ui_builder_mixin import UIBuilderMixin, StepStatus, DetectionStatus
+from .status_controls_mixin import StatusControlsMixin
+from .final_check_mixin import FinalCheckMixin
 from .split_view_mixin import SplitViewMixin
 from .camera_mixin import CameraMixin
 from .process_camera_panel_mixin import ProcessCameraPanelMixin
@@ -52,6 +54,8 @@ class ProcessStep:
 
 class ProcessExecutionWindow(
     ProcessCameraPanelMixin,
+    FinalCheckMixin,
+    StatusControlsMixin,
     UIBuilderMixin,
     SplitViewMixin,
     CameraMixin,
@@ -544,7 +548,7 @@ class ProcessExecutionWindow(
     def _is_simulated_process(self) -> bool:
         name = str(self.process_data.get('algorithm_name', self.process_data.get('name', '')))
         pid = str(self.process_data.get('pid', ''))
-        return ('模拟' in name) or pid.startswith('SIM-')
+        return bool(self.process_data.get("force_simulated_detection")) or ('模拟' in name) or pid.startswith('SIM-')
 
     def _allows_mock_camera_bypass(self) -> bool:
         return bool(self.is_simulated and self.allow_mock_camera)

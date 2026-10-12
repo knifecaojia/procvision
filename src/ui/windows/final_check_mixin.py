@@ -48,6 +48,8 @@ class FinalCheckMixin:
     def can_run_final_check(self) -> bool:
         if not self.has_final_check():
             return False
+        if getattr(getattr(self, "_auto_detect_controller", None), "busy", False):
+            return False
         if bool(getattr(self, "auto_detect_active", False)):
             return False
         if self.detection_status == "detecting":
@@ -56,6 +58,9 @@ class FinalCheckMixin:
 
     def on_final_check_detection(self) -> None:
         if not self.has_final_check():
+            return
+        if getattr(getattr(self, "_auto_detect_controller", None), "busy", False):
+            self.show_toast("自动检测结束前不可手工终检", False)
             return
         if bool(getattr(self, "auto_detect_active", False)):
             self.show_toast("自动检测中不可手工终检", False)

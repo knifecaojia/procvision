@@ -486,7 +486,7 @@ class AssemblyTasksPage(QFrame):
             pass
         self.execution_window = ProcessExecutionWindow(
             process_data,
-            None,
+            self.window(),
             camera_service=self.camera_service,
         )
         try:

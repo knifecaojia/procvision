@@ -1,12 +1,10 @@
-import json
 import logging
-import random
-import time
-from datetime import datetime
 from typing import Any, Dict, Optional
 
-from PySide6.QtCore import QThread, QTimer, Signal
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
+
+from .auto_detect_worker import AutoDetectWorker
 
 from src.services.detection_image_annotation_service import (
     build_annotated_qimage,
@@ -16,148 +14,16 @@ from src.services.detection_image_annotation_service import (
 from src.services.detection_task_trace_service import DetectionTaskTraceService
 
 logger = logging.getLogger(__name__)
-SIMULATED_PASS_PROBABILITY = 0.3
 
 
-class AutoDetectWorker(QThread):
-    result_ready = Signal(str, dict, object)
-    error_occurred = Signal(str)
+class AutoDetectController(QObject):
+    worker_drained = Signal()
 
-    def __init__(self, window, is_simulated: bool, task_seq: int):
+    def __init__(self, window):
         super().__init__()
         self._window = window
-        self._is_simulated = is_simulated
-        self._step_index = window.current_step_index
-        self._process_data = dict(window.process_data)
-        self._is_sim = window.is_simulated
-        self._task_seq = task_seq
-
-    def run(self):
-        try:
-            if self.isInterruptionRequested():
-                return
-            if self._is_simulated:
-                self._run_simulated()
-            else:
-                self._run_external()
-        except Exception as e:
-            if not self.isInterruptionRequested():
-                self.error_occurred.emit(str(e))
-
-    def _run_simulated(self):
-        started_at = datetime.now()
-        time.sleep(1.5)
-        if self.isInterruptionRequested():
-            return
-        passed = random.random() < SIMULATED_PASS_PROBABILITY
-        if passed:
-            result = {"status": "OK", "simulated": True}
-        else:
-            result = {"status": "OK", "data": {"result_status": "NG"}, "simulated": True}
-        status = "OK" if passed else "NG"
-        qimage = self._window._last_qimage.copy() if self._window._last_qimage is not None else None
-        finished_at = datetime.now()
-        result["__trace"] = {
-            "task_seq": self._task_seq,
-            "started_at": started_at.isoformat(timespec="milliseconds"),
-            "finished_at": finished_at.isoformat(timespec="milliseconds"),
-            "elapsed_ms": round((finished_at - started_at).total_seconds() * 1000, 2),
-            "algo_debug": None,
-            "algo_executed_steps": None,
-            "message": "",
-        }
-        self.result_ready.emit(status, result, qimage)
-
-    def _run_external(self):
-        window = self._window
-        if window._last_qimage is None:
-            self.error_occurred.emit("无可用画面帧")
-            return
-        started_at = datetime.now()
-        source_qimage = window._last_qimage.copy()
-
-        idx = self._step_index
-        guide_qi = window._guide_qimages.get(idx)
-
-        img = window._qimage_to_numpy(source_qimage)
-        guide_img = img
-        if guide_qi is not None:
-            try:
-                guide_img = window._qimage_to_numpy(guide_qi)
-            except Exception:
-                guide_img = img
-
-        step_payload = window._get_step_payload(idx)
-        raw_step_no = step_payload.get("step_number") or step_payload.get("step_code") or step_payload.get("step_name")
-        try:
-            step_number = int(str(raw_step_no).strip())
-        except Exception:
-            step_number = idx + 1
-        step_code = str(step_payload.get("step_code") or step_payload.get("step_number") or step_number).strip()
-
-        algo_name = str(window.process_data.get("algorithm_name") or "").strip()
-        algo_ver = str(window.process_data.get("algorithm_version") or "").strip()
-
-        from src.runner.engine import RunnerEngine
-        runner = RunnerEngine()
-
-        camera_id = "unknown"
-        if window.camera_service and window.camera_service.current_camera:
-            camera_id = window.camera_service.current_camera.info.id
-
-        step_desc = ""
-        if step_payload:
-            step_desc = str(step_payload.get("operation_guide") or step_payload.get("step_content") or "").strip()
-        if not step_desc:
-            step_desc = f"步骤 {step_number}"
-
-        context = {
-            "user_params": {"step_number": step_number},
-            "camera_id_cur": camera_id,
-            "camera_id_guide": camera_id,
-            "algorithm_name": algo_name,
-            "algorithm_version": algo_ver,
-        }
-
-        if self.isInterruptionRequested():
-            return
-
-        guide_info = window._get_step_guide_info(idx)
-        result = runner.execute_flow(
-            name=algo_name, version=algo_ver,
-            step_index=step_number, step_desc=step_desc,
-            cur_image=img, guide_image=guide_img,
-            guide_info=guide_info, context=context,
-        )
-
-        if self.isInterruptionRequested():
-            return
-        finished_at = datetime.now()
-        data = result.get("data", {}) if isinstance(result.get("data"), dict) else {}
-        result["__trace"] = {
-            "task_seq": self._task_seq,
-            "started_at": started_at.isoformat(timespec="milliseconds"),
-            "finished_at": finished_at.isoformat(timespec="milliseconds"),
-            "elapsed_ms": round((finished_at - started_at).total_seconds() * 1000, 2),
-            "algo_debug": data.get("debug"),
-            "algo_executed_steps": data.get("executed_steps"),
-            "message": result.get("message", ""),
-        }
-
-        status_str = str(result.get('status', '')).upper()
-        if status_str == 'OK':
-            result_status = data.get("result_status", "NG")
-            if result_status == "OK":
-                self.result_ready.emit("OK", {"status": "OK", "data": data, "step_code": step_code, "step_number": step_number, "__trace": result.get("__trace")}, source_qimage)
-            else:
-                self.result_ready.emit("NG", {"status": "OK", "data": data, "step_code": step_code, "step_number": step_number, "__trace": result.get("__trace")}, source_qimage)
-        else:
-            self.result_ready.emit("ERROR", {"status": "ERROR", "message": result.get("message", ""), "step_code": step_code, "step_number": step_number, "__trace": result.get("__trace")}, source_qimage)
-
-
-class AutoDetectController:
-    def __init__(self, window):
-        self._window = window
+        self._reset_pending = False
+        self._restore_idle = False
         self._active = False
         self._worker: Optional[AutoDetectWorker] = None
         self._retry_timer: Optional[QTimer] = None
@@ -168,8 +34,13 @@ class AutoDetectController:
     def active(self) -> bool:
         return self._active
 
+    @property
+    def busy(self) -> bool:
+        return self._worker is not None
+
     def start(self):
-        if self._active:
+        if self._active or self.busy or self._reset_pending or getattr(self._window, "_closing", False):
+            logger.info("Auto detect start ignored: active=%s busy=%s", self._active, self.busy)
             return
         self._active = True
         self._window.auto_detect_active = True
@@ -181,23 +52,42 @@ class AutoDetectController:
         self._active = False
         w = self._window
         w.auto_detect_active = False
-        if not was_active and not reset_detection_state:
+        if not was_active and not reset_detection_state and not self.busy:
             return
-        self._stop_worker()
         self._stop_retry_timer()
+        self._restore_idle = self._restore_idle or reset_detection_state
+        self._reset_pending = True
+        self._stop_worker()
+        if self.busy:
+            if reset_detection_state:
+                w.detection_status = 'detecting'
+                w._set_instruction_text("正在结束自动检测，请稍候…")
+            w.rebuild_status_section()
+            logger.info("Auto detect cancellation pending worker finish: task=%s", w.auto_detect_task_seq)
+            return
+        self._finish_stop()
+
+    def _finish_stop(self):
+        if not self._reset_pending:
+            return
+        self._reset_pending = False
+        restore_idle = self._restore_idle
+        self._restore_idle = False
+        w = self._window
         w.clear_preview_annotation()
         w.reset_auto_detect_ng_latch()
-        if reset_detection_state:
+        if restore_idle:
             w._set_relay_ng_active(False, "auto_detect_stop")
             w._stop_ng_flash()
             w.detection_status = 'idle'
             w.detection_boxes = []
             w.detection_labels = []
             w._overlay_dismissed = False
+            w._set_instruction_text(w.current_instruction)
             w.update_overlay_visibility()
-            w.rebuild_status_section()
             self._update_indicator("idle")
-        logger.info("Auto detect stopped")
+        w.rebuild_status_section()
+        logger.info("Auto detect stopped: task=%s", w.auto_detect_task_seq)
 
     def clear_cache(self):
         self._window.reset_auto_detect_ng_latch()
@@ -205,16 +95,7 @@ class AutoDetectController:
     def _stop_worker(self):
         if self._worker is not None:
             self._worker.requestInterruption()
-            try:
-                self._worker.quit()
-                self._worker.wait(2000)
-            except Exception:
-                pass
-            try:
-                self._worker.deleteLater()
-            except Exception:
-                pass
-            self._worker = None
+            logger.info("Auto detect interruption requested: task=%s", self._window.auto_detect_task_seq)
 
     def _stop_retry_timer(self):
         if self._retry_timer is not None:
@@ -237,7 +118,7 @@ class AutoDetectController:
         if not self._active:
             return
         w = self._window
-        if w.detection_status == 'detecting':
+        if self.busy or self._reset_pending or w.detection_status == 'detecting':
             return
         if not bool(getattr(w, "_has_detection_source", lambda: False)()):
             logger.warning("Auto detect: no camera/image available")
@@ -248,27 +129,32 @@ class AutoDetectController:
                 pass
             return
 
-        self._stop_worker()
-
         w._mark_task_running_once()
         w.detection_status = 'detecting'
         w.rebuild_status_section()
         self._update_indicator("detecting")
         try:
-            w._set_instruction_text("自动检测中…")
+            w._set_instruction_text(f"自动检测中…\n{w.current_instruction}")
         except Exception:
             pass
         w.auto_detect_task_seq += 1
 
-        is_sim = w.is_simulated
-        self._worker = AutoDetectWorker(w, is_sim, w.auto_detect_task_seq)
-        self._worker.result_ready.connect(self._on_result)
-        self._worker.error_occurred.connect(self._on_error)
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.start()
+        try:
+            worker = AutoDetectWorker(w, w.is_simulated, w.auto_detect_task_seq)
+            self._worker = worker
+            worker.result_ready.connect(self._on_result)
+            worker.error_occurred.connect(self._on_error)
+            worker.finished.connect(self._on_worker_finished)
+            worker.start()
+            logger.info("Auto detect worker started: task=%s", w.auto_detect_task_seq)
+        except Exception as exc:
+            self._worker = None
+            self._handle_error(str(exc))
 
+    @Slot(str, dict, object)
     def _on_result(self, status: str, result: Dict[str, Any], qimage: Optional[QImage]):
-        if not self._active:
+        if not self._active or self.sender() is not self._worker:
+            logger.info("Auto detect late result discarded")
             return
         trace_payload: Dict[str, Any] = dict(result.get("__trace") or {})
         ng_latched_before = self._is_ng_latched(result.get("step_code"))
@@ -281,18 +167,24 @@ class AutoDetectController:
             self._handle_error(result.get("message", "检测执行失败"))
         self._log_task_trace(result, status, trace_payload, ng_reported, ng_latched_before)
 
+    @Slot(str)
     def _on_error(self, msg: str):
-        if not self._active:
+        if not self._active or self.sender() is not self._worker:
+            logger.info("Auto detect late error discarded")
             return
         self._handle_error(msg)
 
-    def _on_worker_finished(self):
-        if self._worker is not None:
-            try:
-                self._worker.deleteLater()
-            except Exception:
-                pass
-            self._worker = None
+    @Slot()
+    def _on_worker_finished(self, worker=None):
+        worker = worker or self.sender()
+        if worker is not self._worker:
+            logger.info("Auto detect stale finish ignored")
+            return
+        logger.info("Auto detect worker finished: task=%s", self._window.auto_detect_task_seq)
+        self._worker = None
+        worker.deleteLater()
+        self._finish_stop()
+        self.worker_drained.emit()
 
     def _handle_ok(self, result: Dict[str, Any], qimage: Optional[QImage]) -> bool:
         w = self._window
@@ -396,9 +288,9 @@ class AutoDetectController:
         except Exception:
             pass
         w.update_overlay_visibility()
-        w.rebuild_status_section()
         self._update_indicator("error")
         self.stop(reset_detection_state=False)
+        w.rebuild_status_section()
         try:
             w.show_toast(f"自动检测已停止: {msg}", False)
         except Exception:
@@ -412,7 +304,8 @@ class AutoDetectController:
         is_last = w.current_step_index >= len(w.steps) - 1
         w.advance_to_next_step()
         if is_last:
-            self.stop()
+            if self._active:
+                self.stop()
             return
         self._retry_timer = QTimer()
         self._retry_timer.setSingleShot(True)

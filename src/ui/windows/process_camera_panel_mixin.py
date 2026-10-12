@@ -65,6 +65,7 @@ class ProcessCameraPanelMixin:
         layout.addWidget(self.refresh_btn)
         layout.addWidget(self.camera_toggle_btn)
         layout.addWidget(self.camera_manage_btn)
+        self.camera_manage_btn.hide()
 
         self.refresh_camera_list(auto_start=True)
         return section

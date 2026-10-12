@@ -172,7 +172,7 @@ class ProcessPage(QFrame):
         # Create and show process execution window with camera service
         self.execution_window = ProcessExecutionWindow(
             process_data,
-            None,
+            self.window(),
             camera_service=self.camera_service
         )
         self.execution_window.show_centered()

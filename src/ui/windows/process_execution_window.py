@@ -2,7 +2,6 @@ import logging
 from typing import Optional, Dict, Any, List, Literal
 from pathlib import Path
 from dataclasses import dataclass
-
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QGraphicsOpacityEffect, QSizePolicy, QTextEdit,
@@ -12,19 +11,11 @@ from PySide6.QtGui import QImage, QResizeEvent, QFontDatabase, QFont
 from datetime import datetime
 import numpy as np
 import json
-
 try:
     from ..core.config import get_config
 except Exception:
     from src.core.config import get_config
-
-from ..styles import (
-    ThemeLoader,
-    build_theme_variables,
-    load_user_theme_preference,
-    resolve_theme_colors,
-)
-
+from ..styles import ThemeLoader, build_theme_variables, load_user_theme_preference, resolve_theme_colors
 from .ui_builder_mixin import UIBuilderMixin, StepStatus, DetectionStatus
 from .status_controls_mixin import StatusControlsMixin
 from .final_check_mixin import FinalCheckMixin
@@ -53,14 +44,8 @@ class ProcessStep:
 
 
 class ProcessExecutionWindow(
-    ProcessCameraPanelMixin,
-    FinalCheckMixin,
-    StatusControlsMixin,
-    UIBuilderMixin,
-    SplitViewMixin,
-    CameraMixin,
-    GuideImageMixin,
-    QWidget,
+    ProcessCameraPanelMixin, FinalCheckMixin, StatusControlsMixin, UIBuilderMixin,
+    SplitViewMixin, CameraMixin, GuideImageMixin, QWidget,
 ):
     closed = Signal()
 
@@ -157,6 +142,7 @@ class ProcessExecutionWindow(
         self._ng_flash = NgFlashController(self)
         self.auto_detect_active = False
         self._auto_detect_controller = AutoDetectController(self)
+        self._auto_detect_controller.worker_drained.connect(self._finish_deferred_close)
 
         self.setWindowTitle(f"工艺执行 - {process_data.get('name', '')}")
         self.setMinimumSize(1280, 720)
@@ -168,7 +154,7 @@ class ProcessExecutionWindow(
             | Qt.WindowType.WindowCloseButtonHint
         )
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, parent is not None)
         self.detection_timer: Optional[QTimer] = None
         self.advance_timer: Optional[QTimer] = None
 
@@ -403,7 +389,7 @@ class ProcessExecutionWindow(
         return rects
 
     def on_start_detection(self):
-        if self.detection_status == 'detecting':
+        if self._closing or self._auto_detect_controller.busy or self.detection_status == 'detecting':
             return
         if not self._has_detection_source():
             return
@@ -428,6 +414,8 @@ class ProcessExecutionWindow(
         run_simulated_detection(self)
 
     def on_retry_detection(self):
+        if self._closing or self._auto_detect_controller.busy:
+            return
         logger.info("Retrying detection")
         self._set_relay_ng_active(False, "manual_retry")
         self._stop_ng_flash()
@@ -440,6 +428,8 @@ class ProcessExecutionWindow(
         self.rebuild_status_section()
 
     def on_skip_step(self):
+        if self._closing or self._auto_detect_controller.busy:
+            return
         logger.info("Skipping step %d", self.current_step_index + 1)
         self._stop_ng_flash()
         self.advance_to_next_step()
@@ -692,11 +682,20 @@ class ProcessExecutionWindow(
         except Exception:
             pass
 
+    def _finish_deferred_close(self):
+        if self._closing and not self._auto_detect_controller.busy:
+            logger.info("Auto detect drained; completing deferred window close")
+            self.close()
+
     def closeEvent(self, event):
         self._closing = True
+        self._auto_detect_controller.stop(reset_detection_state=False)
+        if self._auto_detect_controller.busy:
+            event.ignore()
+            logger.info("Process window close deferred until auto detect finishes")
+            return
         self._set_relay_ng_active(False, "process_window_close")
         self._stop_ng_flash()
-        self._auto_detect_controller.stop(reset_detection_state=False)
         if self.preview_worker:
             self.preview_worker.stop()
             self.preview_worker.wait(1000)
